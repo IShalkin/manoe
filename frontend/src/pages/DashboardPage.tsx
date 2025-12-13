@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { MoralCompass } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://app-ypqheluc.fly.dev';
+// API is served from the same origin via nginx proxy at /api
+const API_URL = '';
 
 interface ProjectFormData {
   name: string;
