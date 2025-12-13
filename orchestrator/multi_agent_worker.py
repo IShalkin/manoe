@@ -206,9 +206,12 @@ async def generate(request: GenerateRequest):
     # Set API key in environment for this request
     os.environ["OPENAI_API_KEY"] = request.api_key
     
+    # Capitalize moral_compass to match enum values (Ethical, Unethical, Amoral, Ambiguous, UserDefined)
+    moral_compass_capitalized = request.moral_compass.capitalize() if request.moral_compass else "Ambiguous"
+    
     project_data = {
         "seed_idea": request.seed_idea,
-        "moral_compass": request.moral_compass,
+        "moral_compass": moral_compass_capitalized,
         "target_audience": request.target_audience,
         "theme_core": request.themes.split(",") if request.themes else [],
     }
