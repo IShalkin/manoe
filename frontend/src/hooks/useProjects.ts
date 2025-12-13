@@ -51,6 +51,7 @@ export function useProjects() {
   // Load projects from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem(PROJECTS_STORAGE_KEY);
+    console.log('[useProjects] Loading from localStorage:', stored ? `${stored.length} bytes` : 'empty');
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
@@ -58,19 +59,26 @@ export function useProjects() {
         const sorted = parsed.sort((a: StoredProject, b: StoredProject) => 
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         );
+        console.log('[useProjects] Loaded', sorted.length, 'projects');
         setProjects(sorted);
       } catch (e) {
-        console.error('Failed to parse projects:', e);
+        console.error('[useProjects] Failed to parse projects:', e);
       }
     }
     setLoading(false);
   }, []);
 
-  // Save projects to localStorage whenever they change
-  const saveProjects = useCallback((newProjects: StoredProject[]) => {
-    setProjects(newProjects);
-    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(newProjects));
-  }, []);
+  // Persist projects to localStorage whenever they change (after initial load)
+  useEffect(() => {
+    if (!loading && projects.length > 0) {
+      try {
+        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+        console.log('[useProjects] Saved', projects.length, 'projects to localStorage');
+      } catch (e) {
+        console.error('[useProjects] Failed to save projects:', e);
+      }
+    }
+  }, [projects, loading]);
 
   // Create a new project
   const createProject = useCallback((data: {
@@ -95,19 +103,22 @@ export function useProjects() {
       updatedAt: now,
     };
     
-    saveProjects([newProject, ...projects]);
+    // Use functional update to avoid stale closure
+    setProjects(prev => [newProject, ...prev]);
+    console.log('[useProjects] Created project:', newProject.id);
     return newProject;
-  }, [projects, saveProjects]);
+  }, []);
 
   // Update a project
   const updateProject = useCallback((id: string, updates: Partial<StoredProject>) => {
-    const newProjects = projects.map(p => 
+    // Use functional update to avoid stale closure
+    setProjects(prev => prev.map(p => 
       p.id === id 
         ? { ...p, ...updates, updatedAt: new Date().toISOString() }
         : p
-    );
-    saveProjects(newProjects);
-  }, [projects, saveProjects]);
+    ));
+    console.log('[useProjects] Updated project:', id);
+  }, []);
 
   // Start generation for a project
   const startGeneration = useCallback((projectId: string, runId: string) => {
@@ -135,9 +146,10 @@ export function useProjects() {
 
   // Delete a project
   const deleteProject = useCallback((id: string) => {
-    const newProjects = projects.filter(p => p.id !== id);
-    saveProjects(newProjects);
-  }, [projects, saveProjects]);
+    // Use functional update to avoid stale closure
+    setProjects(prev => prev.filter(p => p.id !== id));
+    console.log('[useProjects] Deleted project:', id);
+  }, []);
 
   // Get a project by ID
   const getProject = useCallback((id: string): StoredProject | undefined => {
