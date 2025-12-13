@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { MoralCompass } from '../types';
 
+const API_URL = import.meta.env.VITE_API_URL || 'https://app-ypqheluc.fly.dev';
+
 interface ProjectFormData {
   name: string;
   seedIdea: string;
@@ -10,8 +12,14 @@ interface ProjectFormData {
   themes: string;
 }
 
+interface GeneratedProject {
+  name: string;
+  content: string;
+  createdAt: Date;
+}
+
 export function DashboardPage() {
-  const { hasAnyApiKey } = useSettings();
+  const { hasAnyApiKey, getAgentConfig, getProviderKey } = useSettings();
   const [showNewProject, setShowNewProject] = useState(false);
   const [formData, setFormData] = useState<ProjectFormData>({
     name: '',
@@ -21,17 +29,73 @@ export function DashboardPage() {
     themes: '',
   });
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedContent, setGeneratedContent] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [projects, setProjects] = useState<GeneratedProject[]>([]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsGenerating(true);
+    setError(null);
     
-    // TODO: Implement actual API call
-    setTimeout(() => {
+    // Get the Writer agent's configuration (or use Architect for initial generation)
+    const architectConfig = getAgentConfig('architect');
+    if (!architectConfig) {
+      setError('No agent configuration found. Please configure agents in Settings.');
       setIsGenerating(false);
-      setShowNewProject(false);
-      alert('Project created! (API integration pending)');
-    }, 2000);
+      return;
+    }
+    
+    const apiKey = getProviderKey(architectConfig.provider);
+    if (!apiKey) {
+      setError(`No API key found for ${architectConfig.provider}. Please add your API key in Settings.`);
+      setIsGenerating(false);
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${API_URL}/api/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          provider: architectConfig.provider,
+          model: architectConfig.model,
+          api_key: apiKey,
+          seed_idea: formData.seedIdea,
+          moral_compass: formData.moralCompass,
+          target_audience: formData.targetAudience || undefined,
+          themes: formData.themes || undefined,
+          project_name: formData.name,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success && data.content) {
+        setGeneratedContent(data.content);
+        setProjects(prev => [...prev, {
+          name: formData.name || 'Untitled Project',
+          content: data.content,
+          createdAt: new Date(),
+        }]);
+        setShowNewProject(false);
+        setFormData({
+          name: '',
+          seedIdea: '',
+          moralCompass: 'ambiguous',
+          targetAudience: '',
+          themes: '',
+        });
+      } else {
+        setError(data.error || 'Failed to generate story. Please try again.');
+      }
+    } catch (err) {
+      setError(`Network error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   if (!hasAnyApiKey()) {
@@ -71,13 +135,50 @@ export function DashboardPage() {
         </button>
       </div>
 
+      {error && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <h3 className="font-medium text-red-400">Error</h3>
+              <p className="text-sm text-slate-400 mt-1">{error}</p>
+            </div>
+            <button onClick={() => setError(null)} className="ml-auto text-slate-400 hover:text-white">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {generatedContent && (
+        <div className="mb-6 bg-green-500/10 border border-green-500/30 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-green-400">Generated Narrative</h3>
+            <button onClick={() => setGeneratedContent(null)} className="text-slate-400 hover:text-white">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="prose prose-invert max-w-none">
+            <pre className="whitespace-pre-wrap text-sm text-slate-300 bg-slate-900/50 p-4 rounded-lg overflow-auto max-h-96">
+              {generatedContent}
+            </pre>
+          </div>
+        </div>
+      )}
+
       {showNewProject && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-700">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold">Create New Project</h2>
               <button
-                onClick={() => setShowNewProject(false)}
+                onClick={() => { setShowNewProject(false); setError(null); }}
                 className="text-slate-400 hover:text-white transition-colors"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -85,6 +186,12 @@ export function DashboardPage() {
                 </svg>
               </button>
             </div>
+
+            {error && (
+              <div className="mb-4 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                <p className="text-sm text-red-400">{error}</p>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
@@ -194,13 +301,33 @@ export function DashboardPage() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {projects.map((project, index) => (
+          <div key={index} className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 hover:border-primary-500/50 transition-colors">
+            <div className="flex items-start justify-between mb-3">
+              <h3 className="font-semibold text-lg">{project.name}</h3>
+              <span className="text-xs text-slate-500">
+                {project.createdAt.toLocaleDateString()}
+              </span>
+            </div>
+            <p className="text-sm text-slate-400 line-clamp-3 mb-4">
+              {project.content.substring(0, 150)}...
+            </p>
+            <button 
+              onClick={() => setGeneratedContent(project.content)}
+              className="text-sm text-primary-400 hover:text-primary-300 transition-colors"
+            >
+              View Full Narrative
+            </button>
+          </div>
+        ))}
+        
         <div className="bg-slate-800/30 border-2 border-dashed border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:border-primary-500/50 transition-colors cursor-pointer" onClick={() => setShowNewProject(true)}>
           <div className="w-16 h-16 rounded-full bg-slate-700/50 flex items-center justify-center mb-4">
             <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
           </div>
-          <h3 className="font-medium text-slate-400">Create your first project</h3>
+          <h3 className="font-medium text-slate-400">{projects.length === 0 ? 'Create your first project' : 'New Project'}</h3>
           <p className="text-sm text-slate-500 mt-1">Start with a "What If?" idea</p>
         </div>
       </div>
