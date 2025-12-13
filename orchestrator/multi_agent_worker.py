@@ -13,8 +13,9 @@ from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 
 from autogen_orchestrator import StorytellerGroupChat
-from config import create_default_config_from_env
+from config import LLMConfiguration, OpenAIConfig, create_default_config_from_env
 from models import StoryProject
+from pydantic import SecretStr
 from services.redis_streams import RedisStreamsService
 
 load_dotenv()
@@ -59,6 +60,8 @@ class MultiAgentWorker:
         self,
         run_id: str,
         project_data: Dict[str, Any],
+        api_key: str,
+        provider: str = "openai",
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -66,6 +69,8 @@ class MultiAgentWorker:
         Args:
             run_id: Unique identifier for this generation run
             project_data: Project configuration data
+            api_key: User's API key for the LLM provider
+            provider: LLM provider to use (default: openai)
             
         Returns:
             Generation results including all agent messages
@@ -85,10 +90,15 @@ class MultiAgentWorker:
             # Create project from data
             project = StoryProject.model_validate(project_data)
             
-            # Create group chat with event callback
+            # Create config with user's API key for this request
+            request_config = LLMConfiguration(
+                openai=OpenAIConfig(api_key=SecretStr(api_key)) if provider == "openai" else None,
+            )
+            
+            # Create group chat with event callback and user's config
             event_callback = self._create_event_callback(run_id)
             group_chat = StorytellerGroupChat(
-                config=self.config,
+                config=request_config,
                 event_callback=event_callback,
             )
 
@@ -203,9 +213,6 @@ async def generate(request: GenerateRequest):
 
     run_id = str(uuid.uuid4())
     
-    # Set API key in environment for this request
-    os.environ["OPENAI_API_KEY"] = request.api_key
-    
     # Capitalize moral_compass to match enum values (Ethical, Unethical, Amoral, Ambiguous, UserDefined)
     moral_compass_capitalized = request.moral_compass.capitalize() if request.moral_compass else "Ambiguous"
     
@@ -216,8 +223,13 @@ async def generate(request: GenerateRequest):
         "theme_core": request.themes.split(",") if request.themes else [],
     }
 
-    # Start generation in background
-    asyncio.create_task(worker.run_generation(run_id, project_data))
+    # Start generation in background with user's API key
+    asyncio.create_task(worker.run_generation(
+        run_id=run_id,
+        project_data=project_data,
+        api_key=request.api_key,
+        provider=request.provider,
+    ))
 
     return GenerateResponse(
         success=True,
