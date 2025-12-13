@@ -246,12 +246,19 @@ async def stream_events(run_id: str):
 
     async def event_generator():
         # First, get any existing events
-        existing = await worker.redis_streams.get_events(run_id, start_id="0", count=100)
+        existing = await worker.redis_streams.get_events(run_id, start_id="0", count=1000)
+        last_id = "0"
         for event in existing:
             yield f"data: {json.dumps(event)}\n\n"
+            # Track last event ID for continuation
+            if "id" in event:
+                last_id = event["id"]
+            # Stop if generation already completed or errored
+            if event.get("type") in ["generation_complete", "generation_error"]:
+                return
 
-        # Then stream new events
-        async for event in worker.redis_streams.stream_events(run_id, start_id="$"):
+        # Then stream new events from where we left off (not from $)
+        async for event in worker.redis_streams.stream_events(run_id, start_id=last_id):
             yield f"data: {json.dumps(event)}\n\n"
             
             # Stop streaming if generation is complete or errored

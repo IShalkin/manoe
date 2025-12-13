@@ -70,6 +70,13 @@ export function AgentChat({ runId, orchestratorUrl, onClose }: AgentChatProps) {
         
         // Add message to list
         setMessages((prev) => [...prev, data]);
+        
+        // Close connection when generation is complete or errored
+        if (data.type === 'generation_complete' || data.type === 'generation_error') {
+          setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : 'Error');
+          eventSource.close();
+          setIsConnected(false);
+        }
       } catch (e) {
         console.error('Failed to parse SSE message:', e);
       }
