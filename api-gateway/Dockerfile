@@ -8,8 +8,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies (with legacy-peer-deps to resolve version conflicts)
+RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY . .
@@ -29,7 +29,7 @@ RUN apk add --no-cache curl
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm install --only=production
+RUN npm install --only=production --legacy-peer-deps
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
