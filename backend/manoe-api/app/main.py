@@ -34,6 +34,30 @@ class GenerateResponse(BaseModel):
     content: Optional[str] = None
     error: Optional[str] = None
 
+class ModelsRequest(BaseModel):
+    provider: Literal["openai", "openrouter", "gemini", "anthropic"]
+    api_key: str
+
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    context_length: Optional[int] = None
+    description: Optional[str] = None
+
+class ModelsResponse(BaseModel):
+    success: bool
+    models: Optional[list[ModelInfo]] = None
+    error: Optional[str] = None
+
+# Anthropic models (they don't have a models endpoint)
+ANTHROPIC_MODELS = [
+    ModelInfo(id="claude-3-5-sonnet-20241022", name="Claude 3.5 Sonnet (Latest)", context_length=200000, description="Most intelligent model"),
+    ModelInfo(id="claude-3-5-haiku-20241022", name="Claude 3.5 Haiku (Latest)", context_length=200000, description="Fast and cost-effective"),
+    ModelInfo(id="claude-3-opus-20240229", name="Claude 3 Opus", context_length=200000, description="Powerful model for complex tasks"),
+    ModelInfo(id="claude-3-sonnet-20240229", name="Claude 3 Sonnet", context_length=200000, description="Balance of intelligence and speed"),
+    ModelInfo(id="claude-3-haiku-20240307", name="Claude 3 Haiku", context_length=200000, description="Fastest model"),
+]
+
 STORYTELLER_SYSTEM_PROMPT = """You are a master storyteller and narrative architect. Your role is to create compelling, psychologically rich narratives based on the user's seed idea.
 
 Follow these principles:
@@ -66,6 +90,81 @@ async def healthz():
 @app.get("/api/health")
 async def api_health():
     return {"status": "ok", "service": "manoe-api"}
+
+@app.post("/api/models", response_model=ModelsResponse)
+async def get_models(request: ModelsRequest):
+    """Fetch available models for a provider using the user's API key."""
+    try:
+        if request.provider == "openai":
+            client = OpenAI(api_key=request.api_key)
+            response = client.models.list()
+            models = []
+            # Filter to only chat-capable models
+            chat_model_prefixes = ["gpt-4", "gpt-3.5", "o1", "o3", "chatgpt"]
+            for model in response.data:
+                if any(model.id.startswith(prefix) or prefix in model.id for prefix in chat_model_prefixes):
+                    # Skip embedding, tts, whisper, dall-e models
+                    if any(skip in model.id for skip in ["embedding", "tts", "whisper", "dall-e", "audio", "realtime"]):
+                        continue
+                    models.append(ModelInfo(
+                        id=model.id,
+                        name=model.id,
+                        description=f"OpenAI {model.id}"
+                    ))
+            # Sort by name
+            models.sort(key=lambda x: x.id, reverse=True)
+            return ModelsResponse(success=True, models=models)
+            
+        elif request.provider == "openrouter":
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {request.api_key}"},
+                    timeout=30.0
+                )
+                if response.status_code != 200:
+                    return ModelsResponse(success=False, error=f"OpenRouter API error: {response.text}")
+                data = response.json()
+                models = []
+                for model in data.get("data", []):
+                    models.append(ModelInfo(
+                        id=model.get("id", ""),
+                        name=model.get("name", model.get("id", "")),
+                        context_length=model.get("context_length"),
+                        description=model.get("description", "")
+                    ))
+                return ModelsResponse(success=True, models=models)
+                
+        elif request.provider == "gemini":
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"https://generativelanguage.googleapis.com/v1beta/models?key={request.api_key}",
+                    timeout=30.0
+                )
+                if response.status_code != 200:
+                    return ModelsResponse(success=False, error=f"Gemini API error: {response.text}")
+                data = response.json()
+                models = []
+                for model in data.get("models", []):
+                    # Only include models that support generateContent
+                    supported_methods = model.get("supportedGenerationMethods", [])
+                    if "generateContent" in supported_methods:
+                        model_id = model.get("name", "").replace("models/", "")
+                        models.append(ModelInfo(
+                            id=model_id,
+                            name=model.get("displayName", model_id),
+                            description=model.get("description", "")
+                        ))
+                return ModelsResponse(success=True, models=models)
+                
+        elif request.provider == "anthropic":
+            # Anthropic doesn't have a models endpoint, return curated list
+            return ModelsResponse(success=True, models=ANTHROPIC_MODELS)
+        else:
+            return ModelsResponse(success=False, error=f"Unsupported provider: {request.provider}")
+            
+    except Exception as e:
+        return ModelsResponse(success=False, error=str(e))
 
 @app.post("/api/generate", response_model=GenerateResponse)
 async def generate_story(request: GenerateRequest):

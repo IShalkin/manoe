@@ -3,8 +3,18 @@ import { useSettings } from '../hooks/useSettings';
 import { PROVIDERS, AGENTS, LLMProvider } from '../types';
 
 export function SettingsPage() {
-  const { updateProvider, updateAgentConfig, getProviderKey, getAgentConfig, getAvailableModels } = useSettings();
+  const { 
+    updateProvider, 
+    updateAgentConfig, 
+    getProviderKey, 
+    getAgentConfig, 
+    getAvailableModels,
+    fetchModelsForProvider,
+    isLoadingModels,
+    hasDynamicModels,
+  } = useSettings();
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
 
   const toggleShowKey = (provider: string) => {
     setShowKeys(prev => ({ ...prev, [provider]: !prev[provider] }));
@@ -69,7 +79,30 @@ export function SettingsPage() {
                   >
                     {isVisible ? 'Hide' : 'Show'}
                   </button>
+                  {currentKey && (
+                    <button
+                      onClick={async () => {
+                        setLoadErrors(prev => ({ ...prev, [provider.id]: '' }));
+                        const result = await fetchModelsForProvider(provider.id);
+                        if (!result.success) {
+                          setLoadErrors(prev => ({ ...prev, [provider.id]: result.error || 'Failed to load models' }));
+                        }
+                      }}
+                      disabled={isLoadingModels(provider.id)}
+                      className="px-3 py-2 bg-primary-600 rounded-lg hover:bg-primary-500 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                      {isLoadingModels(provider.id) ? 'Loading...' : hasDynamicModels(provider.id) ? 'Refresh Models' : 'Load Models'}
+                    </button>
+                  )}
                 </div>
+                {loadErrors[provider.id] && (
+                  <p className="mt-2 text-xs text-red-400">{loadErrors[provider.id]}</p>
+                )}
+                {hasDynamicModels(provider.id) && (
+                  <p className="mt-2 text-xs text-green-400">
+                    {getAvailableModels(provider.id).length} models loaded from API
+                  </p>
+                )}
               </div>
             );
           })}
@@ -129,7 +162,7 @@ export function SettingsPage() {
                     >
                       {availableModels.map(m => (
                         <option key={m.id} value={m.id}>
-                          {m.name} ({m.contextWindow >= 1000000 ? `${m.contextWindow / 1000000}M` : `${m.contextWindow / 1000}K`})
+                          {m.name} {m.contextWindow ? `(${m.contextWindow >= 1000000 ? `${m.contextWindow / 1000000}M` : `${m.contextWindow / 1000}K`})` : ''}
                         </option>
                       ))}
                     </select>
