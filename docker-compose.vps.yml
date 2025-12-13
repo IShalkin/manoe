@@ -1,0 +1,129 @@
+# MANOE - Multi-Agent Narrative Orchestration Engine
+# Docker Compose for VPS Deployment (207.180.224.91)
+#
+# This configuration integrates with existing VPS infrastructure:
+#   - Supabase: Kong on port 8000, PostgreSQL, Auth, Storage, Studio
+#   - Qdrant: port 6333
+#   - nginx-proxy network: complete-deploy_proxy
+#   - Domain: manoe.iliashalkin.com
+#
+# Usage:
+#   1. Copy .env.example to .env and configure your API keys
+#   2. Run: docker-compose -f docker-compose.vps.yml up -d --build
+#   3. Access API Gateway at https://manoe.iliashalkin.com
+
+version: "3.8"
+
+services:
+  # ==========================================================================
+  # API Gateway - TypeScript/Ts.ED
+  # ==========================================================================
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: manoe-api-gateway
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - REDIS_URL=redis://manoe-redis:6379
+      - SUPABASE_URL=http://supabase-kong:8000
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # nginx-proxy configuration
+      - VIRTUAL_HOST=manoe.iliashalkin.com
+      - VIRTUAL_PORT=3000
+      - LETSENCRYPT_HOST=manoe.iliashalkin.com
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-admin@iliashalkin.com}
+    depends_on:
+      manoe-redis:
+        condition: service_healthy
+    networks:
+      - complete-deploy_proxy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ==========================================================================
+  # AI Orchestrator - Python/AutoGen
+  # ==========================================================================
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: manoe-orchestrator
+    restart: unless-stopped
+    environment:
+      # LLM Provider API Keys (BYOK)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_ORG_ID=${OPENAI_ORG_ID:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Agent Model Configuration
+      - ARCHITECT_PROVIDER=${ARCHITECT_PROVIDER:-openai}
+      - ARCHITECT_MODEL=${ARCHITECT_MODEL:-gpt-4o}
+      - PROFILER_PROVIDER=${PROFILER_PROVIDER:-openai}
+      - PROFILER_MODEL=${PROFILER_MODEL:-gpt-4o}
+      - STRATEGIST_PROVIDER=${STRATEGIST_PROVIDER:-openai}
+      - STRATEGIST_MODEL=${STRATEGIST_MODEL:-gpt-4o}
+      - WRITER_PROVIDER=${WRITER_PROVIDER:-openai}
+      - WRITER_MODEL=${WRITER_MODEL:-gpt-4o-mini}
+      - CRITIC_PROVIDER=${CRITIC_PROVIDER:-openai}
+      - CRITIC_MODEL=${CRITIC_MODEL:-gpt-4o}
+      # Infrastructure - connect to existing services
+      - REDIS_URL=redis://manoe-redis:6379
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - SUPABASE_URL=http://supabase-kong:8000
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
+      # Settings
+      - DEFAULT_TEMPERATURE=${DEFAULT_TEMPERATURE:-0.7}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-120}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      manoe-redis:
+        condition: service_healthy
+    networks:
+      - complete-deploy_proxy
+
+  # ==========================================================================
+  # Redis - Message Broker & Job Queue (MANOE-specific)
+  # ==========================================================================
+  manoe-redis:
+    image: redis:7-alpine
+    container_name: manoe-redis
+    restart: unless-stopped
+    volumes:
+      - manoe-redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - complete-deploy_proxy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ==========================================================================
+# Networks - Use existing nginx-proxy network
+# ==========================================================================
+networks:
+  complete-deploy_proxy:
+    external: true
+
+# ==========================================================================
+# Volumes
+# ==========================================================================
+volumes:
+  manoe-redis-data:
+    driver: local

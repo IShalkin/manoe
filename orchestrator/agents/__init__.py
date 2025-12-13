@@ -4,19 +4,19 @@ Specialized AI agents for narrative generation.
 """
 
 from .base import (
-    LLMClient,
-    OpenAIClient,
+    BaseAgent,
     ClaudeClient,
     GeminiClient,
-    BaseAgent,
+    LLMClient,
+    OpenAIClient,
     create_llm_client,
 )
 from .narrative_agents import (
     ArchitectAgent,
+    CriticAgent,
     ProfilerAgent,
     StrategistAgent,
     WriterAgent,
-    CriticAgent,
 )
 
 __all__ = [

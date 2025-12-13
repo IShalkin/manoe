@@ -4,9 +4,9 @@ Supports OpenAI, OpenRouter, Google Gemini, and Anthropic Claude
 """
 
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field, SecretStr
-from dataclasses import dataclass
 
 
 class LLMProvider(str, Enum):
@@ -317,7 +317,7 @@ class OpenAIConfig(ProviderConfig):
     provider: LLMProvider = LLMProvider.OPENAI
     base_url: str = "https://api.openai.com/v1"
     default_model: str = "gpt-4o"
-    
+
     @property
     def available_models(self) -> Dict[str, Dict[str, Any]]:
         return OPENAI_MODELS
@@ -330,7 +330,7 @@ class OpenRouterConfig(ProviderConfig):
     default_model: str = "anthropic/claude-3.5-sonnet"
     site_url: Optional[str] = None  # For OpenRouter rankings
     app_name: Optional[str] = "MANOE"
-    
+
     @property
     def available_models(self) -> Dict[str, Dict[str, Any]]:
         return OPENROUTER_MODELS
@@ -341,7 +341,7 @@ class GeminiConfig(ProviderConfig):
     provider: LLMProvider = LLMProvider.GEMINI
     base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     default_model: str = "gemini-1.5-pro"
-    
+
     @property
     def available_models(self) -> Dict[str, Dict[str, Any]]:
         return GEMINI_MODELS
@@ -353,7 +353,7 @@ class ClaudeConfig(ProviderConfig):
     base_url: str = "https://api.anthropic.com/v1"
     default_model: str = "claude-3-5-sonnet-20241022"
     anthropic_version: str = "2023-06-01"
-    
+
     @property
     def available_models(self) -> Dict[str, Dict[str, Any]]:
         return CLAUDE_MODELS
@@ -367,16 +367,16 @@ class AgentModelConfig(BaseModel):
     """Configuration for which model each agent uses."""
     architect_provider: LLMProvider = LLMProvider.OPENAI
     architect_model: str = "gpt-4o"
-    
+
     profiler_provider: LLMProvider = LLMProvider.OPENAI
     profiler_model: str = "gpt-4o"
-    
+
     strategist_provider: LLMProvider = LLMProvider.OPENAI
     strategist_model: str = "gpt-4o"
-    
+
     writer_provider: LLMProvider = LLMProvider.OPENAI
     writer_model: str = "gpt-4o-mini"
-    
+
     critic_provider: LLMProvider = LLMProvider.OPENAI
     critic_model: str = "gpt-4o"
 
@@ -387,21 +387,21 @@ class AgentModelConfig(BaseModel):
 
 class LLMConfiguration(BaseModel):
     """Master LLM configuration with all providers."""
-    
+
     # Provider configurations (user provides their own keys)
     openai: Optional[OpenAIConfig] = None
     openrouter: Optional[OpenRouterConfig] = None
     gemini: Optional[GeminiConfig] = None
     claude: Optional[ClaudeConfig] = None
-    
+
     # Agent-specific model assignments
     agent_models: AgentModelConfig = Field(default_factory=AgentModelConfig)
-    
+
     # Global settings
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_retries: int = Field(default=3, ge=1, le=10)
     timeout_seconds: int = Field(default=120, ge=30, le=600)
-    
+
     def get_provider_config(self, provider: LLMProvider) -> Optional[ProviderConfig]:
         """Get configuration for a specific provider."""
         provider_map = {
@@ -411,7 +411,7 @@ class LLMConfiguration(BaseModel):
             LLMProvider.CLAUDE: self.claude,
         }
         return provider_map.get(provider)
-    
+
     def get_enabled_providers(self) -> List[LLMProvider]:
         """Get list of enabled providers."""
         enabled = []
@@ -424,7 +424,7 @@ class LLMConfiguration(BaseModel):
         if self.claude and self.claude.enabled:
             enabled.append(LLMProvider.CLAUDE)
         return enabled
-    
+
     def validate_agent_models(self) -> List[str]:
         """Validate that all agent models are available from enabled providers."""
         errors = []
@@ -435,7 +435,7 @@ class LLMConfiguration(BaseModel):
             ("writer", self.agent_models.writer_provider, self.agent_models.writer_model),
             ("critic", self.agent_models.critic_provider, self.agent_models.critic_model),
         ]
-        
+
         for agent_name, provider, model in agent_configs:
             provider_config = self.get_provider_config(provider)
             if not provider_config:
@@ -444,7 +444,7 @@ class LLMConfiguration(BaseModel):
                 errors.append(f"{agent_name}: Provider {provider.value} is disabled")
             elif model not in provider_config.available_models:
                 errors.append(f"{agent_name}: Model {model} not available for {provider.value}")
-        
+
         return errors
 
 
@@ -466,7 +466,7 @@ def get_models_for_agent(agent_name: str) -> Dict[str, List[str]]:
     """Get recommended models for a specific agent."""
     all_models = get_all_models()
     recommended = {}
-    
+
     for provider, models in all_models.items():
         provider_recommended = []
         for model_id, model_info in models.items():
@@ -474,40 +474,40 @@ def get_models_for_agent(agent_name: str) -> Dict[str, List[str]]:
                 provider_recommended.append(model_id)
         if provider_recommended:
             recommended[provider] = provider_recommended
-    
+
     return recommended
 
 
 def create_default_config_from_env() -> LLMConfiguration:
     """Create configuration from environment variables."""
     import os
-    
+
     config = LLMConfiguration()
-    
+
     # OpenAI
     if os.getenv("OPENAI_API_KEY"):
         config.openai = OpenAIConfig(
             api_key=SecretStr(os.getenv("OPENAI_API_KEY")),
             organization_id=os.getenv("OPENAI_ORG_ID"),
         )
-    
+
     # OpenRouter
     if os.getenv("OPENROUTER_API_KEY"):
         config.openrouter = OpenRouterConfig(
             api_key=SecretStr(os.getenv("OPENROUTER_API_KEY")),
             site_url=os.getenv("OPENROUTER_SITE_URL"),
         )
-    
+
     # Gemini
     if os.getenv("GEMINI_API_KEY"):
         config.gemini = GeminiConfig(
             api_key=SecretStr(os.getenv("GEMINI_API_KEY")),
         )
-    
+
     # Claude
     if os.getenv("ANTHROPIC_API_KEY"):
         config.claude = ClaudeConfig(
             api_key=SecretStr(os.getenv("ANTHROPIC_API_KEY")),
         )
-    
+
     return config

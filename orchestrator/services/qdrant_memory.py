@@ -13,15 +13,15 @@ from qdrant_client.http.models import Distance, VectorParams
 
 class QdrantMemoryService:
     """Service for managing vector memory in Qdrant."""
-    
+
     # Collection names
     COLLECTION_CHARACTERS = "manoe_characters"
     COLLECTION_WORLDBUILDING = "manoe_worldbuilding"
     COLLECTION_SCENES = "manoe_scenes"
-    
+
     # Vector dimensions (OpenAI text-embedding-3-small)
     VECTOR_SIZE = 1536
-    
+
     def __init__(
         self,
         url: str = "http://localhost:6333",
@@ -31,25 +31,25 @@ class QdrantMemoryService:
         self.api_key = api_key
         self._client: Optional[QdrantClient] = None
         self._embedding_client = None
-    
+
     async def connect(self, openai_api_key: Optional[str] = None) -> None:
         """Initialize Qdrant client and create collections if needed."""
         self._client = QdrantClient(url=self.url, api_key=self.api_key)
-        
+
         # Initialize OpenAI for embeddings if key provided
         if openai_api_key:
             from openai import AsyncOpenAI
             self._embedding_client = AsyncOpenAI(api_key=openai_api_key)
-        
+
         # Create collections if they don't exist
         await self._ensure_collections()
-    
+
     @property
     def client(self) -> QdrantClient:
         if self._client is None:
             raise RuntimeError("Qdrant client not connected. Call connect() first.")
         return self._client
-    
+
     async def _ensure_collections(self) -> None:
         """Create collections if they don't exist."""
         collections = [
@@ -57,9 +57,9 @@ class QdrantMemoryService:
             self.COLLECTION_WORLDBUILDING,
             self.COLLECTION_SCENES,
         ]
-        
+
         existing = {c.name for c in self.client.get_collections().collections}
-        
+
         for collection in collections:
             if collection not in existing:
                 self.client.create_collection(
@@ -69,22 +69,22 @@ class QdrantMemoryService:
                         distance=Distance.COSINE,
                     ),
                 )
-    
+
     async def _get_embedding(self, text: str) -> List[float]:
         """Generate embedding for text using OpenAI."""
         if self._embedding_client is None:
             raise RuntimeError("Embedding client not initialized. Provide OpenAI API key.")
-        
+
         response = await self._embedding_client.embeddings.create(
             model="text-embedding-3-small",
             input=text,
         )
         return response.data[0].embedding
-    
+
     # ========================================================================
     # Character Memory Operations
     # ========================================================================
-    
+
     async def store_character(
         self,
         project_id: str,
@@ -94,9 +94,9 @@ class QdrantMemoryService:
         # Create text representation for embedding
         text = self._character_to_text(character)
         embedding = await self._get_embedding(text)
-        
+
         point_id = str(uuid4())
-        
+
         self.client.upsert(
             collection_name=self.COLLECTION_CHARACTERS,
             points=[
@@ -116,9 +116,9 @@ class QdrantMemoryService:
                 )
             ],
         )
-        
+
         return point_id
-    
+
     async def search_characters(
         self,
         project_id: str,
@@ -127,7 +127,7 @@ class QdrantMemoryService:
     ) -> List[Dict[str, Any]]:
         """Search for characters by semantic similarity."""
         query_embedding = await self._get_embedding(query)
-        
+
         results = self.client.search(
             collection_name=self.COLLECTION_CHARACTERS,
             query_vector=query_embedding,
@@ -141,7 +141,7 @@ class QdrantMemoryService:
             ),
             limit=limit,
         )
-        
+
         return [
             {
                 "id": r.id,
@@ -150,7 +150,7 @@ class QdrantMemoryService:
             }
             for r in results
         ]
-    
+
     async def get_project_characters(
         self,
         project_id: str,
@@ -168,9 +168,9 @@ class QdrantMemoryService:
             ),
             limit=100,
         )
-        
+
         return [r.payload.get("full_profile") for r in results[0]]
-    
+
     def _character_to_text(self, character: Dict[str, Any]) -> str:
         """Convert character profile to text for embedding."""
         parts = [
@@ -184,11 +184,11 @@ class QdrantMemoryService:
             f"Potential Arc: {character.get('potential_arc', '')}",
         ]
         return "\n".join(parts)
-    
+
     # ========================================================================
     # Worldbuilding Memory Operations
     # ========================================================================
-    
+
     async def store_worldbuilding(
         self,
         project_id: str,
@@ -198,9 +198,9 @@ class QdrantMemoryService:
         """Store a worldbuilding element as a vector."""
         text = self._worldbuilding_to_text(element_type, element)
         embedding = await self._get_embedding(text)
-        
+
         point_id = str(uuid4())
-        
+
         self.client.upsert(
             collection_name=self.COLLECTION_WORLDBUILDING,
             points=[
@@ -216,9 +216,9 @@ class QdrantMemoryService:
                 )
             ],
         )
-        
+
         return point_id
-    
+
     async def search_worldbuilding(
         self,
         project_id: str,
@@ -228,14 +228,14 @@ class QdrantMemoryService:
     ) -> List[Dict[str, Any]]:
         """Search worldbuilding elements by semantic similarity."""
         query_embedding = await self._get_embedding(query)
-        
+
         filter_conditions = [
             qdrant_models.FieldCondition(
                 key="project_id",
                 match=qdrant_models.MatchValue(value=project_id),
             )
         ]
-        
+
         if element_type:
             filter_conditions.append(
                 qdrant_models.FieldCondition(
@@ -243,14 +243,14 @@ class QdrantMemoryService:
                     match=qdrant_models.MatchValue(value=element_type),
                 )
             )
-        
+
         results = self.client.search(
             collection_name=self.COLLECTION_WORLDBUILDING,
             query_vector=query_embedding,
             query_filter=qdrant_models.Filter(must=filter_conditions),
             limit=limit,
         )
-        
+
         return [
             {
                 "id": r.id,
@@ -260,7 +260,7 @@ class QdrantMemoryService:
             }
             for r in results
         ]
-    
+
     def _worldbuilding_to_text(self, element_type: str, element: Dict[str, Any]) -> str:
         """Convert worldbuilding element to text for embedding."""
         if element_type == "geography":
@@ -271,11 +271,11 @@ class QdrantMemoryService:
             return f"Rule: {element.get('rule_name', '')}\n{element.get('description', '')}\nConsequences: {element.get('consequences_of_breaking', '')}"
         else:
             return str(element)
-    
+
     # ========================================================================
     # Scene Memory Operations
     # ========================================================================
-    
+
     async def store_scene(
         self,
         project_id: str,
@@ -285,9 +285,9 @@ class QdrantMemoryService:
         """Store a scene draft as a vector."""
         text = self._scene_to_text(scene)
         embedding = await self._get_embedding(text)
-        
+
         point_id = str(uuid4())
-        
+
         self.client.upsert(
             collection_name=self.COLLECTION_SCENES,
             points=[
@@ -305,9 +305,9 @@ class QdrantMemoryService:
                 )
             ],
         )
-        
+
         return point_id
-    
+
     async def search_scenes(
         self,
         project_id: str,
@@ -316,7 +316,7 @@ class QdrantMemoryService:
     ) -> List[Dict[str, Any]]:
         """Search scenes by semantic similarity (for continuity)."""
         query_embedding = await self._get_embedding(query)
-        
+
         results = self.client.search(
             collection_name=self.COLLECTION_SCENES,
             query_vector=query_embedding,
@@ -330,7 +330,7 @@ class QdrantMemoryService:
             ),
             limit=limit,
         )
-        
+
         return [
             {
                 "id": r.id,
@@ -341,15 +341,15 @@ class QdrantMemoryService:
             }
             for r in results
         ]
-    
+
     def _scene_to_text(self, scene: Dict[str, Any]) -> str:
         """Convert scene to text for embedding."""
         return f"Scene: {scene.get('title', '')}\nSetting: {scene.get('setting_description', '')}\nContent: {scene.get('narrative_content', '')[:1000]}"
-    
+
     # ========================================================================
     # Cleanup Operations
     # ========================================================================
-    
+
     async def delete_project_data(self, project_id: str) -> None:
         """Delete all vectors for a project."""
         for collection in [
