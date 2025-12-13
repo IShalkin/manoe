@@ -12,6 +12,7 @@ interface AgentMessage {
     phase?: string;
     status?: string;
     error?: string;
+    result?: Record<string, unknown>;
   };
 }
 

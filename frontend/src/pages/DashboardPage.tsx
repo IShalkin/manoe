@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { useProjects, StoredProject } from '../hooks/useProjects';
 import { MoralCompass } from '../types';
@@ -24,7 +24,6 @@ export function DashboardPage() {
     completeGeneration, 
     failGeneration,
     deleteProject,
-    getProjectByRunId,
   } = useProjects();
   
   const [showNewProject, setShowNewProject] = useState(false);
