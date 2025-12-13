@@ -46,15 +46,25 @@ class MultiAgentWorker:
 
     def _create_event_callback(self, run_id: str):
         """Create an event callback that publishes to Redis Streams."""
+        # Store pending tasks to ensure they complete before generation_complete
+        self._pending_event_tasks: list = []
+        
         async def callback(event_type: str, data: Dict[str, Any]) -> None:
             if self.redis_streams:
                 await self.redis_streams.publish_event(run_id, event_type, data)
         
         # Return a sync wrapper since StorytellerGroupChat expects sync callback
         def sync_callback(event_type: str, data: Dict[str, Any]) -> None:
-            asyncio.create_task(callback(event_type, data))
+            task = asyncio.create_task(callback(event_type, data))
+            self._pending_event_tasks.append(task)
         
         return sync_callback
+    
+    async def _flush_pending_events(self) -> None:
+        """Wait for all pending event tasks to complete."""
+        if hasattr(self, '_pending_event_tasks') and self._pending_event_tasks:
+            await asyncio.gather(*self._pending_event_tasks, return_exceptions=True)
+            self._pending_event_tasks.clear()
 
     async def run_generation(
         self,
@@ -115,6 +125,10 @@ class MultiAgentWorker:
             # Run Genesis phase only for now (quick demo)
             # Full generation would use run_full_generation
             result = await group_chat.run_genesis_phase(project)
+
+            # Flush all pending events before publishing completion
+            # This ensures agent_complete events arrive before generation_complete
+            await self._flush_pending_events()
 
             # Publish completion event
             await self.redis_streams.publish_event(

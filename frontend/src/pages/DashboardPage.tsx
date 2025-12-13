@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSettings } from '../hooks/useSettings';
+import { useProjects, StoredProject } from '../hooks/useProjects';
 import { MoralCompass } from '../types';
 import { AgentChat } from '../components/AgentChat';
 
@@ -14,14 +15,18 @@ interface ProjectFormData {
   themes: string;
 }
 
-interface GeneratedProject {
-  name: string;
-  content: string;
-  createdAt: Date;
-}
-
 export function DashboardPage() {
   const { hasAnyApiKey, getAgentConfig, getProviderKey } = useSettings();
+  const { 
+    projects, 
+    createProject, 
+    startGeneration, 
+    completeGeneration, 
+    failGeneration,
+    deleteProject,
+    getProjectByRunId,
+  } = useProjects();
+  
   const [showNewProject, setShowNewProject] = useState(false);
   const [formData, setFormData] = useState<ProjectFormData>({
     name: '',
@@ -31,10 +36,10 @@ export function DashboardPage() {
     themes: '',
   });
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedContent, setGeneratedContent] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<StoredProject | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [projects, setProjects] = useState<GeneratedProject[]>([]);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [showAgentChat, setShowAgentChat] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -79,17 +84,23 @@ export function DashboardPage() {
       const data = await response.json();
       
       if (data.success && data.run_id) {
+        // Create project in persistent storage
+        const newProject = createProject({
+          name: formData.name || 'Untitled Project',
+          seedIdea: formData.seedIdea,
+          moralCompass: formData.moralCompass,
+          targetAudience: formData.targetAudience,
+          themes: formData.themes,
+        });
+        
+        // Start generation for this project
+        startGeneration(newProject.id, data.run_id);
+        
         // Show the agent chat to visualize communication
         setCurrentRunId(data.run_id);
+        setCurrentProjectId(newProject.id);
         setShowAgentChat(true);
         setShowNewProject(false);
-        
-        // Store project info
-        setProjects(prev => [...prev, {
-          name: formData.name || 'Untitled Project',
-          content: `Generation in progress... Run ID: ${data.run_id}`,
-          createdAt: new Date(),
-        }]);
         
         setFormData({
           name: '',
@@ -169,28 +180,50 @@ export function DashboardPage() {
           <AgentChat
             runId={currentRunId}
             orchestratorUrl={ORCHESTRATOR_URL}
+            onComplete={(result) => {
+              // Update project with generation result
+              if (currentProjectId) {
+                if (result.error) {
+                  failGeneration(currentProjectId, result.error);
+                } else {
+                  completeGeneration(currentProjectId, {
+                    narrativePossibility: result.narrative_possibility,
+                  });
+                }
+              }
+            }}
             onClose={() => {
               setShowAgentChat(false);
               setCurrentRunId(null);
+              setCurrentProjectId(null);
             }}
           />
         </div>
       )}
 
-      {generatedContent && (
+      {selectedProject && (
         <div className="mb-6 bg-green-500/10 border border-green-500/30 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-green-400">Generated Narrative</h3>
-            <button onClick={() => setGeneratedContent(null)} className="text-slate-400 hover:text-white">
+            <h3 className="font-semibold text-green-400">{selectedProject.name}</h3>
+            <button onClick={() => setSelectedProject(null)} className="text-slate-400 hover:text-white">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
           <div className="prose prose-invert max-w-none">
-            <pre className="whitespace-pre-wrap text-sm text-slate-300 bg-slate-900/50 p-4 rounded-lg overflow-auto max-h-96">
-              {generatedContent}
-            </pre>
+            <div className="mb-4">
+              <span className="text-xs text-slate-500">Seed Idea:</span>
+              <p className="text-sm text-slate-300">{selectedProject.seedIdea}</p>
+            </div>
+            {selectedProject.result?.narrativePossibility && (
+              <pre className="whitespace-pre-wrap text-sm text-slate-300 bg-slate-900/50 p-4 rounded-lg overflow-auto max-h-96">
+                {JSON.stringify(selectedProject.result.narrativePossibility, null, 2)}
+              </pre>
+            )}
+            {selectedProject.result?.error && (
+              <div className="text-red-400 text-sm">{selectedProject.result.error}</div>
+            )}
           </div>
         </div>
       )}
@@ -324,23 +357,43 @@ export function DashboardPage() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {projects.map((project, index) => (
-          <div key={index} className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 hover:border-primary-500/50 transition-colors">
+        {projects.map((project) => (
+          <div 
+            key={project.id} 
+            className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 hover:border-primary-500/50 transition-colors cursor-pointer"
+            onClick={() => setSelectedProject(project)}
+          >
             <div className="flex items-start justify-between mb-3">
               <h3 className="font-semibold text-lg">{project.name}</h3>
-              <span className="text-xs text-slate-500">
-                {project.createdAt.toLocaleDateString()}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                  project.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                  project.status === 'generating' ? 'bg-amber-500/20 text-amber-400' :
+                  project.status === 'error' ? 'bg-red-500/20 text-red-400' :
+                  'bg-slate-500/20 text-slate-400'
+                }`}>
+                  {project.status === 'generating' ? 'In Progress' : 
+                   project.status.charAt(0).toUpperCase() + project.status.slice(1)}
+                </span>
+              </div>
             </div>
-            <p className="text-sm text-slate-400 line-clamp-3 mb-4">
-              {project.content.substring(0, 150)}...
+            <p className="text-sm text-slate-400 line-clamp-2 mb-2">
+              {project.seedIdea.substring(0, 100)}...
             </p>
-            <button 
-              onClick={() => setGeneratedContent(project.content)}
-              className="text-sm text-primary-400 hover:text-primary-300 transition-colors"
-            >
-              View Full Narrative
-            </button>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                {new Date(project.createdAt).toLocaleDateString()}
+              </span>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteProject(project.id);
+                }}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         ))}
         

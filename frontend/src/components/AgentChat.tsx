@@ -15,9 +15,15 @@ interface AgentMessage {
   };
 }
 
+interface GenerationResult {
+  narrative_possibility?: Record<string, unknown>;
+  error?: string;
+}
+
 interface AgentChatProps {
   runId: string | null;
   orchestratorUrl: string;
+  onComplete?: (result: GenerationResult) => void;
   onClose?: () => void;
 }
 
@@ -39,11 +45,12 @@ const AGENT_ICONS: Record<string, string> = {
   System: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
 };
 
-export function AgentChat({ runId, orchestratorUrl, onClose }: AgentChatProps) {
+export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: AgentChatProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentPhase, setCurrentPhase] = useState<string>('Initializing');
+  const [isComplete, setIsComplete] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -74,8 +81,24 @@ export function AgentChat({ runId, orchestratorUrl, onClose }: AgentChatProps) {
         // Close connection when generation is complete or errored
         if (data.type === 'generation_complete' || data.type === 'generation_error') {
           setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : 'Error');
+          setIsComplete(true);
           eventSource.close();
           setIsConnected(false);
+          
+          // Call onComplete callback with result
+          if (onComplete) {
+            if (data.type === 'generation_error') {
+              onComplete({ error: data.data.error || 'Unknown error' });
+            } else {
+              // Extract narrative_possibility from phase_complete event
+              const phaseCompleteEvent = [...messages, data].find(
+                m => m.type === 'phase_complete' && m.data.phase === 'genesis'
+              );
+              onComplete({
+                narrative_possibility: phaseCompleteEvent?.data?.result || data.data,
+              });
+            }
+          }
         }
       } catch (e) {
         console.error('Failed to parse SSE message:', e);
@@ -157,6 +180,19 @@ export function AgentChat({ runId, orchestratorUrl, onClose }: AgentChatProps) {
     }
 
     if (type === 'agent_start') {
+      // Check if this agent has completed (has a matching agent_complete event after this one)
+      const hasCompleted = isComplete || messages.some(
+        (m, idx) => 
+          idx > messages.indexOf(msg) && 
+          m.type === 'agent_complete' && 
+          m.data.agent === agent
+      );
+      
+      if (hasCompleted) {
+        // Don't show "thinking" for completed agents
+        return null;
+      }
+      
       return (
         <div key={msg.id} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-400">
           <div className={`w-2 h-2 rounded-full ${color} animate-pulse`} />
