@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional
 
 import redis.asyncio as redis
 
-from ..models import JobPayload
+from models import JobPayload
 
 
 class RedisQueueService:

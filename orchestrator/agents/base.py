@@ -9,8 +9,8 @@ from typing import Any, Dict, Optional, Type, TypeVar
 
 from pydantic import BaseModel
 
-from ..config import LLMConfiguration, LLMProvider
-from ..models import AgentEvent
+from config import LLMConfiguration, LLMProvider
+from models import AgentEvent
 
 T = TypeVar("T", bound=BaseModel)
 

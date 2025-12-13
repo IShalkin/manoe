@@ -10,7 +10,7 @@ import google.generativeai as genai
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
-from ..config import LLMConfiguration, LLMProvider
+from config import LLMConfiguration, LLMProvider
 
 
 @dataclass

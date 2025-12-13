@@ -5,7 +5,7 @@ Specialized agents for each phase of narrative generation.
 
 from typing import Any, Dict
 
-from ..models import (
+from models import (
     CharacterProfile,
     NarrativePossibility,
     PlotOutline,
@@ -13,7 +13,7 @@ from ..models import (
     SceneDraft,
     StoryProject,
 )
-from ..prompts import (
+from prompts import (
     ARCHITECT_SYSTEM_PROMPT,
     ARCHITECT_USER_PROMPT_TEMPLATE,
     CRITIC_SYSTEM_PROMPT,
