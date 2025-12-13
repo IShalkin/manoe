@@ -3,9 +3,6 @@ import { useSettings } from '../hooks/useSettings';
 import { MoralCompass } from '../types';
 import { AgentChat } from '../components/AgentChat';
 
-// API is served from the same origin via nginx proxy at /api
-const API_URL = '';
-
 // Multi-agent orchestrator URL (separate subdomain)
 const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
 
