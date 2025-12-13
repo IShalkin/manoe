@@ -34,6 +34,7 @@ class UnifiedModelClient:
         self.config = config
         self._openai_client: Optional[AsyncOpenAI] = None
         self._openrouter_client: Optional[AsyncOpenAI] = None
+        self._deepseek_client: Optional[AsyncOpenAI] = None
         self._anthropic_client: Optional[AsyncAnthropic] = None
         self._gemini_configured = False
 
@@ -58,6 +59,17 @@ class UnifiedModelClient:
                 base_url=self.config.openrouter.base_url,
             )
         return self._openrouter_client
+
+    def _get_deepseek_client(self) -> AsyncOpenAI:
+        """Get or create DeepSeek client (OpenAI-compatible)."""
+        if self._deepseek_client is None:
+            if not self.config.deepseek:
+                raise ValueError("DeepSeek configuration not provided")
+            self._deepseek_client = AsyncOpenAI(
+                api_key=self.config.deepseek.api_key.get_secret_value(),
+                base_url=self.config.deepseek.base_url,
+            )
+        return self._deepseek_client
 
     def _get_anthropic_client(self) -> AsyncAnthropic:
         """Get or create Anthropic client."""
@@ -114,6 +126,10 @@ class UnifiedModelClient:
             )
         elif provider == LLMProvider.GEMINI:
             return await self._gemini_completion(
+                messages, model, temperature, max_tokens, response_format
+            )
+        elif provider == LLMProvider.DEEPSEEK:
+            return await self._deepseek_completion(
                 messages, model, temperature, max_tokens, response_format
             )
         else:
@@ -181,6 +197,41 @@ class UnifiedModelClient:
             content=response.choices[0].message.content or "",
             model=model,
             provider=LLMProvider.OPENROUTER,
+            usage={
+                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                "total_tokens": response.usage.total_tokens if response.usage else 0,
+            },
+            finish_reason=response.choices[0].finish_reason or "stop",
+        )
+
+    async def _deepseek_completion(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: Optional[int],
+        response_format: Optional[Dict[str, str]],
+    ) -> ModelResponse:
+        """Create completion using DeepSeek API (OpenAI-compatible)."""
+        client = self._get_deepseek_client()
+
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        response = await client.chat.completions.create(**kwargs)
+
+        return ModelResponse(
+            content=response.choices[0].message.content or "",
+            model=model,
+            provider=LLMProvider.DEEPSEEK,
             usage={
                 "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
                 "completion_tokens": response.usage.completion_tokens if response.usage else 0,
@@ -328,6 +379,14 @@ class UnifiedModelClient:
                 "model": model,
                 "api_key": self.config.gemini.api_key.get_secret_value(),
                 "api_type": "google",
+            }
+        elif provider == LLMProvider.DEEPSEEK:
+            if not self.config.deepseek:
+                raise ValueError("DeepSeek configuration not provided")
+            return {
+                "model": model,
+                "api_key": self.config.deepseek.api_key.get_secret_value(),
+                "base_url": self.config.deepseek.base_url,
             }
         else:
             raise ValueError(f"Unsupported provider: {provider}")

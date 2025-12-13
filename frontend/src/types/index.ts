@@ -1,4 +1,4 @@
-export type LLMProvider = 'openai' | 'openrouter' | 'gemini' | 'anthropic';
+export type LLMProvider = 'openai' | 'openrouter' | 'gemini' | 'anthropic' | 'deepseek';
 
 export interface LLMModel {
   id: string;
@@ -58,6 +58,7 @@ export const PROVIDERS: { id: LLMProvider; name: string; icon: string }[] = [
   { id: 'openrouter', name: 'OpenRouter', icon: 'R' },
   { id: 'gemini', name: 'Google Gemini', icon: 'G' },
   { id: 'anthropic', name: 'Anthropic Claude', icon: 'A' },
+  { id: 'deepseek', name: 'DeepSeek', icon: 'D' },
 ];
 
 export const AGENTS = [
@@ -97,5 +98,9 @@ export const MODELS: Record<LLMProvider, LLMModel[]> = {
     { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision', 'computer_use'], recommended: ['architect', 'critic'] },
     { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', provider: 'anthropic', contextWindow: 200000, inputPrice: 0.8, outputPrice: 4, capabilities: ['vision'], recommended: ['writer'] },
     { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'anthropic', contextWindow: 200000, inputPrice: 15, outputPrice: 75, capabilities: ['vision'], recommended: ['strategist'] },
+  ],
+  deepseek: [
+    { id: 'deepseek-chat', name: 'DeepSeek V3', provider: 'deepseek', contextWindow: 64000, inputPrice: 0.14, outputPrice: 0.28, capabilities: ['function_calling'], recommended: ['writer', 'profiler'] },
+    { id: 'deepseek-reasoner', name: 'DeepSeek R1', provider: 'deepseek', contextWindow: 64000, inputPrice: 0.55, outputPrice: 2.19, capabilities: ['reasoning'], recommended: ['architect', 'strategist', 'critic'] },
   ],
 };

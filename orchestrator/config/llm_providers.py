@@ -15,6 +15,7 @@ class LLMProvider(str, Enum):
     OPENROUTER = "openrouter"
     GEMINI = "gemini"
     CLAUDE = "claude"
+    DEEPSEEK = "deepseek"
 
 
 # ============================================================================
@@ -239,6 +240,31 @@ GEMINI_MODELS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+DEEPSEEK_MODELS: Dict[str, Dict[str, Any]] = {
+    "deepseek-chat": {
+        "name": "DeepSeek V3",
+        "description": "DeepSeek's most capable chat model",
+        "context_window": 64000,
+        "max_output": 8192,
+        "input_price_per_1k": 0.00014,
+        "output_price_per_1k": 0.00028,
+        "supports_vision": False,
+        "supports_function_calling": True,
+        "recommended_for": ["writer", "profiler"]
+    },
+    "deepseek-reasoner": {
+        "name": "DeepSeek R1",
+        "description": "DeepSeek reasoning model with chain-of-thought",
+        "context_window": 64000,
+        "max_output": 8192,
+        "input_price_per_1k": 0.00055,
+        "output_price_per_1k": 0.00219,
+        "supports_vision": False,
+        "supports_function_calling": False,
+        "recommended_for": ["architect", "strategist", "critic"]
+    },
+}
+
 CLAUDE_MODELS: Dict[str, Dict[str, Any]] = {
     "claude-3-5-sonnet-20241022": {
         "name": "Claude 3.5 Sonnet (Latest)",
@@ -359,6 +385,17 @@ class ClaudeConfig(ProviderConfig):
         return CLAUDE_MODELS
 
 
+class DeepSeekConfig(ProviderConfig):
+    """DeepSeek-specific configuration (OpenAI-compatible API)."""
+    provider: LLMProvider = LLMProvider.DEEPSEEK
+    base_url: str = "https://api.deepseek.com"
+    default_model: str = "deepseek-chat"
+
+    @property
+    def available_models(self) -> Dict[str, Dict[str, Any]]:
+        return DEEPSEEK_MODELS
+
+
 # ============================================================================
 # Agent Model Assignment
 # ============================================================================
@@ -393,6 +430,7 @@ class LLMConfiguration(BaseModel):
     openrouter: Optional[OpenRouterConfig] = None
     gemini: Optional[GeminiConfig] = None
     claude: Optional[ClaudeConfig] = None
+    deepseek: Optional[DeepSeekConfig] = None
 
     # Agent-specific model assignments
     agent_models: AgentModelConfig = Field(default_factory=AgentModelConfig)
@@ -409,6 +447,7 @@ class LLMConfiguration(BaseModel):
             LLMProvider.OPENROUTER: self.openrouter,
             LLMProvider.GEMINI: self.gemini,
             LLMProvider.CLAUDE: self.claude,
+            LLMProvider.DEEPSEEK: self.deepseek,
         }
         return provider_map.get(provider)
 
@@ -423,6 +462,8 @@ class LLMConfiguration(BaseModel):
             enabled.append(LLMProvider.GEMINI)
         if self.claude and self.claude.enabled:
             enabled.append(LLMProvider.CLAUDE)
+        if self.deepseek and self.deepseek.enabled:
+            enabled.append(LLMProvider.DEEPSEEK)
         return enabled
 
     def validate_agent_models(self) -> List[str]:
@@ -459,6 +500,7 @@ def get_all_models() -> Dict[str, Dict[str, Dict[str, Any]]]:
         "openrouter": OPENROUTER_MODELS,
         "gemini": GEMINI_MODELS,
         "claude": CLAUDE_MODELS,
+        "deepseek": DEEPSEEK_MODELS,
     }
 
 
@@ -508,6 +550,12 @@ def create_default_config_from_env() -> LLMConfiguration:
     if os.getenv("ANTHROPIC_API_KEY"):
         config.claude = ClaudeConfig(
             api_key=SecretStr(os.getenv("ANTHROPIC_API_KEY")),
+        )
+
+    # DeepSeek
+    if os.getenv("DEEPSEEK_API_KEY"):
+        config.deepseek = DeepSeekConfig(
+            api_key=SecretStr(os.getenv("DEEPSEEK_API_KEY")),
         )
 
     return config

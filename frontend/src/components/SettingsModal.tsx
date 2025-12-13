@@ -104,6 +104,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             {provider.id === 'openrouter' && 'sk-or-...'}
                             {provider.id === 'gemini' && 'AI...'}
                             {provider.id === 'anthropic' && 'sk-ant-...'}
+                            {provider.id === 'deepseek' && 'sk-...'}
                           </p>
                         </div>
                       </div>
