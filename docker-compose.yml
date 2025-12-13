@@ -1,0 +1,184 @@
+# MANOE - Multi-Agent Narrative Orchestration Engine
+# Docker Compose for Self-Hosting Deployment
+#
+# Usage:
+#   1. Copy .env.example to .env and configure your API keys
+#   2. Run: docker-compose up -d
+#   3. Access API Gateway at http://localhost:3000
+#
+# Services:
+#   - api-gateway: TypeScript/Ts.ED API entry point (port 3000)
+#   - orchestrator: Python AI agent orchestrator
+#   - redis: Message broker and job queue
+#   - qdrant: Vector database for character/worldbuilding memory
+#   - postgres: PostgreSQL database (Supabase alternative)
+
+version: "3.8"
+
+services:
+  # ==========================================================================
+  # API Gateway - TypeScript/Ts.ED
+  # ==========================================================================
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: manoe-api-gateway
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=3000
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - REDIS_URL=redis://redis:6379
+      - SUPABASE_URL=http://postgres:5432
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - manoe-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ==========================================================================
+  # AI Orchestrator - Python/AutoGen
+  # ==========================================================================
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: manoe-orchestrator
+    restart: unless-stopped
+    environment:
+      # LLM Provider API Keys (BYOK)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_ORG_ID=${OPENAI_ORG_ID:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Agent Model Configuration
+      - ARCHITECT_PROVIDER=${ARCHITECT_PROVIDER:-openai}
+      - ARCHITECT_MODEL=${ARCHITECT_MODEL:-gpt-4o}
+      - PROFILER_PROVIDER=${PROFILER_PROVIDER:-openai}
+      - PROFILER_MODEL=${PROFILER_MODEL:-gpt-4o}
+      - STRATEGIST_PROVIDER=${STRATEGIST_PROVIDER:-openai}
+      - STRATEGIST_MODEL=${STRATEGIST_MODEL:-gpt-4o}
+      - WRITER_PROVIDER=${WRITER_PROVIDER:-openai}
+      - WRITER_MODEL=${WRITER_MODEL:-gpt-4o-mini}
+      - CRITIC_PROVIDER=${CRITIC_PROVIDER:-openai}
+      - CRITIC_MODEL=${CRITIC_MODEL:-gpt-4o}
+      # Infrastructure
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - SUPABASE_URL=http://postgres:5432
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
+      # Settings
+      - DEFAULT_TEMPERATURE=${DEFAULT_TEMPERATURE:-0.7}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-120}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - manoe-network
+
+  # ==========================================================================
+  # Redis - Message Broker & Job Queue
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: manoe-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    networks:
+      - manoe-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # Qdrant - Vector Database for Memory
+  # ==========================================================================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: manoe-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__HTTP_PORT=6333
+    networks:
+      - manoe-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # PostgreSQL - Relational Database (Supabase Alternative)
+  # ==========================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: manoe-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-manoe}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-manoe_password}
+      - POSTGRES_DB=${POSTGRES_DB:-manoe}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - manoe-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-manoe} -d ${POSTGRES_DB:-manoe}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  manoe-network:
+    driver: bridge
+
+# ==========================================================================
+# Volumes
+# ==========================================================================
+volumes:
+  redis-data:
+    driver: local
+  qdrant-data:
+    driver: local
+  postgres-data:
+    driver: local
