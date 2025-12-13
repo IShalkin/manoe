@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { MoralCompass } from '../types';
+import { AgentChat } from '../components/AgentChat';
 
 // API is served from the same origin via nginx proxy at /api
 const API_URL = '';
+
+// Multi-agent orchestrator URL (separate subdomain)
+const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
 
 interface ProjectFormData {
   name: string;
@@ -33,11 +37,14 @@ export function DashboardPage() {
   const [generatedContent, setGeneratedContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<GeneratedProject[]>([]);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const [showAgentChat, setShowAgentChat] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsGenerating(true);
     setError(null);
+    setCurrentRunId(null);
     
     // Get the Writer agent's configuration (or use Architect for initial generation)
     const architectConfig = getAgentConfig('architect');
@@ -55,7 +62,8 @@ export function DashboardPage() {
     }
     
     try {
-      const response = await fetch(`${API_URL}/api/generate`, {
+      // Call the multi-agent orchestrator
+      const response = await fetch(`${ORCHESTRATOR_URL}/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -68,20 +76,24 @@ export function DashboardPage() {
           moral_compass: formData.moralCompass,
           target_audience: formData.targetAudience || undefined,
           themes: formData.themes || undefined,
-          project_name: formData.name,
         }),
       });
       
       const data = await response.json();
       
-      if (data.success && data.content) {
-        setGeneratedContent(data.content);
+      if (data.success && data.run_id) {
+        // Show the agent chat to visualize communication
+        setCurrentRunId(data.run_id);
+        setShowAgentChat(true);
+        setShowNewProject(false);
+        
+        // Store project info
         setProjects(prev => [...prev, {
           name: formData.name || 'Untitled Project',
-          content: data.content,
+          content: `Generation in progress... Run ID: ${data.run_id}`,
           createdAt: new Date(),
         }]);
-        setShowNewProject(false);
+        
         setFormData({
           name: '',
           seedIdea: '',
@@ -90,7 +102,7 @@ export function DashboardPage() {
           themes: '',
         });
       } else {
-        setError(data.error || 'Failed to generate story. Please try again.');
+        setError(data.error || 'Failed to start generation. Please try again.');
       }
     } catch (err) {
       setError(`Network error: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -152,6 +164,19 @@ export function DashboardPage() {
               </svg>
             </button>
           </div>
+        </div>
+      )}
+
+      {showAgentChat && currentRunId && (
+        <div className="mb-6">
+          <AgentChat
+            runId={currentRunId}
+            orchestratorUrl={ORCHESTRATOR_URL}
+            onClose={() => {
+              setShowAgentChat(false);
+              setCurrentRunId(null);
+            }}
+          />
         </div>
       )}
 

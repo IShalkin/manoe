@@ -44,5 +44,8 @@ COPY . .
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Start the application
-CMD ["python", "main.py"]
+# Expose port for FastAPI
+EXPOSE 8001
+
+# Start the multi-agent worker with FastAPI
+CMD ["uvicorn", "multi_agent_worker:app", "--host", "0.0.0.0", "--port", "8001"]

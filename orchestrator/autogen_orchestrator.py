@@ -206,6 +206,15 @@ Always output critiques as valid JSON wrapped in ```json``` blocks.
                 **data,
             })
 
+    def _emit_agent_message(self, agent_name: str, message_type: str, content: str, to_agent: str = None) -> None:
+        """Emit an agent message event for chat visualization."""
+        self._emit_event("agent_message", {
+            "agent": agent_name,
+            "message_type": message_type,
+            "content": content[:2000] if content else "",  # Truncate for display
+            "to_agent": to_agent,
+        })
+
     async def _call_agent(
         self,
         agent: Dict[str, Any],
@@ -241,6 +250,13 @@ Always output critiques as valid JSON wrapped in ```json``` blocks.
             "agent": agent["name"],
             "usage": response.usage,
         })
+
+        # Emit the agent's message for chat visualization
+        self._emit_agent_message(
+            agent_name=agent["name"],
+            message_type="response",
+            content=response.content,
+        )
 
         return response.content
 
