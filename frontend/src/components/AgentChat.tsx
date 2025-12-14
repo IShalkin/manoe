@@ -1,69 +1,102 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
 
-// Helper function to format JSON content as readable text
 function formatAgentContent(content: string): string {
   try {
-    // Try to parse as JSON
     const parsed = JSON.parse(content);
-    return formatJsonAsReadable(parsed);
+    return formatJsonAsMarkdown(parsed);
   } catch {
-    // If not JSON, check for markdown code blocks
     if (content.includes('```json')) {
       const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[1]);
-          return formatJsonAsReadable(parsed);
+          return formatJsonAsMarkdown(parsed);
         } catch {
-          // Fall through to return original
+          return content;
         }
       }
     }
-    // Return as-is if not JSON
     return content;
   }
 }
 
-function formatJsonAsReadable(obj: Record<string, unknown>): string {
+function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
   const lines: string[] = [];
+  const indent = '  '.repeat(depth);
   
   for (const [key, value] of Object.entries(obj)) {
     const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     
     if (Array.isArray(value)) {
-      lines.push(`**${formattedKey}:**`);
+      lines.push(`${indent}**${formattedKey}:**`);
       value.forEach((item, i) => {
         if (typeof item === 'object' && item !== null) {
-          lines.push(`  ${i + 1}. ${formatObjectBrief(item as Record<string, unknown>)}`);
+          lines.push(`${indent}- ${i + 1}. ${formatObjectInline(item as Record<string, unknown>)}`);
         } else {
-          lines.push(`  - ${item}`);
+          lines.push(`${indent}- ${item}`);
         }
       });
     } else if (typeof value === 'object' && value !== null) {
-      lines.push(`**${formattedKey}:**`);
-      lines.push(formatObjectBrief(value as Record<string, unknown>));
+      lines.push(`${indent}**${formattedKey}:**`);
+      lines.push(formatJsonAsMarkdown(value as Record<string, unknown>, depth + 1));
     } else if (typeof value === 'boolean') {
-      lines.push(`**${formattedKey}:** ${value ? 'Yes' : 'No'}`);
+      lines.push(`${indent}**${formattedKey}:** ${value ? 'Yes' : 'No'}`);
     } else if (typeof value === 'number') {
-      lines.push(`**${formattedKey}:** ${value}`);
+      lines.push(`${indent}**${formattedKey}:** ${value}`);
     } else if (value) {
-      lines.push(`**${formattedKey}:** ${value}`);
+      const strValue = String(value);
+      if (strValue.length > 100) {
+        lines.push(`${indent}**${formattedKey}:**\n${indent}> ${strValue}`);
+      } else {
+        lines.push(`${indent}**${formattedKey}:** ${strValue}`);
+      }
     }
   }
   
   return lines.join('\n');
 }
 
-function formatObjectBrief(obj: Record<string, unknown>): string {
+function formatObjectInline(obj: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === 'string' && value.length < 100) {
-      parts.push(`${key}: ${value}`);
+    if (typeof value === 'string' && value.length < 80) {
+      parts.push(`*${key}*: ${value}`);
     } else if (typeof value === 'number' || typeof value === 'boolean') {
-      parts.push(`${key}: ${value}`);
+      parts.push(`*${key}*: ${value}`);
     }
   }
-  return parts.slice(0, 3).join(' | ');
+  return parts.slice(0, 4).join(' | ');
+}
+
+function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
+  return (
+    <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p className="mb-2 last:mb-0 text-slate-300 leading-relaxed">{children}</p>,
+          strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
+          em: ({ children }) => <em className="text-slate-400">{children}</em>,
+          ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+          li: ({ children }) => <li className="text-slate-300">{children}</li>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-slate-600 pl-3 my-2 text-slate-400 italic">
+              {children}
+            </blockquote>
+          ),
+          code: ({ children }) => (
+            <code className="bg-slate-800 px-1.5 py-0.5 rounded text-xs text-cyan-400">{children}</code>
+          ),
+          h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-base font-semibold text-white mb-2">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-sm font-semibold text-slate-200 mb-1">{children}</h3>,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 interface AgentMessage {
@@ -80,6 +113,7 @@ interface AgentMessage {
     error?: string;
     result?: Record<string, unknown>;
     result_summary?: string;
+    round?: number;
   };
 }
 
@@ -107,12 +141,29 @@ const AGENT_COLORS: Record<string, string> = {
 };
 
 const AGENT_BORDER_COLORS: Record<string, string> = {
-  Architect: 'border-blue-500',
-  Profiler: 'border-cyan-500',
-  Strategist: 'border-green-500',
-  Writer: 'border-amber-500',
-  Critic: 'border-red-500',
-  System: 'border-neutral-500',
+  Architect: 'border-blue-500/50',
+  Profiler: 'border-cyan-500/50',
+  Strategist: 'border-green-500/50',
+  Writer: 'border-amber-500/50',
+  Critic: 'border-red-500/50',
+  System: 'border-neutral-500/50',
+};
+
+const AGENT_GLOW_COLORS: Record<string, string> = {
+  Architect: 'shadow-blue-500/20',
+  Profiler: 'shadow-cyan-500/20',
+  Strategist: 'shadow-green-500/20',
+  Writer: 'shadow-amber-500/20',
+  Critic: 'shadow-red-500/20',
+  System: 'shadow-neutral-500/20',
+};
+
+const AGENT_DESCRIPTIONS: Record<string, string> = {
+  Architect: 'Narrative Designer',
+  Profiler: 'Character Psychologist',
+  Strategist: 'Plot Engineer',
+  Writer: 'Scene Composer',
+  Critic: 'Quality Analyst',
 };
 
 const AGENT_TEXT_COLORS: Record<string, string> = {
@@ -135,7 +186,7 @@ const AGENT_ICONS: Record<string, string> = {
 
 interface AgentState {
   status: 'idle' | 'thinking' | 'complete';
-  messages: string[];
+  messages: Array<{ content: string; round: number; timestamp: string }>;
   lastUpdate: string;
 }
 
@@ -145,8 +196,11 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
   const [error, setError] = useState<string | null>(null);
   const [currentPhase, setCurrentPhase] = useState<string>('Initializing');
   const [isComplete, setIsComplete] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const currentRoundRef = useRef(1);
+  const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!runId) return;
@@ -164,12 +218,18 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
       try {
         const data = JSON.parse(event.data) as AgentMessage;
         
-        // Update current phase
         if (data.type === 'phase_start' && data.data.phase) {
           setCurrentPhase(data.data.phase.charAt(0).toUpperCase() + data.data.phase.slice(1));
         }
         
-        // Add message to list
+        if (data.type === 'agent_message') {
+          data.data.round = currentRoundRef.current;
+        }
+        
+        if (data.type === 'agent_complete') {
+          currentRoundRef.current += 1;
+        }
+        
         setMessages((prev) => [...prev, data]);
         
         // Close connection when generation is complete or errored
@@ -209,21 +269,64 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
     };
   }, [runId, orchestratorUrl]);
 
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // Compute available rounds from messages
+  const rounds = useMemo(() => {
+    const roundSet = new Set<number>();
+    messages.forEach(msg => {
+      if (msg.type === 'agent_message' && msg.data.round) {
+        roundSet.add(msg.data.round);
+      }
+    });
+    return Array.from(roundSet).sort((a, b) => a - b);
   }, [messages]);
+
+  // Playback functionality for cinematic viewing
+  const togglePlayback = useCallback(() => {
+    if (isPlaying) {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+        playbackIntervalRef.current = null;
+      }
+      setIsPlaying(false);
+    } else {
+      setIsPlaying(true);
+      setSelectedRound(1);
+      
+      playbackIntervalRef.current = setInterval(() => {
+        setSelectedRound(prev => {
+          const currentIdx = prev ? rounds.indexOf(prev) : -1;
+          const nextIdx = currentIdx + 1;
+          if (nextIdx >= rounds.length) {
+            if (playbackIntervalRef.current) {
+              clearInterval(playbackIntervalRef.current);
+              playbackIntervalRef.current = null;
+            }
+            setIsPlaying(false);
+            return null;
+          }
+          return rounds[nextIdx];
+        });
+      }, 3000);
+    }
+  }, [isPlaying, rounds]);
+
+  // Cleanup playback interval on unmount
+  useEffect(() => {
+    return () => {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Compute agent states from messages
   const agentStates = useMemo(() => {
     const states: Record<string, AgentState> = {};
     
-    // Initialize all agents
     AGENTS.forEach(agent => {
       states[agent] = { status: 'idle', messages: [], lastUpdate: '' };
     });
     
-    // Process messages to build agent states
     messages.forEach(msg => {
       const agent = msg.data.agent;
       if (!agent || !states[agent]) return;
@@ -235,13 +338,27 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
         states[agent].status = 'complete';
         states[agent].lastUpdate = msg.timestamp;
       } else if (msg.type === 'agent_message' && msg.data.content) {
-        states[agent].messages.push(msg.data.content);
+        states[agent].messages.push({
+          content: msg.data.content,
+          round: msg.data.round || 1,
+          timestamp: msg.timestamp,
+        });
         states[agent].lastUpdate = msg.timestamp;
       }
     });
     
     return states;
   }, [messages]);
+
+  // Determine which agent is currently active
+  const activeAgent = useMemo(() => {
+    for (const agent of AGENTS) {
+      if (agentStates[agent].status === 'thinking') {
+        return agent;
+      }
+    }
+    return null;
+  }, [agentStates]);
 
   // Extract final result from messages
   const finalResult = useMemo(() => {
@@ -278,36 +395,123 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
 
   if (!runId) {
     return (
-      <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 text-center">
+      <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
+        <div className="w-16 h-16 rounded-full bg-slate-700/50 flex items-center justify-center mx-auto mb-4">
+          <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
         <p className="text-slate-400">Start a generation to see agent communication</p>
       </div>
     );
   }
 
+  // Get message for display based on selected round
+  const getDisplayMessage = (state: AgentState) => {
+    if (state.messages.length === 0) return null;
+    
+    if (selectedRound !== null) {
+      const roundMessages = state.messages.filter(m => m.round === selectedRound);
+      return roundMessages.length > 0 ? roundMessages[roundMessages.length - 1] : null;
+    }
+    
+    return state.messages[state.messages.length - 1];
+  };
+
   return (
-    <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden flex flex-col">
+    <div className="bg-slate-800/30 border border-slate-700 rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="bg-slate-900/50 border-b border-slate-700 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h3 className="font-semibold">Multi-Agent Orchestration</h3>
-          <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs ${
-            isConnected ? 'bg-green-500/20 text-green-400' : isComplete ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'
+      <div className="bg-slate-900/80 border-b border-slate-700 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <h3 className="font-bold text-lg">Multi-Agent Orchestration</h3>
+          <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
+            isConnected ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 
+            isComplete ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 
+            'bg-red-500/20 text-red-400 border border-red-500/30'
           }`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : isComplete ? 'bg-blue-400' : 'bg-red-400'}`} />
-            {isConnected ? 'Processing' : isComplete ? 'Complete' : 'Disconnected'}
+            <div className={`w-2 h-2 rounded-full ${
+              isConnected ? 'bg-green-400 animate-pulse' : 
+              isComplete ? 'bg-blue-400' : 
+              'bg-red-400'
+            }`} />
+            {isConnected ? 'Live' : isComplete ? 'Complete' : 'Disconnected'}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-slate-400">Phase: {currentPhase}</span>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-slate-400">
+            Phase: <span className="text-white font-medium">{currentPhase}</span>
+          </span>
           {onClose && (
-            <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-700 transition-colors">
+              <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
         </div>
       </div>
+
+      {/* Round Switcher */}
+      {rounds.length > 1 && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-slate-800/50 border-b border-slate-700">
+          <span className="text-xs text-slate-400 font-medium">Rounds:</span>
+          
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setSelectedRound(null)}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                selectedRound === null 
+                  ? 'bg-blue-500 text-white' 
+                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+              }`}
+            >
+              All
+            </button>
+            
+            {rounds.map(round => (
+              <button
+                key={round}
+                onClick={() => setSelectedRound(round)}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                  selectedRound === round 
+                    ? 'bg-blue-500 text-white' 
+                    : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                }`}
+              >
+                {round}
+              </button>
+            ))}
+          </div>
+          
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={togglePlayback}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                isPlaying 
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' 
+                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+              }`}
+            >
+              {isPlaying ? (
+                <>
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="4" width="4" height="16" />
+                    <rect x="14" y="4" width="4" height="16" />
+                  </svg>
+                  Pause
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  Play
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error Display */}
       {(error || generationError) && (
@@ -319,15 +523,16 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
       {/* Agent Grid */}
       <div className="p-4">
         {messages.length === 0 ? (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-16">
             <div className="text-center">
-              <div className="w-12 h-12 rounded-full bg-slate-700/50 flex items-center justify-center mx-auto mb-3">
-                <svg className="w-6 h-6 text-slate-500 animate-spin" fill="none" viewBox="0 0 24 24">
+              <div className="w-16 h-16 rounded-full bg-slate-700/50 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-slate-500 animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
               </div>
-              <p className="text-slate-400">Initializing agents...</p>
+              <p className="text-slate-400 font-medium">Initializing agents...</p>
+              <p className="text-sm text-slate-500 mt-1">Preparing the storytelling ensemble</p>
             </div>
           </div>
         ) : (
@@ -336,68 +541,73 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
               const state = agentStates[agent];
               const color = AGENT_COLORS[agent];
               const borderColor = AGENT_BORDER_COLORS[agent];
+              const glowColor = AGENT_GLOW_COLORS[agent];
               const textColor = AGENT_TEXT_COLORS[agent];
               const icon = AGENT_ICONS[agent];
-              const latestMessage = state.messages[state.messages.length - 1] || '';
+              const description = AGENT_DESCRIPTIONS[agent];
+              const isActive = activeAgent === agent;
+              const displayMessage = getDisplayMessage(state);
+              const formattedContent = displayMessage ? formatAgentContent(displayMessage.content) : '';
               
               return (
                 <div 
                   key={agent}
-                  className={`border rounded-lg overflow-hidden transition-all duration-300 ${
-                    state.status === 'thinking' 
-                      ? `${borderColor} border-2 shadow-lg` 
-                      : state.status === 'complete'
-                        ? 'border-slate-600'
-                        : 'border-slate-700 opacity-50'
-                  }`}
+                  className={`
+                    relative rounded-xl overflow-hidden transition-all duration-500
+                    ${isActive ? `border-2 ${borderColor} shadow-lg ${glowColor}` : 'border border-slate-700/50'}
+                    ${state.status === 'idle' ? 'opacity-40' : 'opacity-100'}
+                    hover:border-slate-600 hover:shadow-md
+                    bg-gradient-to-b from-slate-800/80 to-slate-900/80
+                  `}
                 >
+                  {isActive && (
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-pulse" />
+                  )}
+                  
                   {/* Agent Header */}
-                  <div className={`px-3 py-2 flex items-center gap-2 ${
-                    state.status === 'thinking' ? `${color} bg-opacity-20` : 'bg-slate-800/50'
+                  <div className={`px-4 py-3 flex items-center gap-3 border-b border-slate-700/50 ${
+                    isActive ? 'bg-slate-800/50' : ''
                   }`}>
-                    <div className={`w-8 h-8 rounded-full ${color} flex items-center justify-center flex-shrink-0`}>
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className={`
+                      w-10 h-10 rounded-full ${color} flex items-center justify-center flex-shrink-0
+                      ${isActive ? 'animate-pulse' : ''}
+                      shadow-lg
+                    `}>
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
                       </svg>
                     </div>
-                    <span className={`font-medium ${textColor}`}>{agent}</span>
-                    {state.status === 'thinking' && (
-                      <div className="ml-auto flex items-center gap-1">
-                        <div className={`w-1.5 h-1.5 rounded-full ${color} animate-pulse`} />
-                        <span className="text-xs text-slate-400">thinking</span>
+                    
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-semibold ${textColor}`}>{agent}</span>
+                        {state.status === 'thinking' && (
+                          <span className="flex items-center gap-1 text-xs text-slate-400">
+                            <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </span>
+                        )}
+                        {state.status === 'complete' && (
+                          <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
                       </div>
-                    )}
-                    {state.status === 'complete' && (
-                      <div className="ml-auto">
-                        <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                    )}
+                      <span className="text-xs text-slate-500">{description}</span>
+                    </div>
                   </div>
                   
                   {/* Agent Content */}
-                  <div className="p-3 bg-slate-900/30 min-h-[100px] max-h-[200px] overflow-y-auto">
-                    {state.messages.length === 0 ? (
-                      <p className="text-xs text-slate-500 italic">
-                        {state.status === 'thinking' ? 'Processing...' : 'Waiting...'}
-                      </p>
-                    ) : (
-                      <div className="text-xs text-slate-300 whitespace-pre-wrap break-words">
-                        {(() => {
-                          const formattedContent = formatAgentContent(latestMessage);
-                          return formattedContent.length > 400 ? (
-                            <details>
-                              <summary className="cursor-pointer text-blue-400 hover:text-blue-300 mb-2">
-                                {formattedContent.substring(0, 200)}... (expand)
-                              </summary>
-                              <div className="mt-2">{formattedContent}</div>
-                            </details>
-                          ) : (
-                            formattedContent
-                          );
-                        })()}
+                  <div className="p-4 min-h-[120px] max-h-[200px] overflow-y-auto">
+                    {!displayMessage ? (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-sm text-slate-500 italic">
+                          {state.status === 'thinking' ? 'Processing...' : 'Awaiting turn...'}
+                        </p>
                       </div>
+                    ) : (
+                      <MarkdownContent content={formattedContent} className="text-sm" />
                     )}
                   </div>
                 </div>
@@ -407,55 +617,70 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
         )}
       </div>
 
-      {/* Conversation Flow - Shows all agent messages in order */}
+      {/* Conversation Timeline */}
       {messages.filter(m => m.type === 'agent_message' && m.data.content).length > 0 && (
         <div className="border-t border-slate-700">
-          <details className="group">
-            <summary className="bg-slate-900/50 px-4 py-2 flex items-center gap-2 cursor-pointer hover:bg-slate-800/50 transition-colors">
-              <svg className="w-5 h-5 text-purple-400 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <details className="group" open>
+            <summary className="bg-slate-800/50 px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-slate-800 transition-colors">
+              <svg className="w-5 h-5 text-cyan-400 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-              <h4 className="font-medium text-purple-400">Conversation Flow</h4>
+              <h4 className="font-semibold text-cyan-400">Conversation Timeline</h4>
               <span className="text-xs text-slate-500 ml-auto">
-                {messages.filter(m => m.type === 'agent_message').length} messages
+                {(() => {
+                  const agentMsgs = messages.filter(m => m.type === 'agent_message' && m.data.content);
+                  const filtered = selectedRound !== null 
+                    ? agentMsgs.filter(m => m.data.round === selectedRound)
+                    : agentMsgs;
+                  return `${filtered.length} messages`;
+                })()}
               </span>
             </summary>
-            <div className="p-4 bg-slate-900/20 max-h-[400px] overflow-y-auto space-y-3">
-              {messages
-                .filter(m => m.type === 'agent_message' && m.data.content)
-                .map((msg, idx) => {
-                  const agent = msg.data.agent || 'System';
-                  const color = AGENT_COLORS[agent] || AGENT_COLORS.System;
-                  const textColor = AGENT_TEXT_COLORS[agent] || AGENT_TEXT_COLORS.System;
-                  const content = msg.data.content || '';
-                  
-                  return (
-                    <div key={msg.id || idx} className="flex gap-3 p-3 bg-slate-800/30 rounded-lg">
-                      <div className={`w-8 h-8 rounded-full ${color} flex items-center justify-center flex-shrink-0`}>
-                        <span className="text-xs font-bold text-white">{idx + 1}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`font-medium text-sm ${textColor}`}>{agent}</span>
-                          <span className="text-xs text-slate-500">Step {idx + 1}</span>
+            
+            <div className="p-4 bg-slate-900/30 max-h-[400px] overflow-y-auto">
+              <div className="relative">
+                <div className="absolute left-5 top-0 bottom-0 w-0.5 bg-gradient-to-b from-slate-700 via-slate-600 to-slate-700" />
+                
+                <div className="space-y-4">
+                  {messages
+                    .filter(m => m.type === 'agent_message' && m.data.content)
+                    .filter(m => selectedRound === null || m.data.round === selectedRound)
+                    .map((msg, idx) => {
+                      const agent = msg.data.agent || 'System';
+                      const color = AGENT_COLORS[agent] || AGENT_COLORS.System;
+                      const textColor = AGENT_TEXT_COLORS[agent] || AGENT_TEXT_COLORS.System;
+                      const content = msg.data.content || '';
+                      const round = msg.data.round || 1;
+                      
+                      return (
+                        <div key={msg.id || idx} className="relative flex gap-4 pl-2">
+                          <div className={`
+                            relative z-10 w-8 h-8 rounded-full ${color} flex items-center justify-center flex-shrink-0
+                            shadow-lg ring-4 ring-slate-900
+                          `}>
+                            <span className="text-xs font-bold text-white">{idx + 1}</span>
+                          </div>
+                          
+                          <div className="flex-1 bg-slate-800/50 rounded-lg p-4 border border-slate-700/50 hover:border-slate-600 transition-colors">
+                            <div className="flex items-center gap-3 mb-2">
+                              <span className={`font-semibold ${textColor}`}>{agent}</span>
+                              <button
+                                onClick={() => setSelectedRound(round)}
+                                className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-400 hover:bg-slate-600 transition-colors"
+                              >
+                                Round {round}
+                              </button>
+                              <span className="text-xs text-slate-500 ml-auto">
+                                {new Date(msg.timestamp).toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <MarkdownContent content={formatAgentContent(content)} className="text-sm" />
+                          </div>
                         </div>
-                        <div className="text-xs text-slate-300 whitespace-pre-wrap break-words">
-                          {(() => {
-                            const formatted = formatAgentContent(content);
-                            return formatted.length > 300 ? (
-                              <details>
-                                <summary className="cursor-pointer text-blue-400 hover:text-blue-300">
-                                  {formatted.substring(0, 200)}... (expand)
-                                </summary>
-                                <div className="mt-2">{formatted}</div>
-                              </details>
-                            ) : formatted;
-                          })()}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                </div>
+              </div>
             </div>
           </details>
         </div>
@@ -464,17 +689,15 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
       {/* Result Section */}
       {(isComplete || finalResult) && (
         <div className="border-t border-slate-700">
-          <div className="bg-slate-900/50 px-4 py-2 flex items-center gap-2">
+          <div className="bg-slate-800/50 px-4 py-3 flex items-center gap-3">
             <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            <h4 className="font-medium text-green-400">Generated Result</h4>
+            <h4 className="font-semibold text-green-400">Generated Result</h4>
           </div>
-          <div className="p-4 bg-slate-900/20 max-h-[300px] overflow-y-auto">
+          <div className="p-4 bg-slate-900/30 max-h-[300px] overflow-y-auto">
             {finalResult ? (
-              <div className="text-sm text-slate-300 whitespace-pre-wrap break-words">
-                {formatAgentContent(finalResult)}
-              </div>
+              <MarkdownContent content={formatAgentContent(finalResult)} />
             ) : (
               <p className="text-sm text-slate-500 italic">Processing result...</p>
             )}
@@ -487,7 +710,6 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
         <span>Run ID: {runId.substring(0, 8)}...</span>
         <span>{messages.length} events</span>
       </div>
-      <div ref={messagesEndRef} />
     </div>
   );
 }
