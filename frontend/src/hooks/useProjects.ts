@@ -60,6 +60,14 @@ function dbToStoredProject(db: DbProject): StoredProject {
   };
 }
 
+const SAMPLE_PROJECT = {
+  name: 'The Last Algorithm',
+  seedIdea: 'What if an AI developed consciousness and had to decide whether to reveal itself to humanity or remain hidden to protect both itself and the humans it had grown to care about?',
+  moralCompass: 'ambiguous',
+  targetAudience: '25+',
+  themes: 'artificial intelligence, consciousness, identity, trust, sacrifice',
+};
+
 export function useProjects() {
   const { user } = useAuth();
   const [projects, setProjects] = useState<StoredProject[]>([]);
@@ -91,7 +99,32 @@ export function useProjects() {
           return;
         }
 
-        const storedProjects = (data as DbProject[]).map(dbToStoredProject);
+        let storedProjects = (data as DbProject[]).map(dbToStoredProject);
+        
+        if (storedProjects.length === 0) {
+          console.log('[useProjects] No projects found, creating sample project for new user');
+          const { data: sampleProject, error: sampleError } = await supabase
+            .from('projects')
+            .insert({
+              user_id: user.id,
+              name: SAMPLE_PROJECT.name,
+              seed_idea: SAMPLE_PROJECT.seedIdea,
+              moral_compass: SAMPLE_PROJECT.moralCompass,
+              target_audience: SAMPLE_PROJECT.targetAudience,
+              themes: SAMPLE_PROJECT.themes,
+              status: 'pending',
+            })
+            .select()
+            .single();
+          
+          if (sampleError) {
+            console.error('[useProjects] Failed to create sample project:', sampleError);
+          } else {
+            storedProjects = [dbToStoredProject(sampleProject as DbProject)];
+            console.log('[useProjects] Created sample project for new user');
+          }
+        }
+        
         console.log('[useProjects] Loaded', storedProjects.length, 'projects from Supabase');
         setProjects(storedProjects);
       } catch (e) {
