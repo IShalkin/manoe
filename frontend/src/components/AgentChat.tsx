@@ -553,6 +553,18 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
               // Extract the best available result content
               const allMessages = [...messages, data];
               
+              // Collect all agent outputs for persistence
+              const agentMessages = allMessages.filter(
+                m => m.type === 'agent_message' && m.data.content?.trim()
+              );
+              const agentOutputs: Record<string, string> = {};
+              agentMessages.forEach(m => {
+                const agent = m.data.agent || 'Unknown';
+                if (m.data.content) {
+                  agentOutputs[agent] = m.data.content;
+                }
+              });
+              
               // Try phase_complete with result first
               const phaseCompleteEvents = allMessages.filter(m => m.type === 'phase_complete' && m.data.result);
               if (phaseCompleteEvents.length > 0) {
@@ -560,6 +572,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                 const phaseComplete = genesisComplete || phaseCompleteEvents[phaseCompleteEvents.length - 1];
                 onComplete({
                   narrative_possibility: phaseComplete.data.result,
+                  agents: agentOutputs,
                 });
                 return;
               }
@@ -569,6 +582,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
               if (completeEvent?.data.result_summary) {
                 onComplete({
                   story: completeEvent.data.result_summary,
+                  agents: agentOutputs,
                 });
                 return;
               }
@@ -580,23 +594,14 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
               if (writerMessages.length > 0) {
                 onComplete({
                   story: writerMessages[writerMessages.length - 1].data.content,
+                  agents: agentOutputs,
                 });
                 return;
               }
               
               // Fall back to all agent messages combined
-              const agentMessages = allMessages.filter(
-                m => m.type === 'agent_message' && m.data.content?.trim()
-              );
-              const combinedContent: Record<string, string> = {};
-              agentMessages.forEach(m => {
-                const agent = m.data.agent || 'Unknown';
-                if (m.data.content) {
-                  combinedContent[agent] = m.data.content;
-                }
-              });
               onComplete({
-                agents: combinedContent,
+                agents: agentOutputs,
               });
             }
           }

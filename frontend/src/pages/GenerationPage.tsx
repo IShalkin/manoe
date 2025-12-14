@@ -343,6 +343,7 @@ export function GenerationPage() {
                   } else {
                     await completeGeneration(project.id, {
                       narrativePossibility: result.narrative_possibility,
+                      agentOutputs: result.agents,
                     });
                   }
                 } catch (e) {
