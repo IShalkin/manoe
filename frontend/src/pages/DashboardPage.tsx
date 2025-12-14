@@ -149,7 +149,16 @@ export function DashboardPage() {
         setError(data.error || 'Failed to start generation. Please try again.');
       }
     } catch (err) {
-      setError(`Network error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error('[DashboardPage] Generation error:', err);
+      let errorMsg = 'Unknown error';
+      if (err instanceof Error) {
+        errorMsg = err.message || err.name || String(err);
+      } else if (typeof err === 'string') {
+        errorMsg = err;
+      } else if (err && typeof err === 'object') {
+        errorMsg = JSON.stringify(err, Object.getOwnPropertyNames(err)) || String(err);
+      }
+      setError(`Network error: ${errorMsg}`);
     } finally {
       setIsGenerating(false);
     }

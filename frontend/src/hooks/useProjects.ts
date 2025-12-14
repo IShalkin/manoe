@@ -231,7 +231,7 @@ export function useProjects() {
 
     if (updateError) {
       console.error('[useProjects] Failed to update project:', updateError);
-      const errorMsg = updateError.message || updateError.details || updateError.hint || JSON.stringify(updateError);
+      const errorMsg = updateError.message || updateError.details || updateError.hint || updateError.code || String(updateError) || 'Unknown database error';
       throw new Error(errorMsg);
     }
 
