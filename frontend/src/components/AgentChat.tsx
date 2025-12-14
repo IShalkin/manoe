@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
 interface AgentMessage {
   id: string;
@@ -13,6 +13,7 @@ interface AgentMessage {
     status?: string;
     error?: string;
     result?: Record<string, unknown>;
+    result_summary?: string;
   };
 }
 
@@ -28,6 +29,8 @@ interface AgentChatProps {
   onClose?: () => void;
 }
 
+const AGENTS = ['Architect', 'Profiler', 'Strategist', 'Writer', 'Critic'] as const;
+
 const AGENT_COLORS: Record<string, string> = {
   Architect: 'bg-blue-500',
   Profiler: 'bg-cyan-500',
@@ -35,6 +38,24 @@ const AGENT_COLORS: Record<string, string> = {
   Writer: 'bg-amber-500',
   Critic: 'bg-red-500',
   System: 'bg-neutral-500',
+};
+
+const AGENT_BORDER_COLORS: Record<string, string> = {
+  Architect: 'border-blue-500',
+  Profiler: 'border-cyan-500',
+  Strategist: 'border-green-500',
+  Writer: 'border-amber-500',
+  Critic: 'border-red-500',
+  System: 'border-neutral-500',
+};
+
+const AGENT_TEXT_COLORS: Record<string, string> = {
+  Architect: 'text-blue-400',
+  Profiler: 'text-cyan-400',
+  Strategist: 'text-green-400',
+  Writer: 'text-amber-400',
+  Critic: 'text-red-400',
+  System: 'text-neutral-400',
 };
 
 const AGENT_ICONS: Record<string, string> = {
@@ -45,6 +66,12 @@ const AGENT_ICONS: Record<string, string> = {
   Critic: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
   System: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
 };
+
+interface AgentState {
+  status: 'idle' | 'thinking' | 'complete';
+  messages: string[];
+  lastUpdate: string;
+}
 
 export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: AgentChatProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -121,143 +148,67 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const formatTimestamp = (timestamp: string) => {
-    try {
-      return new Date(timestamp).toLocaleTimeString();
-    } catch {
-      return '';
-    }
-  };
-
-  const renderMessage = (msg: AgentMessage) => {
-    const { type, data, timestamp } = msg;
-    const agent = data.agent || 'System';
-    const color = AGENT_COLORS[agent] || AGENT_COLORS.System;
-    const icon = AGENT_ICONS[agent] || AGENT_ICONS.System;
-
-    // Skip heartbeat messages
-    if (type === 'heartbeat') return null;
-
-    // Render different message types
-    if (type === 'agent_message') {
-      const content = data.content || '';
-      const toAgent = data.to_agent;
+  // Compute agent states from messages
+  const agentStates = useMemo(() => {
+    const states: Record<string, AgentState> = {};
+    
+    // Initialize all agents
+    AGENTS.forEach(agent => {
+      states[agent] = { status: 'idle', messages: [], lastUpdate: '' };
+    });
+    
+    // Process messages to build agent states
+    messages.forEach(msg => {
+      const agent = msg.data.agent;
+      if (!agent || !states[agent]) return;
       
-      return (
-        <div key={msg.id} className="flex gap-3 p-3 hover:bg-slate-800/30 rounded-lg transition-colors">
-          <div className={`w-10 h-10 rounded-full ${color} flex items-center justify-center flex-shrink-0`}>
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="font-semibold text-white">{agent}</span>
-              {toAgent && (
-                <>
-                  <span className="text-slate-500">to</span>
-                  <span className="font-medium text-slate-300">{toAgent}</span>
-                </>
-              )}
-              <span className="text-xs text-slate-500 ml-auto">{formatTimestamp(timestamp)}</span>
-            </div>
-            <div className="text-sm text-slate-300 whitespace-pre-wrap break-words">
-              {content.length > 500 ? (
-                <details>
-                  <summary className="cursor-pointer text-primary-400 hover:text-primary-300">
-                    {content.substring(0, 200)}... (click to expand)
-                  </summary>
-                  <pre className="mt-2 p-2 bg-slate-900/50 rounded text-xs overflow-auto max-h-96">
-                    {content}
-                  </pre>
-                </details>
-              ) : (
-                content
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (type === 'agent_start') {
-      // Check if this agent has completed (has a matching agent_complete event after this one)
-      const hasCompleted = isComplete || messages.some(
-        (m, idx) => 
-          idx > messages.indexOf(msg) && 
-          m.type === 'agent_complete' && 
-          m.data.agent === agent
-      );
-      
-      if (hasCompleted) {
-        // Don't show "thinking" for completed agents
-        return null;
+      if (msg.type === 'agent_start') {
+        states[agent].status = 'thinking';
+        states[agent].lastUpdate = msg.timestamp;
+      } else if (msg.type === 'agent_complete') {
+        states[agent].status = 'complete';
+        states[agent].lastUpdate = msg.timestamp;
+      } else if (msg.type === 'agent_message' && msg.data.content) {
+        states[agent].messages.push(msg.data.content);
+        states[agent].lastUpdate = msg.timestamp;
       }
-      
-      return (
-        <div key={msg.id} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-400">
-          <div className={`w-2 h-2 rounded-full ${color} animate-pulse`} />
-          <span>{agent} is thinking...</span>
-          <span className="text-xs text-slate-500 ml-auto">{formatTimestamp(timestamp)}</span>
-        </div>
-      );
-    }
+    });
+    
+    return states;
+  }, [messages]);
 
-    if (type === 'phase_start') {
-      return (
-        <div key={msg.id} className="flex items-center justify-center py-4">
-          <div className="bg-blue-500/20 border border-blue-500/30 rounded-full px-4 py-1">
-            <span className="text-sm font-medium text-primary-400">
-              Phase: {data.phase?.charAt(0).toUpperCase()}{data.phase?.slice(1)}
-            </span>
-          </div>
-        </div>
-      );
+  // Extract final result from messages
+  const finalResult = useMemo(() => {
+    const completeEvent = messages.find(m => m.type === 'generation_complete');
+    if (completeEvent?.data.result_summary) {
+      return completeEvent.data.result_summary;
     }
-
-    if (type === 'generation_start') {
-      return (
-        <div key={msg.id} className="flex items-center justify-center py-4">
-          <div className="bg-green-500/20 border border-green-500/30 rounded-full px-4 py-1">
-            <span className="text-sm font-medium text-green-400">
-              Generation Started
-            </span>
-          </div>
-        </div>
-      );
+    
+    // Try to get from phase_complete
+    const phaseComplete = messages.find(m => m.type === 'phase_complete' && m.data.phase === 'genesis');
+    if (phaseComplete?.data.result) {
+      const result = phaseComplete.data.result;
+      if (typeof result === 'object' && result !== null) {
+        return JSON.stringify(result, null, 2);
+      }
+      return String(result);
     }
-
-    if (type === 'generation_complete') {
-      return (
-        <div key={msg.id} className="flex items-center justify-center py-4">
-          <div className="bg-green-500/20 border border-green-500/30 rounded-full px-4 py-1">
-            <span className="text-sm font-medium text-green-400">
-              Generation Complete
-            </span>
-          </div>
-        </div>
-      );
+    
+    // Get the last substantial agent message as fallback
+    const agentMessages = messages.filter(m => m.type === 'agent_message' && m.data.content);
+    if (agentMessages.length > 0) {
+      const lastMsg = agentMessages[agentMessages.length - 1];
+      return lastMsg.data.content || '';
     }
+    
+    return '';
+  }, [messages]);
 
-    if (type === 'generation_error' || type === 'error') {
-      return (
-        <div key={msg.id} className="flex items-center justify-center py-4">
-          <div className="bg-red-500/20 border border-red-500/30 rounded-lg px-4 py-2">
-            <span className="text-sm font-medium text-red-400">
-              Error: {data.error || 'Unknown error'}
-            </span>
-          </div>
-        </div>
-      );
-    }
-
-    // Default: show raw event
-    return (
-      <div key={msg.id} className="px-3 py-1 text-xs text-slate-500">
-        [{type}] {JSON.stringify(data).substring(0, 100)}...
-      </div>
-    );
-  };
+  // Check for errors
+  const generationError = useMemo(() => {
+    const errorEvent = messages.find(m => m.type === 'generation_error' || m.type === 'error');
+    return errorEvent?.data.error || null;
+  }, [messages]);
 
   if (!runId) {
     return (
@@ -268,16 +219,16 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
   }
 
   return (
-    <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden flex flex-col h-[600px]">
+    <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden flex flex-col">
       {/* Header */}
       <div className="bg-slate-900/50 border-b border-slate-700 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h3 className="font-semibold">Agent Communication</h3>
+          <h3 className="font-semibold">Multi-Agent Orchestration</h3>
           <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs ${
-            isConnected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+            isConnected ? 'bg-green-500/20 text-green-400' : isComplete ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'
           }`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
-            {isConnected ? 'Connected' : 'Disconnected'}
+            <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : isComplete ? 'bg-blue-400' : 'bg-red-400'}`} />
+            {isConnected ? 'Processing' : isComplete ? 'Complete' : 'Disconnected'}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -292,26 +243,17 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
         </div>
       </div>
 
-      {/* Agent Legend */}
-      <div className="bg-slate-900/30 border-b border-slate-700 px-4 py-2 flex items-center gap-4 flex-wrap">
-        {Object.entries(AGENT_COLORS).filter(([name]) => name !== 'System').map(([name, color]) => (
-          <div key={name} className="flex items-center gap-1.5">
-            <div className={`w-3 h-3 rounded-full ${color}`} />
-            <span className="text-xs text-slate-400">{name}</span>
-          </div>
-        ))}
-      </div>
+      {/* Error Display */}
+      {(error || generationError) && (
+        <div className="bg-red-500/10 border-b border-red-500/30 px-4 py-3">
+          <p className="text-sm text-red-400">{error || generationError}</p>
+        </div>
+      )}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 m-2">
-            <p className="text-sm text-red-400">{error}</p>
-          </div>
-        )}
-        
+      {/* Agent Grid */}
+      <div className="p-4">
         {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex items-center justify-center py-12">
             <div className="text-center">
               <div className="w-12 h-12 rounded-full bg-slate-700/50 flex items-center justify-center mx-auto mb-3">
                 <svg className="w-6 h-6 text-slate-500 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -319,20 +261,110 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
               </div>
-              <p className="text-slate-400">Waiting for agents...</p>
+              <p className="text-slate-400">Initializing agents...</p>
             </div>
           </div>
         ) : (
-          messages.map(renderMessage)
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {AGENTS.map(agent => {
+              const state = agentStates[agent];
+              const color = AGENT_COLORS[agent];
+              const borderColor = AGENT_BORDER_COLORS[agent];
+              const textColor = AGENT_TEXT_COLORS[agent];
+              const icon = AGENT_ICONS[agent];
+              const latestMessage = state.messages[state.messages.length - 1] || '';
+              
+              return (
+                <div 
+                  key={agent}
+                  className={`border rounded-lg overflow-hidden transition-all duration-300 ${
+                    state.status === 'thinking' 
+                      ? `${borderColor} border-2 shadow-lg` 
+                      : state.status === 'complete'
+                        ? 'border-slate-600'
+                        : 'border-slate-700 opacity-50'
+                  }`}
+                >
+                  {/* Agent Header */}
+                  <div className={`px-3 py-2 flex items-center gap-2 ${
+                    state.status === 'thinking' ? `${color} bg-opacity-20` : 'bg-slate-800/50'
+                  }`}>
+                    <div className={`w-8 h-8 rounded-full ${color} flex items-center justify-center flex-shrink-0`}>
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
+                      </svg>
+                    </div>
+                    <span className={`font-medium ${textColor}`}>{agent}</span>
+                    {state.status === 'thinking' && (
+                      <div className="ml-auto flex items-center gap-1">
+                        <div className={`w-1.5 h-1.5 rounded-full ${color} animate-pulse`} />
+                        <span className="text-xs text-slate-400">thinking</span>
+                      </div>
+                    )}
+                    {state.status === 'complete' && (
+                      <div className="ml-auto">
+                        <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Agent Content */}
+                  <div className="p-3 bg-slate-900/30 min-h-[100px] max-h-[200px] overflow-y-auto">
+                    {state.messages.length === 0 ? (
+                      <p className="text-xs text-slate-500 italic">
+                        {state.status === 'thinking' ? 'Processing...' : 'Waiting...'}
+                      </p>
+                    ) : (
+                      <div className="text-xs text-slate-300 whitespace-pre-wrap break-words">
+                        {latestMessage.length > 300 ? (
+                          <details>
+                            <summary className="cursor-pointer text-blue-400 hover:text-blue-300 mb-2">
+                              {latestMessage.substring(0, 150)}... (expand)
+                            </summary>
+                            <div className="mt-2">{latestMessage}</div>
+                          </details>
+                        ) : (
+                          latestMessage
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
+
+      {/* Result Section */}
+      {(isComplete || finalResult) && (
+        <div className="border-t border-slate-700">
+          <div className="bg-slate-900/50 px-4 py-2 flex items-center gap-2">
+            <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <h4 className="font-medium text-green-400">Generated Result</h4>
+          </div>
+          <div className="p-4 bg-slate-900/20 max-h-[300px] overflow-y-auto">
+            {finalResult ? (
+              <div className="text-sm text-slate-300 whitespace-pre-wrap break-words font-mono">
+                {finalResult}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 italic">Processing result...</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="bg-slate-900/50 border-t border-slate-700 px-4 py-2 flex items-center justify-between text-xs text-slate-500">
         <span>Run ID: {runId.substring(0, 8)}...</span>
         <span>{messages.length} events</span>
       </div>
+      <div ref={messagesEndRef} />
     </div>
   );
 }

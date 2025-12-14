@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 
 from autogen_orchestrator import StorytellerGroupChat
-from config import LLMConfiguration, OpenAIConfig, ClaudeConfig, GeminiConfig, OpenRouterConfig, DeepSeekConfig, create_default_config_from_env
+from config import LLMConfiguration, OpenAIConfig, ClaudeConfig, GeminiConfig, OpenRouterConfig, DeepSeekConfig, AgentModelConfig, LLMProvider, create_default_config_from_env
 from models import StoryProject
 from pydantic import SecretStr
 from services.redis_streams import RedisStreamsService
@@ -72,6 +72,7 @@ class MultiAgentWorker:
         project_data: Dict[str, Any],
         api_key: str,
         provider: str = "openai",
+        model: str = "gpt-4o",
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -101,14 +102,41 @@ class MultiAgentWorker:
             project = StoryProject.model_validate(project_data)
             
             # Create config with user's API key for this request
-            # Map frontend provider names to backend config classes
+            # Map frontend provider names to backend config classes and LLMProvider enum
             provider_lower = provider.lower()
+            
+            # Map provider string to LLMProvider enum
+            provider_enum_map = {
+                "openai": LLMProvider.OPENAI,
+                "anthropic": LLMProvider.CLAUDE,
+                "claude": LLMProvider.CLAUDE,
+                "gemini": LLMProvider.GEMINI,
+                "openrouter": LLMProvider.OPENROUTER,
+                "deepseek": LLMProvider.DEEPSEEK,
+            }
+            llm_provider = provider_enum_map.get(provider_lower, LLMProvider.OPENAI)
+            
+            # Create agent model config - all agents use the same provider/model for now
+            agent_models = AgentModelConfig(
+                architect_provider=llm_provider,
+                architect_model=model,
+                profiler_provider=llm_provider,
+                profiler_model=model,
+                strategist_provider=llm_provider,
+                strategist_model=model,
+                writer_provider=llm_provider,
+                writer_model=model,
+                critic_provider=llm_provider,
+                critic_model=model,
+            )
+            
             request_config = LLMConfiguration(
                 openai=OpenAIConfig(api_key=SecretStr(api_key)) if provider_lower == "openai" else None,
                 claude=ClaudeConfig(api_key=SecretStr(api_key)) if provider_lower in ["anthropic", "claude"] else None,
                 gemini=GeminiConfig(api_key=SecretStr(api_key)) if provider_lower == "gemini" else None,
                 openrouter=OpenRouterConfig(api_key=SecretStr(api_key)) if provider_lower == "openrouter" else None,
                 deepseek=DeepSeekConfig(api_key=SecretStr(api_key)) if provider_lower == "deepseek" else None,
+                agent_models=agent_models,
             )
             
             # Create group chat with event callback and user's config
@@ -249,6 +277,7 @@ async def generate(request: GenerateRequest):
         project_data=project_data,
         api_key=request.api_key,
         provider=request.provider,
+        model=request.model,
     ))
 
     return GenerateResponse(
