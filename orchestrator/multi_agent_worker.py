@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 
 from autogen_orchestrator import StorytellerGroupChat
-from config import LLMConfiguration, OpenAIConfig, create_default_config_from_env
+from config import LLMConfiguration, OpenAIConfig, ClaudeConfig, GeminiConfig, OpenRouterConfig, DeepSeekConfig, create_default_config_from_env
 from models import StoryProject
 from pydantic import SecretStr
 from services.redis_streams import RedisStreamsService
@@ -101,8 +101,14 @@ class MultiAgentWorker:
             project = StoryProject.model_validate(project_data)
             
             # Create config with user's API key for this request
+            # Map frontend provider names to backend config classes
+            provider_lower = provider.lower()
             request_config = LLMConfiguration(
-                openai=OpenAIConfig(api_key=SecretStr(api_key)) if provider == "openai" else None,
+                openai=OpenAIConfig(api_key=SecretStr(api_key)) if provider_lower == "openai" else None,
+                claude=ClaudeConfig(api_key=SecretStr(api_key)) if provider_lower in ["anthropic", "claude"] else None,
+                gemini=GeminiConfig(api_key=SecretStr(api_key)) if provider_lower == "gemini" else None,
+                openrouter=OpenRouterConfig(api_key=SecretStr(api_key)) if provider_lower == "openrouter" else None,
+                deepseek=DeepSeekConfig(api_key=SecretStr(api_key)) if provider_lower == "deepseek" else None,
             )
             
             # Create group chat with event callback and user's config
