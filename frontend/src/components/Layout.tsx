@@ -48,7 +48,7 @@ export function Layout({ children }: LayoutProps) {
             </div>
 
             <div className="flex items-center gap-4">
-              <span className="text-sm text-slate-400">v2.1</span>
+              <span className="text-sm text-slate-400">v2.2</span>
               <button
                 onClick={() => setIsSettingsOpen(true)}
                 className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center hover:opacity-90 transition-opacity"

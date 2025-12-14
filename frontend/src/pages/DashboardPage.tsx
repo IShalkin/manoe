@@ -56,8 +56,9 @@ export function DashboardPage() {
     }
     
     const apiKey = getProviderKey(architectConfig.provider);
+    console.log('[DashboardPage] Architect provider:', architectConfig.provider, 'API key present:', !!apiKey);
     if (!apiKey) {
-      setError(`No API key found for ${architectConfig.provider}. Please add your API key in Settings.`);
+      setError(`No API key found for "${architectConfig.provider}". The Architect agent is configured to use ${architectConfig.provider}. Please either add your ${architectConfig.provider} API key in Settings, or change the Architect's provider in "Agent Configuration" tab.`);
       setIsGenerating(false);
       return;
     }
