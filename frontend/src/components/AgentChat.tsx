@@ -1,5 +1,71 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 
+// Helper function to format JSON content as readable text
+function formatAgentContent(content: string): string {
+  try {
+    // Try to parse as JSON
+    const parsed = JSON.parse(content);
+    return formatJsonAsReadable(parsed);
+  } catch {
+    // If not JSON, check for markdown code blocks
+    if (content.includes('```json')) {
+      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1]);
+          return formatJsonAsReadable(parsed);
+        } catch {
+          // Fall through to return original
+        }
+      }
+    }
+    // Return as-is if not JSON
+    return content;
+  }
+}
+
+function formatJsonAsReadable(obj: Record<string, unknown>): string {
+  const lines: string[] = [];
+  
+  for (const [key, value] of Object.entries(obj)) {
+    const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    
+    if (Array.isArray(value)) {
+      lines.push(`**${formattedKey}:**`);
+      value.forEach((item, i) => {
+        if (typeof item === 'object' && item !== null) {
+          lines.push(`  ${i + 1}. ${formatObjectBrief(item as Record<string, unknown>)}`);
+        } else {
+          lines.push(`  - ${item}`);
+        }
+      });
+    } else if (typeof value === 'object' && value !== null) {
+      lines.push(`**${formattedKey}:**`);
+      lines.push(formatObjectBrief(value as Record<string, unknown>));
+    } else if (typeof value === 'boolean') {
+      lines.push(`**${formattedKey}:** ${value ? 'Yes' : 'No'}`);
+    } else if (typeof value === 'number') {
+      lines.push(`**${formattedKey}:** ${value}`);
+    } else if (value) {
+      lines.push(`**${formattedKey}:** ${value}`);
+    }
+  }
+  
+  return lines.join('\n');
+}
+
+function formatObjectBrief(obj: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'string' && value.length < 100) {
+      parts.push(`${key}: ${value}`);
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      parts.push(`${key}: ${value}`);
+    }
+  }
+  return parts.slice(0, 3).join(' | ');
+}
+
 interface AgentMessage {
   id: string;
   type: string;
@@ -318,16 +384,19 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
                       </p>
                     ) : (
                       <div className="text-xs text-slate-300 whitespace-pre-wrap break-words">
-                        {latestMessage.length > 300 ? (
-                          <details>
-                            <summary className="cursor-pointer text-blue-400 hover:text-blue-300 mb-2">
-                              {latestMessage.substring(0, 150)}... (expand)
-                            </summary>
-                            <div className="mt-2">{latestMessage}</div>
-                          </details>
-                        ) : (
-                          latestMessage
-                        )}
+                        {(() => {
+                          const formattedContent = formatAgentContent(latestMessage);
+                          return formattedContent.length > 400 ? (
+                            <details>
+                              <summary className="cursor-pointer text-blue-400 hover:text-blue-300 mb-2">
+                                {formattedContent.substring(0, 200)}... (expand)
+                              </summary>
+                              <div className="mt-2">{formattedContent}</div>
+                            </details>
+                          ) : (
+                            formattedContent
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
@@ -337,6 +406,60 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
           </div>
         )}
       </div>
+
+      {/* Conversation Flow - Shows all agent messages in order */}
+      {messages.filter(m => m.type === 'agent_message' && m.data.content).length > 0 && (
+        <div className="border-t border-slate-700">
+          <details className="group">
+            <summary className="bg-slate-900/50 px-4 py-2 flex items-center gap-2 cursor-pointer hover:bg-slate-800/50 transition-colors">
+              <svg className="w-5 h-5 text-purple-400 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <h4 className="font-medium text-purple-400">Conversation Flow</h4>
+              <span className="text-xs text-slate-500 ml-auto">
+                {messages.filter(m => m.type === 'agent_message').length} messages
+              </span>
+            </summary>
+            <div className="p-4 bg-slate-900/20 max-h-[400px] overflow-y-auto space-y-3">
+              {messages
+                .filter(m => m.type === 'agent_message' && m.data.content)
+                .map((msg, idx) => {
+                  const agent = msg.data.agent || 'System';
+                  const color = AGENT_COLORS[agent] || AGENT_COLORS.System;
+                  const textColor = AGENT_TEXT_COLORS[agent] || AGENT_TEXT_COLORS.System;
+                  const content = msg.data.content || '';
+                  
+                  return (
+                    <div key={msg.id || idx} className="flex gap-3 p-3 bg-slate-800/30 rounded-lg">
+                      <div className={`w-8 h-8 rounded-full ${color} flex items-center justify-center flex-shrink-0`}>
+                        <span className="text-xs font-bold text-white">{idx + 1}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`font-medium text-sm ${textColor}`}>{agent}</span>
+                          <span className="text-xs text-slate-500">Step {idx + 1}</span>
+                        </div>
+                        <div className="text-xs text-slate-300 whitespace-pre-wrap break-words">
+                          {(() => {
+                            const formatted = formatAgentContent(content);
+                            return formatted.length > 300 ? (
+                              <details>
+                                <summary className="cursor-pointer text-blue-400 hover:text-blue-300">
+                                  {formatted.substring(0, 200)}... (expand)
+                                </summary>
+                                <div className="mt-2">{formatted}</div>
+                              </details>
+                            ) : formatted;
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </details>
+        </div>
+      )}
 
       {/* Result Section */}
       {(isComplete || finalResult) && (
@@ -349,8 +472,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
           </div>
           <div className="p-4 bg-slate-900/20 max-h-[300px] overflow-y-auto">
             {finalResult ? (
-              <div className="text-sm text-slate-300 whitespace-pre-wrap break-words font-mono">
-                {finalResult}
+              <div className="text-sm text-slate-300 whitespace-pre-wrap break-words">
+                {formatAgentContent(finalResult)}
               </div>
             ) : (
               <p className="text-sm text-slate-500 italic">Processing result...</p>

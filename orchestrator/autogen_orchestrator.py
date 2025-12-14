@@ -863,6 +863,155 @@ Output the revised scene as valid JSON.
             ],
         }
 
+    async def run_demo_generation(self, project: StoryProject) -> Dict[str, Any]:
+        """
+        Run a demo generation that involves all 5 agents in a simplified flow.
+        This gives users visibility into the multi-agent collaboration without
+        the full cost/time of run_full_generation.
+        
+        Flow:
+        1. Architect: Creates initial narrative concept
+        2. Profiler: Suggests character archetypes
+        3. Strategist: Proposes story structure
+        4. Writer: Drafts opening scene
+        5. Critic: Reviews and provides feedback
+        """
+        self.state = GenerationState(
+            phase=GenerationPhase.GENESIS,
+            project_id=project.seed_idea[:20].replace(" ", "_"),
+        )
+
+        self._emit_event("phase_start", {"phase": "demo"})
+
+        results = {}
+
+        # 1. Architect creates narrative concept
+        architect_prompt = f"""
+## Project Configuration
+
+**Seed Idea:** {project.seed_idea}
+**Moral Compass:** {project.moral_compass.value}
+**Target Audience:** {project.target_audience}
+**Core Themes:** {", ".join(project.theme_core) if project.theme_core else "Not specified"}
+
+Create a brief narrative concept including:
+- A compelling premise (2-3 sentences)
+- The central conflict
+- The emotional core of the story
+- Key thematic elements
+
+Output as JSON with fields: premise, conflict, emotional_core, themes (array).
+"""
+        architect_response = await self._call_agent(self.architect, architect_prompt)
+        architect_msg = self._parse_agent_message("Architect", architect_response)
+        self.state.messages.append(architect_msg)
+        results["architect"] = architect_msg.content
+
+        # 2. Profiler suggests character archetypes
+        profiler_prompt = f"""
+Based on this narrative concept:
+{json.dumps(architect_msg.content, indent=2) if isinstance(architect_msg.content, dict) else architect_msg.content}
+
+Suggest 2-3 main character archetypes that would serve this story well.
+For each character, provide:
+- Role (protagonist, antagonist, mentor, etc.)
+- Core motivation
+- Key psychological trait
+- Potential arc
+
+Output as JSON with field: characters (array of objects).
+"""
+        profiler_response = await self._call_agent(self.profiler, profiler_prompt)
+        profiler_msg = self._parse_agent_message("Profiler", profiler_response)
+        self.state.messages.append(profiler_msg)
+        results["profiler"] = profiler_msg.content
+
+        # 3. Strategist proposes story structure
+        strategist_prompt = f"""
+Given this narrative concept and characters:
+
+Concept: {json.dumps(architect_msg.content, indent=2) if isinstance(architect_msg.content, dict) else architect_msg.content}
+
+Characters: {json.dumps(profiler_msg.content, indent=2) if isinstance(profiler_msg.content, dict) else profiler_msg.content}
+
+Propose a story structure including:
+- Opening hook
+- Key turning points (3 major beats)
+- Climax setup
+- Resolution approach
+
+Output as JSON with fields: opening_hook, turning_points (array), climax, resolution.
+"""
+        strategist_response = await self._call_agent(self.strategist, strategist_prompt)
+        strategist_msg = self._parse_agent_message("Strategist", strategist_response)
+        self.state.messages.append(strategist_msg)
+        results["strategist"] = strategist_msg.content
+
+        # 4. Writer drafts opening scene
+        writer_prompt = f"""
+Using the narrative foundation:
+
+Concept: {json.dumps(architect_msg.content, indent=2) if isinstance(architect_msg.content, dict) else architect_msg.content}
+
+Characters: {json.dumps(profiler_msg.content, indent=2) if isinstance(profiler_msg.content, dict) else profiler_msg.content}
+
+Structure: {json.dumps(strategist_msg.content, indent=2) if isinstance(strategist_msg.content, dict) else strategist_msg.content}
+
+Write a compelling opening scene (200-300 words) that:
+- Hooks the reader immediately
+- Introduces the protagonist
+- Establishes the tone and setting
+- Hints at the central conflict
+
+Output as JSON with fields: scene_title, setting, narrative_text.
+"""
+        writer_response = await self._call_agent(self.writer, writer_prompt)
+        writer_msg = self._parse_agent_message("Writer", writer_response)
+        self.state.messages.append(writer_msg)
+        results["writer"] = writer_msg.content
+
+        # 5. Critic reviews everything
+        critic_prompt = f"""
+Review the collaborative output from all agents:
+
+**Architect's Concept:**
+{json.dumps(architect_msg.content, indent=2) if isinstance(architect_msg.content, dict) else architect_msg.content}
+
+**Profiler's Characters:**
+{json.dumps(profiler_msg.content, indent=2) if isinstance(profiler_msg.content, dict) else profiler_msg.content}
+
+**Strategist's Structure:**
+{json.dumps(strategist_msg.content, indent=2) if isinstance(strategist_msg.content, dict) else strategist_msg.content}
+
+**Writer's Opening:**
+{json.dumps(writer_msg.content, indent=2) if isinstance(writer_msg.content, dict) else writer_msg.content}
+
+Provide a brief assessment:
+1. Overall coherence (1-10)
+2. Strengths of the collaboration
+3. Areas for improvement
+4. Final verdict: approved or needs revision
+
+Output as JSON with fields: overall_score, strengths (array), improvements (array), approved (bool), summary.
+"""
+        critic_response = await self._call_agent(self.critic, critic_prompt)
+        critic_msg = self._parse_agent_message("Critic", critic_response)
+        self.state.messages.append(critic_msg)
+        results["critic"] = critic_msg.content
+
+        self._emit_event("phase_complete", {
+            "phase": "demo",
+            "result": results,
+        })
+
+        return {
+            "demo_result": results,
+            "messages": [
+                {"agent": m.from_agent, "type": m.type, "content": str(m.content)[:500]}
+                for m in self.state.messages
+            ],
+        }
+
     async def run_full_generation(
         self,
         project: StoryProject,

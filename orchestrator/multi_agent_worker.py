@@ -156,9 +156,9 @@ class MultiAgentWorker:
                 }
             )
 
-            # Run Genesis phase only for now (quick demo)
-            # Full generation would use run_full_generation
-            result = await group_chat.run_genesis_phase(project)
+            # Run demo generation that involves all 5 agents
+            # This gives users visibility into the multi-agent flow
+            result = await group_chat.run_demo_generation(project)
 
             # Flush all pending events before publishing completion
             # This ensures agent_complete events arrive before generation_complete
