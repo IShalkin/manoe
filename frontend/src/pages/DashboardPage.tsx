@@ -1,8 +1,45 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { useSettings } from '../hooks/useSettings';
-import { useProjects, StoredProject } from '../hooks/useProjects';
+import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
 import { MoralCompass } from '../types';
 import { AgentChat } from '../components/AgentChat';
+
+// Helper to format result as readable text
+function formatResultAsMarkdown(result: ProjectResult): string {
+  if (result.error) {
+    return `**Error:** ${result.error}`;
+  }
+  
+  const np = result.narrativePossibility;
+  if (!np) {
+    return '*No narrative data available*';
+  }
+  
+  const sections: string[] = [];
+  
+  if (np.plot_summary) {
+    sections.push(`## Plot Summary\n${np.plot_summary}`);
+  }
+  
+  if (np.setting_description) {
+    sections.push(`## Setting\n${np.setting_description}`);
+  }
+  
+  if (np.main_conflict) {
+    sections.push(`## Main Conflict\n${np.main_conflict}`);
+  }
+  
+  if (np.potential_characters && np.potential_characters.length > 0) {
+    sections.push(`## Characters\n${np.potential_characters.map(c => `- ${c}`).join('\n')}`);
+  }
+  
+  if (np.thematic_elements && np.thematic_elements.length > 0) {
+    sections.push(`## Themes\n${np.thematic_elements.map(t => `- ${t}`).join('\n')}`);
+  }
+  
+  return sections.join('\n\n') || '*No content generated yet*';
+}
 
 // Multi-agent orchestrator URL (separate subdomain)
 const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
@@ -73,6 +110,22 @@ export function DashboardPage() {
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [showAgentChat, setShowAgentChat] = useState(false);
+  const [viewingProject, setViewingProject] = useState<StoredProject | null>(null);
+
+  // Open result viewer for completed/error projects
+  const openResultViewer = (project: StoredProject) => {
+    setViewingProject(project);
+  };
+
+  // Continue an in-progress generation
+  const continueGeneration = (project: StoredProject) => {
+    if (project.runId) {
+      setCurrentRunId(project.runId);
+      setCurrentProjectId(project.id);
+      setShowAgentChat(true);
+    }
+  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -380,12 +433,119 @@ export function DashboardPage() {
         </div>
       )}
 
+      {/* Result Viewer Modal */}
+      {viewingProject && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden border border-slate-700 flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                  viewingProject.status === 'completed' ? 'bg-green-600' :
+                  viewingProject.status === 'error' ? 'bg-red-600' :
+                  'bg-slate-600'
+                }`}>
+                  {viewingProject.status === 'completed' ? (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : viewingProject.status === 'error' ? (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  )}
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold">{viewingProject.name}</h2>
+                  <p className="text-xs text-slate-400">
+                    {viewingProject.status === 'completed' ? 'Generation Complete' : 
+                     viewingProject.status === 'error' ? 'Generation Failed' : 'View Result'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingProject(null)}
+                className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700 rounded-lg"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Project Info */}
+            <div className="px-4 py-3 bg-slate-900/50 border-b border-slate-700">
+              <p className="text-sm text-slate-400 italic">"{viewingProject.seedIdea}"</p>
+              <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                <span>Created: {new Date(viewingProject.createdAt).toLocaleDateString()}</span>
+                <span>Moral Compass: {viewingProject.moralCompass}</span>
+                {viewingProject.themes && <span>Themes: {viewingProject.themes}</span>}
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {viewingProject.result ? (
+                <div className="prose prose-invert prose-sm max-w-none">
+                  <ReactMarkdown
+                    components={{
+                      h2: ({ children }) => <h2 className="text-xl font-bold text-white mt-6 mb-3 first:mt-0">{children}</h2>,
+                      p: ({ children }) => <p className="text-slate-300 mb-4 leading-relaxed">{children}</p>,
+                      ul: ({ children }) => <ul className="list-disc list-inside mb-4 space-y-1">{children}</ul>,
+                      li: ({ children }) => <li className="text-slate-300">{children}</li>,
+                      strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
+                    }}
+                  >
+                    {formatResultAsMarkdown(viewingProject.result)}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <svg className="w-16 h-16 text-slate-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-slate-500">No result data available</p>
+                  <p className="text-sm text-slate-600 mt-1">This project hasn't been generated yet</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-700 bg-slate-800/50 flex gap-3">
+              <button
+                onClick={() => {
+                  setViewingProject(null);
+                  openEditProjectModal(viewingProject);
+                }}
+                className="flex-1 px-4 py-2 border border-slate-600 rounded-lg hover:bg-slate-700 transition-colors text-sm"
+              >
+                Regenerate
+              </button>
+              <button
+                onClick={() => setViewingProject(null)}
+                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-500 transition-colors text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {projects.map((project) => (
           <div 
             key={project.id} 
-            className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 hover:border-primary-500/50 transition-colors cursor-pointer"
-            onClick={() => openEditProjectModal(project)}
+            className={`bg-slate-800/50 border rounded-xl p-6 transition-colors ${
+              project.status === 'completed' ? 'border-green-500/30 hover:border-green-500/50' :
+              project.status === 'generating' ? 'border-amber-500/30 hover:border-amber-500/50' :
+              project.status === 'error' ? 'border-red-500/30 hover:border-red-500/50' :
+              'border-slate-700 hover:border-primary-500/50'
+            }`}
           >
             <div className="flex items-start justify-between mb-3">
               <h3 className="font-semibold text-lg">{project.name}</h3>
@@ -401,9 +561,59 @@ export function DashboardPage() {
                 </span>
               </div>
             </div>
-            <p className="text-sm text-slate-400 line-clamp-2 mb-2">
+            <p className="text-sm text-slate-400 line-clamp-2 mb-4">
               {project.seedIdea.substring(0, 100)}...
             </p>
+            
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 mb-3">
+              {(project.status === 'completed' || project.status === 'error') && (
+                <button
+                  onClick={() => openResultViewer(project)}
+                  className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 transition-colors flex items-center justify-center gap-1"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  View
+                </button>
+              )}
+              {project.status === 'generating' && project.runId && (
+                <button
+                  onClick={() => continueGeneration(project)}
+                  className="flex-1 px-3 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-500 transition-colors flex items-center justify-center gap-1"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Continue
+                </button>
+              )}
+              {project.status === 'pending' && (
+                <button
+                  onClick={() => openEditProjectModal(project)}
+                  className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 transition-colors flex items-center justify-center gap-1"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Generate
+                </button>
+              )}
+              <button
+                onClick={() => openEditProjectModal(project)}
+                className="px-3 py-2 border border-slate-600 rounded-lg text-sm hover:bg-slate-700 transition-colors"
+                title="Edit & Regenerate"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+              </button>
+            </div>
+            
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-500">
                 {new Date(project.createdAt).toLocaleDateString()}
