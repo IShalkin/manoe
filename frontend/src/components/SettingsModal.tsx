@@ -105,6 +105,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             {provider.id === 'gemini' && 'AI...'}
                             {provider.id === 'anthropic' && 'sk-ant-...'}
                             {provider.id === 'deepseek' && 'sk-...'}
+                            {provider.id === 'venice' && 'vvv-...'}
                           </p>
                         </div>
                       </div>
