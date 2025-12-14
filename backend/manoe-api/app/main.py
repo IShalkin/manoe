@@ -49,13 +49,20 @@ class ModelsResponse(BaseModel):
     models: Optional[list[ModelInfo]] = None
     error: Optional[str] = None
 
-# Anthropic models (they don't have a models endpoint)
+# Anthropic models (they don't have a models endpoint, so we provide a curated list)
+# Note: Not all models may be available for all API keys
 ANTHROPIC_MODELS = [
-    ModelInfo(id="claude-3-5-sonnet-20241022", name="Claude 3.5 Sonnet (Latest)", context_length=200000, description="Most intelligent model"),
-    ModelInfo(id="claude-3-5-haiku-20241022", name="Claude 3.5 Haiku (Latest)", context_length=200000, description="Fast and cost-effective"),
+    # Claude 4 models (latest)
+    ModelInfo(id="claude-sonnet-4-20250514", name="Claude Sonnet 4", context_length=200000, description="Latest Claude 4 Sonnet model"),
+    ModelInfo(id="claude-opus-4-20250514", name="Claude Opus 4", context_length=200000, description="Latest Claude 4 Opus model"),
+    # Claude 3.5 models
+    ModelInfo(id="claude-3-5-sonnet-20241022", name="Claude 3.5 Sonnet (Oct 2024)", context_length=200000, description="Updated Claude 3.5 Sonnet with computer use"),
+    ModelInfo(id="claude-3-5-sonnet-20240620", name="Claude 3.5 Sonnet (Jun 2024)", context_length=200000, description="Original Claude 3.5 Sonnet"),
+    ModelInfo(id="claude-3-5-haiku-20241022", name="Claude 3.5 Haiku", context_length=200000, description="Fast and cost-effective"),
+    # Claude 3 models
     ModelInfo(id="claude-3-opus-20240229", name="Claude 3 Opus", context_length=200000, description="Powerful model for complex tasks"),
     ModelInfo(id="claude-3-sonnet-20240229", name="Claude 3 Sonnet", context_length=200000, description="Balance of intelligence and speed"),
-    ModelInfo(id="claude-3-haiku-20240307", name="Claude 3 Haiku", context_length=200000, description="Fastest model"),
+    ModelInfo(id="claude-3-haiku-20240307", name="Claude 3 Haiku", context_length=200000, description="Fastest Claude 3 model"),
 ]
 
 STORYTELLER_SYSTEM_PROMPT = """You are a master storyteller and narrative architect. Your role is to create compelling, psychologically rich narratives based on the user's seed idea.

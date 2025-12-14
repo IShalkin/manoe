@@ -95,11 +95,17 @@ export const MODELS: Record<LLMProvider, LLMModel[]> = {
     { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', provider: 'gemini', contextWindow: 1000000, inputPrice: 0.075, outputPrice: 0.3, capabilities: ['vision'] },
   ],
   anthropic: [
+    // Claude 4 models (latest)
     { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision', 'computer_use'], recommended: ['architect', 'critic'] },
+    { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', provider: 'anthropic', contextWindow: 200000, inputPrice: 15, outputPrice: 75, capabilities: ['vision', 'computer_use'], recommended: ['strategist'] },
+    // Claude 3.5 models
     { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Oct 2024)', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision', 'computer_use'], recommended: ['architect', 'critic'] },
     { id: 'claude-3-5-sonnet-20240620', name: 'Claude 3.5 Sonnet (Jun 2024)', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision'], recommended: ['architect', 'critic'] },
     { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', provider: 'anthropic', contextWindow: 200000, inputPrice: 0.8, outputPrice: 4, capabilities: ['vision'], recommended: ['writer'] },
+    // Claude 3 models
     { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'anthropic', contextWindow: 200000, inputPrice: 15, outputPrice: 75, capabilities: ['vision'], recommended: ['strategist'] },
+    { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision'] },
+    { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', provider: 'anthropic', contextWindow: 200000, inputPrice: 0.25, outputPrice: 1.25, capabilities: ['vision'], recommended: ['writer'] },
   ],
   deepseek: [
     { id: 'deepseek-chat', name: 'DeepSeek V3', provider: 'deepseek', contextWindow: 64000, inputPrice: 0.14, outputPrice: 0.28, capabilities: ['function_calling'], recommended: ['writer', 'profiler'] },
