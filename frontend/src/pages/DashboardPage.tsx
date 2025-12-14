@@ -5,6 +5,15 @@ import { useSettings } from '../hooks/useSettings';
 import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
 import { MoralCompass } from '../types';
 
+// Helper to format date as dd/mm/yyyy
+function formatDateDDMMYYYY(isoDate: string): string {
+  const date = new Date(isoDate);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
 // Helper to format any value as readable Markdown
 function formatValueAsMarkdown(value: unknown, depth = 0): string {
   if (value === null || value === undefined) {
@@ -507,7 +516,7 @@ export function DashboardPage() {
             <div className="px-4 py-3 bg-slate-900/50 border-b border-slate-700">
               <p className="text-sm text-slate-400 italic">"{viewingProject.seedIdea}"</p>
               <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
-                <span>Created: {new Date(viewingProject.createdAt).toLocaleDateString()}</span>
+                <span>Created: {formatDateDDMMYYYY(viewingProject.createdAt)}</span>
                 <span>Moral Compass: {viewingProject.moralCompass}</span>
                 {viewingProject.themes && <span>Themes: {viewingProject.themes}</span>}
               </div>
@@ -681,7 +690,7 @@ export function DashboardPage() {
             
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-500">
-                {new Date(project.createdAt).toLocaleDateString()}
+                {formatDateDDMMYYYY(project.createdAt)}
               </span>
               <button 
                 onClick={async (e) => {
