@@ -5,40 +5,88 @@ import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects'
 import { MoralCompass } from '../types';
 import { AgentChat } from '../components/AgentChat';
 
+// Helper to format any value as readable Markdown
+function formatValueAsMarkdown(value: unknown, depth = 0): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  
+  if (typeof value === 'string') {
+    return value;
+  }
+  
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '';
+    // Check if array contains simple strings
+    if (value.every(item => typeof item === 'string')) {
+      return value.map(item => `- ${item}`).join('\n');
+    }
+    // Complex array items
+    return value.map((item, i) => `### Item ${i + 1}\n${formatValueAsMarkdown(item, depth + 1)}`).join('\n\n');
+  }
+  
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const sections: string[] = [];
+    
+    for (const [key, val] of Object.entries(obj)) {
+      if (val === null || val === undefined || val === '') continue;
+      
+      // Format key as title (snake_case to Title Case)
+      const title = key
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+      
+      const content = formatValueAsMarkdown(val, depth + 1);
+      if (content) {
+        if (depth === 0) {
+          sections.push(`## ${title}\n${content}`);
+        } else {
+          sections.push(`**${title}:** ${content}`);
+        }
+      }
+    }
+    
+    return sections.join('\n\n');
+  }
+  
+  return String(value);
+}
+
 // Helper to format result as readable text
 function formatResultAsMarkdown(result: ProjectResult): string {
   if (result.error) {
     return `**Error:** ${result.error}`;
   }
   
+  // Try narrativePossibility first (camelCase from frontend)
   const np = result.narrativePossibility;
-  if (!np) {
-    return '*No narrative data available*';
+  if (np && typeof np === 'object' && Object.keys(np).length > 0) {
+    return formatValueAsMarkdown(np);
   }
   
-  const sections: string[] = [];
-  
-  if (np.plot_summary) {
-    sections.push(`## Plot Summary\n${np.plot_summary}`);
+  // Try narrative_possibility (snake_case from backend)
+  const npSnake = (result as Record<string, unknown>)['narrative_possibility'];
+  if (npSnake && typeof npSnake === 'object' && Object.keys(npSnake as object).length > 0) {
+    return formatValueAsMarkdown(npSnake);
   }
   
-  if (np.setting_description) {
-    sections.push(`## Setting\n${np.setting_description}`);
+  // Try other common result keys
+  const commonKeys = ['story', 'final_story', 'text', 'content', 'output', 'draft', 'result'];
+  for (const key of commonKeys) {
+    const val = (result as Record<string, unknown>)[key];
+    if (val) {
+      return formatValueAsMarkdown(val);
+    }
   }
   
-  if (np.main_conflict) {
-    sections.push(`## Main Conflict\n${np.main_conflict}`);
+  // If result has any other keys, format them
+  const resultKeys = Object.keys(result).filter(k => k !== 'error');
+  if (resultKeys.length > 0) {
+    return formatValueAsMarkdown(result);
   }
   
-  if (np.potential_characters && np.potential_characters.length > 0) {
-    sections.push(`## Characters\n${np.potential_characters.map(c => `- ${c}`).join('\n')}`);
-  }
-  
-  if (np.thematic_elements && np.thematic_elements.length > 0) {
-    sections.push(`## Themes\n${np.thematic_elements.map(t => `- ${t}`).join('\n')}`);
-  }
-  
-  return sections.join('\n\n') || '*No content generated yet*';
+  return '*No content generated yet*';
 }
 
 // Multi-agent orchestrator URL (separate subdomain)
