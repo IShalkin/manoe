@@ -20,19 +20,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
+    let isMounted = true;
+    
+    const initializeAuth = async () => {
+      try {
+        // Check if we have OAuth callback parameters in the URL (code or access_token)
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const searchParams = new URLSearchParams(window.location.search);
+        const hasOAuthParams = hashParams.has('access_token') || searchParams.has('code');
+        
+        if (hasOAuthParams) {
+          console.log('[AuthContext] OAuth callback detected, processing...');
+          // Clear the URL params after processing to avoid re-processing on refresh
+          // Supabase should handle this automatically, but we log for debugging
+        }
+        
+        // Get the current session
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('[AuthContext] Error getting session:', error);
+        }
+        
+        if (isMounted) {
+          setSession(session);
+          setUser(session?.user ?? null);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('[AuthContext] Error initializing auth:', error);
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+    
+    // Initialize auth
+    initializeAuth();
+    
+    // Set up auth state change listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      console.log('[AuthContext] Auth state changed:', _event);
+      if (isMounted) {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      }
     });
+    
+    // Fallback timeout to prevent infinite loading (10 seconds)
+    const timeout = setTimeout(() => {
+      if (isMounted && loading) {
+        console.warn('[AuthContext] Auth initialization timeout, forcing loading to false');
+        setLoading(false);
+      }
+    }, 10000);
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const signInWithEmail = useCallback(async (email: string, password: string) => {
