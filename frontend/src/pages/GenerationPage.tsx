@@ -234,27 +234,27 @@ export function GenerationPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}
-      <header className="bg-slate-900/80 border-b border-slate-700 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
+      <header className="bg-slate-900/80 border-b border-slate-700 px-3 sm:px-6 py-3 sm:py-4">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
             <button
               onClick={() => navigate('/')}
-              className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700 rounded-lg"
+              className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700 rounded-lg flex-shrink-0"
               title="Back to Dashboard"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
             </button>
-            <div>
-              <h1 className="text-xl font-bold">{project.name}</h1>
-              <p className="text-sm text-slate-400 truncate max-w-md">
-                {project.seedIdea.substring(0, 80)}...
+            <div className="min-w-0 flex-1">
+              <h1 className="text-lg sm:text-xl font-bold truncate">{project.name}</h1>
+              <p className="text-xs sm:text-sm text-slate-400 truncate">
+                {project.seedIdea.substring(0, 60)}...
               </p>
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
             {project.status === 'completed' && (
               <button
                 onClick={startNewGeneration}
@@ -316,7 +316,7 @@ export function GenerationPage() {
       )}
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
         {isStarting && !runId ? (
           <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
             <div className="w-16 h-16 rounded-full bg-slate-700/50 flex items-center justify-center mx-auto mb-4">

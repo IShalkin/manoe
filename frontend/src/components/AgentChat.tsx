@@ -788,15 +788,15 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   return (
     <div className="bg-slate-800/30 border border-slate-700 rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="bg-slate-900/80 border-b border-slate-700 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h3 className="font-bold text-lg">Multi-Agent Orchestration</h3>
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
+      <div className="bg-slate-900/80 border-b border-slate-700 px-3 sm:px-4 py-2 sm:py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0">
+        <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+          <h3 className="font-bold text-base sm:text-lg">Multi-Agent Orchestration</h3>
+          <div className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs font-medium ${
             isConnected ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 
             isComplete ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 
             'bg-red-500/20 text-red-400 border border-red-500/30'
           }`}>
-            <div className={`w-2 h-2 rounded-full ${
+            <div className={`w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full ${
               isConnected ? 'bg-green-400 animate-pulse' : 
               isComplete ? 'bg-blue-400' : 
               'bg-red-400'
@@ -804,8 +804,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
             {isConnected ? 'Live' : isComplete ? 'Complete' : 'Disconnected'}
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-slate-400">
+        <div className="flex items-center gap-2 sm:gap-4">
+          <span className="text-xs sm:text-sm text-slate-400">
             Phase: <span className="text-white font-medium">{currentPhase}</span>
           </span>
           {onClose && (
@@ -820,13 +820,13 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
 
       {/* Round Switcher */}
       {rounds.length > 1 && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-slate-800/50 border-b border-slate-700">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 bg-slate-800/50 border-b border-slate-700">
           <span className="text-xs text-slate-400 font-medium">Rounds:</span>
           
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap">
             <button
               onClick={() => setSelectedRound(null)}
-              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+              className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-medium transition-all ${
                 selectedRound === null 
                   ? 'bg-blue-500 text-white' 
                   : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
@@ -839,7 +839,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
               <button
                 key={round}
                 onClick={() => setSelectedRound(round)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-medium transition-all ${
                   selectedRound === round 
                     ? 'bg-blue-500 text-white' 
                     : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
@@ -853,7 +853,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
           <div className="ml-auto flex items-center gap-2">
             <button
               onClick={togglePlayback}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-medium transition-all ${
                 isPlaying 
                   ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' 
                   : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
@@ -888,7 +888,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       )}
 
       {/* Agent Grid */}
-      <div className="p-4">
+      <div className="p-2 sm:p-4">
         {messages.length === 0 ? (
           <div className="flex items-center justify-center py-16">
             <div className="text-center">
