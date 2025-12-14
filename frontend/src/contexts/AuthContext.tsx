@@ -21,18 +21,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let isMounted = true;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     
     const initializeAuth = async () => {
       try {
-        // Check if we have OAuth callback parameters in the URL (code or access_token)
+        // Check if we have OAuth callback parameters in the URL
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
         const searchParams = new URLSearchParams(window.location.search);
-        const hasOAuthParams = hashParams.has('access_token') || searchParams.has('code');
+        const code = searchParams.get('code');
+        const accessToken = hashParams.get('access_token');
         
-        if (hasOAuthParams) {
-          console.log('[AuthContext] OAuth callback detected, processing...');
-          // Clear the URL params after processing to avoid re-processing on refresh
-          // Supabase should handle this automatically, but we log for debugging
+        console.log('[AuthContext] Initializing auth...', {
+          hasCode: !!code,
+          hasAccessToken: !!accessToken,
+          url: window.location.href
+        });
+        
+        // If we have a code parameter, explicitly exchange it for a session
+        // This is more reliable than relying on Supabase's auto-detection on mobile
+        if (code) {
+          console.log('[AuthContext] OAuth code detected, exchanging for session...');
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          
+          if (error) {
+            console.error('[AuthContext] Error exchanging code for session:', error);
+            // Clear the URL params to prevent re-processing
+            window.history.replaceState({}, '', window.location.pathname);
+          } else if (data.session) {
+            console.log('[AuthContext] Successfully exchanged code for session');
+            if (isMounted) {
+              setSession(data.session);
+              setUser(data.session.user);
+              setLoading(false);
+              // Clear the URL params
+              window.history.replaceState({}, '', window.location.pathname);
+            }
+            return; // Exit early, we have a session
+          }
+        }
+        
+        // If we have an access_token in hash (implicit flow), let Supabase handle it
+        if (accessToken) {
+          console.log('[AuthContext] Access token detected in hash, letting Supabase handle it...');
+          // Supabase should automatically detect and process this
+          // Give it a moment to process
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
         
         // Get the current session
@@ -41,6 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error) {
           console.error('[AuthContext] Error getting session:', error);
         }
+        
+        console.log('[AuthContext] Got session:', !!session);
         
         if (isMounted) {
           setSession(session);
@@ -65,21 +100,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        // Clear timeout if auth succeeds
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
       }
     });
     
-    // Fallback timeout to prevent infinite loading (10 seconds)
-    const timeout = setTimeout(() => {
-      if (isMounted && loading) {
+    // Fallback timeout to prevent infinite loading (15 seconds - increased for mobile)
+    timeoutId = setTimeout(() => {
+      if (isMounted) {
         console.warn('[AuthContext] Auth initialization timeout, forcing loading to false');
         setLoading(false);
       }
-    }, 10000);
+    }, 15000);
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
-      clearTimeout(timeout);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     };
   }, []);
 
