@@ -863,7 +863,11 @@ Output the revised scene as valid JSON.
             ],
         }
 
-    async def run_demo_generation(self, project: StoryProject) -> Dict[str, Any]:
+    async def run_demo_generation(
+        self, 
+        project: StoryProject,
+        constraints: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Run a demo generation that involves all 5 agents in a simplified flow.
         This gives users visibility into the multi-agent collaboration without
@@ -875,6 +879,15 @@ Output the revised scene as valid JSON.
         3. Strategist: Proposes story structure
         4. Writer: Drafts opening scene
         5. Critic: Reviews and provides feedback
+        
+        Args:
+            project: The story project configuration
+            constraints: Optional regeneration constraints with:
+                - edited_agent: Which agent was edited
+                - edited_content: The edited content
+                - edit_comment: User's description of what they changed
+                - locked_agents: Dict of agent name -> locked content
+                - agents_to_regenerate: List of agents to regenerate
         """
         self.state = GenerationState(
             phase=GenerationPhase.GENESIS,
@@ -884,16 +897,65 @@ Output the revised scene as valid JSON.
         self._emit_event("phase_start", {"phase": "demo"})
 
         results = {}
+        
+        # Extract constraints if provided
+        edited_agent = constraints.get("edited_agent") if constraints else None
+        edited_content = constraints.get("edited_content") if constraints else None
+        edit_comment = constraints.get("edit_comment") if constraints else None
+        locked_agents = constraints.get("locked_agents", {}) if constraints else {}
+        agents_to_regenerate = constraints.get("agents_to_regenerate", []) if constraints else []
+        
+        # Helper to check if an agent should be skipped (locked or not selected for regen)
+        def should_skip_agent(agent_name: str) -> bool:
+            if not constraints:
+                return False
+            # If this is the edited agent, use the edited content
+            if agent_name == edited_agent:
+                return True
+            # If agent is locked, skip it
+            if agent_name in locked_agents:
+                return True
+            # If we have a list of agents to regenerate and this agent is not in it, skip
+            if agents_to_regenerate and agent_name not in agents_to_regenerate:
+                return True
+            return False
+        
+        def get_agent_content(agent_name: str) -> Optional[str]:
+            """Get the content for a skipped agent."""
+            if agent_name == edited_agent:
+                return edited_content
+            if agent_name in locked_agents:
+                return locked_agents[agent_name]
+            return None
+        
+        # Build constraint context for prompts
+        constraint_context = ""
+        if constraints and edit_comment:
+            constraint_context = f"""
+## User Edit Context
+The user has made edits to the {edited_agent} agent's output with the following note:
+"{edit_comment}"
+
+Please take this feedback into account and ensure your output is consistent with the user's intent.
+"""
 
         # 1. Architect creates narrative concept
-        architect_prompt = f"""
+        if should_skip_agent("Architect"):
+            # Use locked/edited content instead of calling LLM
+            architect_content = get_agent_content("Architect")
+            self._emit_event("agent_start", {"agent": "Architect", "phase": "demo", "skipped": True})
+            self._emit_agent_message("Architect", "locked", architect_content or "")
+            self._emit_event("agent_complete", {"agent": "Architect", "skipped": True})
+            architect_msg = AgentMessage(type="artifact", from_agent="Architect", content=self._extract_json(architect_content) if architect_content else architect_content)
+        else:
+            architect_prompt = f"""
 ## Project Configuration
 
 **Seed Idea:** {project.seed_idea}
 **Moral Compass:** {project.moral_compass.value}
 **Target Audience:** {project.target_audience}
 **Core Themes:** {", ".join(project.theme_core) if project.theme_core else "Not specified"}
-
+{constraint_context}
 Create a brief narrative concept including:
 - A compelling premise (2-3 sentences)
 - The central conflict
@@ -902,16 +964,23 @@ Create a brief narrative concept including:
 
 Output as JSON with fields: premise, conflict, emotional_core, themes (array).
 """
-        architect_response = await self._call_agent(self.architect, architect_prompt)
-        architect_msg = self._parse_agent_message("Architect", architect_response)
+            architect_response = await self._call_agent(self.architect, architect_prompt)
+            architect_msg = self._parse_agent_message("Architect", architect_response)
         self.state.messages.append(architect_msg)
         results["architect"] = architect_msg.content
 
         # 2. Profiler suggests character archetypes
-        profiler_prompt = f"""
+        if should_skip_agent("Profiler"):
+            profiler_content = get_agent_content("Profiler")
+            self._emit_event("agent_start", {"agent": "Profiler", "phase": "demo", "skipped": True})
+            self._emit_agent_message("Profiler", "locked", profiler_content or "")
+            self._emit_event("agent_complete", {"agent": "Profiler", "skipped": True})
+            profiler_msg = AgentMessage(type="artifact", from_agent="Profiler", content=self._extract_json(profiler_content) if profiler_content else profiler_content)
+        else:
+            profiler_prompt = f"""
 Based on this narrative concept:
 {json.dumps(architect_msg.content, indent=2) if isinstance(architect_msg.content, dict) else architect_msg.content}
-
+{constraint_context}
 Suggest 2-3 main character archetypes that would serve this story well.
 For each character, provide:
 - Role (protagonist, antagonist, mentor, etc.)
@@ -921,19 +990,26 @@ For each character, provide:
 
 Output as JSON with field: characters (array of objects).
 """
-        profiler_response = await self._call_agent(self.profiler, profiler_prompt)
-        profiler_msg = self._parse_agent_message("Profiler", profiler_response)
+            profiler_response = await self._call_agent(self.profiler, profiler_prompt)
+            profiler_msg = self._parse_agent_message("Profiler", profiler_response)
         self.state.messages.append(profiler_msg)
         results["profiler"] = profiler_msg.content
 
         # 3. Strategist proposes story structure
-        strategist_prompt = f"""
+        if should_skip_agent("Strategist"):
+            strategist_content = get_agent_content("Strategist")
+            self._emit_event("agent_start", {"agent": "Strategist", "phase": "demo", "skipped": True})
+            self._emit_agent_message("Strategist", "locked", strategist_content or "")
+            self._emit_event("agent_complete", {"agent": "Strategist", "skipped": True})
+            strategist_msg = AgentMessage(type="artifact", from_agent="Strategist", content=self._extract_json(strategist_content) if strategist_content else strategist_content)
+        else:
+            strategist_prompt = f"""
 Given this narrative concept and characters:
 
 Concept: {json.dumps(architect_msg.content, indent=2) if isinstance(architect_msg.content, dict) else architect_msg.content}
 
 Characters: {json.dumps(profiler_msg.content, indent=2) if isinstance(profiler_msg.content, dict) else profiler_msg.content}
-
+{constraint_context}
 Propose a story structure including:
 - Opening hook
 - Key turning points (3 major beats)
@@ -942,13 +1018,20 @@ Propose a story structure including:
 
 Output as JSON with fields: opening_hook, turning_points (array), climax, resolution.
 """
-        strategist_response = await self._call_agent(self.strategist, strategist_prompt)
-        strategist_msg = self._parse_agent_message("Strategist", strategist_response)
+            strategist_response = await self._call_agent(self.strategist, strategist_prompt)
+            strategist_msg = self._parse_agent_message("Strategist", strategist_response)
         self.state.messages.append(strategist_msg)
         results["strategist"] = strategist_msg.content
 
         # 4. Writer drafts opening scene
-        writer_prompt = f"""
+        if should_skip_agent("Writer"):
+            writer_content = get_agent_content("Writer")
+            self._emit_event("agent_start", {"agent": "Writer", "phase": "demo", "skipped": True})
+            self._emit_agent_message("Writer", "locked", writer_content or "")
+            self._emit_event("agent_complete", {"agent": "Writer", "skipped": True})
+            writer_msg = AgentMessage(type="artifact", from_agent="Writer", content=self._extract_json(writer_content) if writer_content else writer_content)
+        else:
+            writer_prompt = f"""
 Using the narrative foundation:
 
 Concept: {json.dumps(architect_msg.content, indent=2) if isinstance(architect_msg.content, dict) else architect_msg.content}
@@ -956,7 +1039,7 @@ Concept: {json.dumps(architect_msg.content, indent=2) if isinstance(architect_ms
 Characters: {json.dumps(profiler_msg.content, indent=2) if isinstance(profiler_msg.content, dict) else profiler_msg.content}
 
 Structure: {json.dumps(strategist_msg.content, indent=2) if isinstance(strategist_msg.content, dict) else strategist_msg.content}
-
+{constraint_context}
 Write a compelling opening scene (200-300 words) that:
 - Hooks the reader immediately
 - Introduces the protagonist
@@ -965,13 +1048,20 @@ Write a compelling opening scene (200-300 words) that:
 
 Output as JSON with fields: scene_title, setting, narrative_text.
 """
-        writer_response = await self._call_agent(self.writer, writer_prompt)
-        writer_msg = self._parse_agent_message("Writer", writer_response)
+            writer_response = await self._call_agent(self.writer, writer_prompt)
+            writer_msg = self._parse_agent_message("Writer", writer_response)
         self.state.messages.append(writer_msg)
         results["writer"] = writer_msg.content
 
         # 5. Critic reviews everything
-        critic_prompt = f"""
+        if should_skip_agent("Critic"):
+            critic_content = get_agent_content("Critic")
+            self._emit_event("agent_start", {"agent": "Critic", "phase": "demo", "skipped": True})
+            self._emit_agent_message("Critic", "locked", critic_content or "")
+            self._emit_event("agent_complete", {"agent": "Critic", "skipped": True})
+            critic_msg = AgentMessage(type="artifact", from_agent="Critic", content=self._extract_json(critic_content) if critic_content else critic_content)
+        else:
+            critic_prompt = f"""
 Review the collaborative output from all agents:
 
 **Architect's Concept:**
@@ -985,7 +1075,7 @@ Review the collaborative output from all agents:
 
 **Writer's Opening:**
 {json.dumps(writer_msg.content, indent=2) if isinstance(writer_msg.content, dict) else writer_msg.content}
-
+{constraint_context}
 Provide a brief assessment:
 1. Overall coherence (1-10)
 2. Strengths of the collaboration
@@ -994,8 +1084,8 @@ Provide a brief assessment:
 
 Output as JSON with fields: overall_score, strengths (array), improvements (array), approved (bool), summary.
 """
-        critic_response = await self._call_agent(self.critic, critic_prompt)
-        critic_msg = self._parse_agent_message("Critic", critic_response)
+            critic_response = await self._call_agent(self.critic, critic_prompt)
+            critic_msg = self._parse_agent_message("Critic", critic_response)
         self.state.messages.append(critic_msg)
         results["critic"] = critic_msg.content
 

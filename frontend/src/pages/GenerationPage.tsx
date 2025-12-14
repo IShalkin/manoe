@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useSettings } from '../hooks/useSettings';
-import { useProjects, StoredProject } from '../hooks/useProjects';
-import { AgentChat } from '../components/AgentChat';
+import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
+import { AgentChat, RegenerationConstraints } from '../components/AgentChat';
 
 // Multi-agent orchestrator URL (separate subdomain)
 const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
@@ -15,6 +15,7 @@ export function GenerationPage() {
   const { 
     projects, 
     getProject,
+    updateProject,
     startGeneration, 
     completeGeneration, 
     failGeneration,
@@ -23,6 +24,7 @@ export function GenerationPage() {
   const [project, setProject] = useState<StoredProject | null>(null);
   const [runId, setRunId] = useState<string | null>(searchParams.get('runId'));
   const [isStarting, setIsStarting] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Load project data
@@ -45,6 +47,87 @@ export function GenerationPage() {
       startNewGeneration();
     }
   }, [project, runId, isStarting]);
+
+  // Handle regeneration with constraints from AgentChat
+  const handleRegenerate = useCallback(async (constraints: RegenerationConstraints) => {
+    if (!project || isRegenerating) return;
+    
+    if (!hasAnyApiKey()) {
+      setError('Please configure an API key in Settings first');
+      return;
+    }
+
+    setIsRegenerating(true);
+    setError(null);
+
+    try {
+      const agentConfig = getAgentConfig('architect');
+      
+      if (!agentConfig) {
+        throw new Error('No agent configuration found. Please configure a provider in Settings.');
+      }
+      
+      const apiKey = getProviderKey(agentConfig.provider);
+      
+      if (!apiKey) {
+        throw new Error(`No API key configured for ${agentConfig.provider}`);
+      }
+
+      // Call orchestrator with constraints for partial regeneration
+      const response = await fetch(`${ORCHESTRATOR_URL}/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          seed_idea: project.seedIdea,
+          moral_compass: project.moralCompass,
+          target_audience: project.targetAudience,
+          themes: project.themes,
+          provider: agentConfig.provider,
+          model: agentConfig.model,
+          api_key: apiKey,
+          constraints: {
+            edited_agent: constraints.editedAgent,
+            edited_content: constraints.editedContent,
+            edit_comment: constraints.editComment,
+            locked_agents: constraints.lockedAgents,
+            agents_to_regenerate: constraints.agentsToRegenerate,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const newRunId = data.run_id;
+      
+      // Update project with new runId and mark as generating
+      await startGeneration(project.id, newRunId);
+      setRunId(newRunId);
+      
+      // Update URL with runId for bookmarking/sharing
+      window.history.replaceState(null, '', `/generate/${project.id}?runId=${newRunId}`);
+    } catch (err) {
+      console.error('[GenerationPage] Failed to regenerate:', err);
+      setError(err instanceof Error ? err.message : 'Failed to regenerate');
+    } finally {
+      setIsRegenerating(false);
+    }
+  }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration]);
+
+  // Handle updating project result (for persisting edits/locks)
+  const handleUpdateResult = useCallback(async (result: ProjectResult) => {
+    if (!project) return;
+    try {
+      await updateProject(project.id, { result });
+    } catch (err) {
+      console.error('[GenerationPage] Failed to update project result:', err);
+    }
+  }, [project, updateProject]);
 
   const startNewGeneration = async () => {
     if (!project || isStarting) return;
@@ -249,6 +332,9 @@ export function GenerationPage() {
           <AgentChat
             runId={runId}
             orchestratorUrl={ORCHESTRATOR_URL}
+            projectResult={project?.result}
+            onUpdateResult={handleUpdateResult}
+            onRegenerate={handleRegenerate}
             onComplete={async (result) => {
               if (project) {
                 try {

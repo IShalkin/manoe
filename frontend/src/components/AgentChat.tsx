@@ -255,7 +255,7 @@ interface AgentChatProps {
   onRegenerate?: (constraints: RegenerationConstraints) => void;
 }
 
-interface RegenerationConstraints {
+export interface RegenerationConstraints {
   editComment: string;
   editedAgent: string;
   editedContent: string;
@@ -364,6 +364,33 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       setLockedAgents(projectResult.locks);
     }
   }, [projectResult?.locks]);
+
+  // Reset state when runId changes (new generation or regeneration)
+  useEffect(() => {
+    if (runId) {
+      // Close existing EventSource connection
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      // Reset all state for new run
+      setMessages([]);
+      setIsConnected(false);
+      setError(null);
+      setCurrentPhase('Initializing');
+      setIsComplete(false);
+      setSelectedRound(null);
+      setIsPlaying(false);
+      currentRoundRef.current = 1;
+      hasMessageInCurrentRoundRef.current = false;
+      // Reset edit state
+      setEditState(null);
+      setShowConfirmModal(false);
+      setEditComment('');
+      setAgentsToRegenerate([]);
+      setPendingEdit(null);
+    }
+  }, [runId]);
 
   const getAgentContent = useCallback((agent: string): string => {
     if (projectResult?.edits?.[agent]) {

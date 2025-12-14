@@ -8,7 +8,7 @@ import json
 import os
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -73,6 +73,7 @@ class MultiAgentWorker:
         api_key: str,
         provider: str = "openai",
         model: str = "gpt-4o",
+        constraints: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -158,7 +159,7 @@ class MultiAgentWorker:
 
             # Run demo generation that involves all 5 agents
             # This gives users visibility into the multi-agent flow
-            result = await group_chat.run_demo_generation(project)
+            result = await group_chat.run_demo_generation(project, constraints=constraints)
 
             # Flush all pending events before publishing completion
             # This ensures agent_complete events arrive before generation_complete
@@ -218,6 +219,15 @@ app.add_middleware(
 worker: Optional[MultiAgentWorker] = None
 
 
+class RegenerationConstraints(BaseModel):
+    """Constraints for partial regeneration with edited/locked agent outputs."""
+    edited_agent: str  # Which agent was edited
+    edited_content: str  # The edited content
+    edit_comment: str  # User's description of what they changed
+    locked_agents: Dict[str, str]  # Agent name -> locked content
+    agents_to_regenerate: List[str]  # Which agents to regenerate
+
+
 class GenerateRequest(BaseModel):
     seed_idea: str
     moral_compass: str = "ambiguous"
@@ -226,6 +236,7 @@ class GenerateRequest(BaseModel):
     provider: str = "openai"
     model: str = "gpt-4o"
     api_key: str
+    constraints: Optional[RegenerationConstraints] = None  # For partial regeneration
 
 
 class GenerateResponse(BaseModel):
@@ -271,6 +282,17 @@ async def generate(request: GenerateRequest):
         "theme_core": request.themes.split(",") if request.themes else [],
     }
 
+    # Convert constraints to dict if provided
+    constraints_dict = None
+    if request.constraints:
+        constraints_dict = {
+            "edited_agent": request.constraints.edited_agent,
+            "edited_content": request.constraints.edited_content,
+            "edit_comment": request.constraints.edit_comment,
+            "locked_agents": request.constraints.locked_agents,
+            "agents_to_regenerate": request.constraints.agents_to_regenerate,
+        }
+
     # Start generation in background with user's API key
     asyncio.create_task(worker.run_generation(
         run_id=run_id,
@@ -278,6 +300,7 @@ async def generate(request: GenerateRequest):
         api_key=request.api_key,
         provider=request.provider,
         model=request.model,
+        constraints=constraints_dict,
     ))
 
     return GenerateResponse(
