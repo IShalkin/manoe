@@ -393,8 +393,10 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
   const rounds = useMemo(() => {
     const roundSet = new Set<number>();
     messages.forEach(msg => {
-      if (msg.type === 'agent_message' && msg.data.round) {
-        roundSet.add(msg.data.round);
+      if (msg.type === 'agent_message' && msg.data.content) {
+        // Use round from message, default to 1 if not set
+        const round = msg.data.round ?? 1;
+        roundSet.add(round);
       }
     });
     return Array.from(roundSet).sort((a, b) => a - b);
@@ -482,14 +484,12 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
 
   // Extract final result from messages
   const finalResult = useMemo(() => {
-    const completeEvent = messages.find(m => m.type === 'generation_complete');
-    if (completeEvent?.data.result_summary) {
-      return completeEvent.data.result_summary;
-    }
-    
-    // Try to get from phase_complete
-    const phaseComplete = messages.find(m => m.type === 'phase_complete' && m.data.phase === 'genesis');
-    if (phaseComplete?.data.result) {
+    // Try to get from any phase_complete event with result
+    const phaseCompleteEvents = messages.filter(m => m.type === 'phase_complete' && m.data.result);
+    if (phaseCompleteEvents.length > 0) {
+      // Prefer genesis phase, but take any phase_complete with result
+      const genesisComplete = phaseCompleteEvents.find(m => m.data.phase === 'genesis');
+      const phaseComplete = genesisComplete || phaseCompleteEvents[phaseCompleteEvents.length - 1];
       const result = phaseComplete.data.result;
       if (typeof result === 'object' && result !== null) {
         return JSON.stringify(result, null, 2);
@@ -497,11 +497,26 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
       return String(result);
     }
     
-    // Get the last substantial agent message as fallback
-    const agentMessages = messages.filter(m => m.type === 'agent_message' && m.data.content);
+    // Try generation_complete result_summary
+    const completeEvent = messages.find(m => m.type === 'generation_complete');
+    if (completeEvent?.data.result_summary) {
+      return completeEvent.data.result_summary;
+    }
+    
+    // Prefer Writer's last message as the "final result" (the actual story content)
+    const writerMessages = messages.filter(
+      m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
+    );
+    if (writerMessages.length > 0) {
+      return writerMessages[writerMessages.length - 1].data.content || '';
+    }
+    
+    // Fall back to last substantial agent message
+    const agentMessages = messages.filter(
+      m => m.type === 'agent_message' && m.data.content?.trim()
+    );
     if (agentMessages.length > 0) {
-      const lastMsg = agentMessages[agentMessages.length - 1];
-      return lastMsg.data.content || '';
+      return agentMessages[agentMessages.length - 1].data.content || '';
     }
     
     return '';
