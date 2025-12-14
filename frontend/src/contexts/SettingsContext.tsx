@@ -21,7 +21,7 @@ interface ModelsCache {
 const defaultAgentConfigs: AgentConfig[] = AGENTS.map(agent => ({
   agent: agent.id,
   provider: 'openai' as LLMProvider,
-  model: 'gpt-4o',
+  model: '',
 }));
 
 interface SettingsContextType {
