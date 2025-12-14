@@ -59,7 +59,28 @@ function formatResultAsMarkdown(result: ProjectResult): string {
     return `**Error:** ${result.error}`;
   }
   
-  // Try narrativePossibility first (camelCase from frontend)
+  // Try story key first (from Writer's output)
+  const story = (result as Record<string, unknown>)['story'];
+  if (story && typeof story === 'string' && story.trim().length > 0) {
+    return story;
+  }
+  
+  // Try agents combined output
+  const agents = (result as Record<string, unknown>)['agents'];
+  if (agents && typeof agents === 'object' && Object.keys(agents as object).length > 0) {
+    const agentContent = agents as Record<string, string>;
+    const sections: string[] = [];
+    for (const [agentName, content] of Object.entries(agentContent)) {
+      if (content && content.trim()) {
+        sections.push(`## ${agentName}\n\n${content}`);
+      }
+    }
+    if (sections.length > 0) {
+      return sections.join('\n\n---\n\n');
+    }
+  }
+  
+  // Try narrativePossibility (camelCase from frontend)
   const np = result.narrativePossibility;
   if (np && typeof np === 'object' && Object.keys(np).length > 0) {
     return formatValueAsMarkdown(np);
@@ -72,7 +93,7 @@ function formatResultAsMarkdown(result: ProjectResult): string {
   }
   
   // Try other common result keys
-  const commonKeys = ['story', 'final_story', 'text', 'content', 'output', 'draft', 'result'];
+  const commonKeys = ['final_story', 'text', 'content', 'output', 'draft', 'result'];
   for (const key of commonKeys) {
     const val = (result as Record<string, unknown>)[key];
     if (val) {

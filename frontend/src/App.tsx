@@ -4,6 +4,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { LoginPage } from './pages/LoginPage';
 import { GenerationPage } from './pages/GenerationPage';
+import { GenerationsPage } from './pages/GenerationsPage';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
@@ -35,6 +36,7 @@ function AuthenticatedApp() {
       <Layout>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/generations" element={<GenerationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/generate/:projectId" element={<GenerationPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

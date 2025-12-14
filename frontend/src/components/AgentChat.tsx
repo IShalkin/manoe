@@ -239,6 +239,8 @@ interface AgentMessage {
 
 interface GenerationResult {
   narrative_possibility?: Record<string, unknown>;
+  story?: string;
+  agents?: Record<string, string>;
   error?: string;
 }
 
@@ -371,12 +373,53 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
             if (data.type === 'generation_error') {
               onComplete({ error: data.data.error || 'Unknown error' });
             } else {
-              // Extract narrative_possibility from phase_complete event
-              const phaseCompleteEvent = [...messages, data].find(
-                m => m.type === 'phase_complete' && m.data.phase === 'genesis'
+              // Extract the best available result content
+              const allMessages = [...messages, data];
+              
+              // Try phase_complete with result first
+              const phaseCompleteEvents = allMessages.filter(m => m.type === 'phase_complete' && m.data.result);
+              if (phaseCompleteEvents.length > 0) {
+                const genesisComplete = phaseCompleteEvents.find(m => m.data.phase === 'genesis');
+                const phaseComplete = genesisComplete || phaseCompleteEvents[phaseCompleteEvents.length - 1];
+                onComplete({
+                  narrative_possibility: phaseComplete.data.result,
+                });
+                return;
+              }
+              
+              // Try generation_complete result_summary
+              const completeEvent = allMessages.find(m => m.type === 'generation_complete');
+              if (completeEvent?.data.result_summary) {
+                onComplete({
+                  story: completeEvent.data.result_summary,
+                });
+                return;
+              }
+              
+              // Use Writer's last message as the story content
+              const writerMessages = allMessages.filter(
+                m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
               );
+              if (writerMessages.length > 0) {
+                onComplete({
+                  story: writerMessages[writerMessages.length - 1].data.content,
+                });
+                return;
+              }
+              
+              // Fall back to all agent messages combined
+              const agentMessages = allMessages.filter(
+                m => m.type === 'agent_message' && m.data.content?.trim()
+              );
+              const combinedContent: Record<string, string> = {};
+              agentMessages.forEach(m => {
+                const agent = m.data.agent || 'Unknown';
+                if (m.data.content) {
+                  combinedContent[agent] = m.data.content;
+                }
+              });
               onComplete({
-                narrative_possibility: phaseCompleteEvent?.data?.result || data.data,
+                agents: combinedContent,
               });
             }
           }
