@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-
-const PROJECTS_STORAGE_KEY = 'manoe_projects';
-const PROFILE_ID_KEY = 'manoe_profile_id';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 export interface StoredProject {
   id: string;
@@ -30,123 +29,224 @@ export interface ProjectResult {
   error?: string;
 }
 
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+interface DbProject {
+  id: string;
+  user_id: string;
+  name: string;
+  seed_idea: string;
+  moral_compass: string;
+  target_audience: string | null;
+  themes: string | null;
+  run_id: string | null;
+  status: string;
+  result: ProjectResult | null;
+  created_at: string;
+  updated_at: string;
 }
 
-function getOrCreateProfileId(): string {
-  let profileId = localStorage.getItem(PROFILE_ID_KEY);
-  if (!profileId) {
-    profileId = `profile-${generateId()}`;
-    localStorage.setItem(PROFILE_ID_KEY, profileId);
-  }
-  return profileId;
+function dbToStoredProject(db: DbProject): StoredProject {
+  return {
+    id: db.id,
+    name: db.name,
+    seedIdea: db.seed_idea,
+    moralCompass: db.moral_compass,
+    targetAudience: db.target_audience || '',
+    themes: db.themes || '',
+    runId: db.run_id,
+    status: db.status as StoredProject['status'],
+    result: db.result,
+    createdAt: db.created_at,
+    updatedAt: db.updated_at,
+  };
 }
 
 export function useProjects() {
+  const { user } = useAuth();
   const [projects, setProjects] = useState<StoredProject[]>([]);
   const [loading, setLoading] = useState(true);
-  const [profileId] = useState(() => getOrCreateProfileId());
+  const [error, setError] = useState<string | null>(null);
 
-  // Load projects from localStorage on mount
+  // Load projects from Supabase on mount and when user changes
   useEffect(() => {
-    const stored = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    console.log('[useProjects] Loading from localStorage:', stored ? `${stored.length} bytes` : 'empty');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        // Sort by createdAt descending (newest first)
-        const sorted = parsed.sort((a: StoredProject, b: StoredProject) => 
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-        console.log('[useProjects] Loaded', sorted.length, 'projects');
-        setProjects(sorted);
-      } catch (e) {
-        console.error('[useProjects] Failed to parse projects:', e);
-      }
+    if (!user) {
+      setProjects([]);
+      setLoading(false);
+      return;
     }
-    setLoading(false);
-  }, []);
 
-  // Persist projects to localStorage whenever they change (after initial load)
-  useEffect(() => {
-    if (!loading && projects.length > 0) {
+    const fetchProjects = async () => {
+      setLoading(true);
+      setError(null);
+      
       try {
-        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
-        console.log('[useProjects] Saved', projects.length, 'projects to localStorage');
+        const { data, error: fetchError } = await supabase
+          .from('projects')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (fetchError) {
+          console.error('[useProjects] Failed to fetch projects:', fetchError);
+          setError(fetchError.message);
+          return;
+        }
+
+        const storedProjects = (data as DbProject[]).map(dbToStoredProject);
+        console.log('[useProjects] Loaded', storedProjects.length, 'projects from Supabase');
+        setProjects(storedProjects);
       } catch (e) {
-        console.error('[useProjects] Failed to save projects:', e);
+        console.error('[useProjects] Error fetching projects:', e);
+        setError(e instanceof Error ? e.message : 'Failed to load projects');
+      } finally {
+        setLoading(false);
       }
-    }
-  }, [projects, loading]);
+    };
+
+    fetchProjects();
+
+    // Subscribe to real-time changes
+    const subscription = supabase
+      .channel('projects_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'projects',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('[useProjects] Real-time update:', payload.eventType);
+          
+          if (payload.eventType === 'INSERT') {
+            const newProject = dbToStoredProject(payload.new as DbProject);
+            setProjects(prev => [newProject, ...prev.filter(p => p.id !== newProject.id)]);
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedProject = dbToStoredProject(payload.new as DbProject);
+            setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
+          } else if (payload.eventType === 'DELETE') {
+            const deletedId = (payload.old as { id: string }).id;
+            setProjects(prev => prev.filter(p => p.id !== deletedId));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [user]);
 
   // Create a new project
-  const createProject = useCallback((data: {
+  const createProject = useCallback(async (data: {
     name: string;
     seedIdea: string;
     moralCompass: string;
     targetAudience: string;
     themes: string;
-  }): StoredProject => {
-    const now = new Date().toISOString();
-    const newProject: StoredProject = {
-      id: generateId(),
-      name: data.name || 'Untitled Project',
-      seedIdea: data.seedIdea,
-      moralCompass: data.moralCompass,
-      targetAudience: data.targetAudience,
-      themes: data.themes,
-      runId: null,
-      status: 'pending',
-      result: null,
-      createdAt: now,
-      updatedAt: now,
-    };
+  }): Promise<StoredProject> => {
+    if (!user) {
+      throw new Error('User must be logged in to create a project');
+    }
+
+    const { data: newProject, error: insertError } = await supabase
+      .from('projects')
+      .insert({
+        user_id: user.id,
+        name: data.name || 'Untitled Project',
+        seed_idea: data.seedIdea,
+        moral_compass: data.moralCompass,
+        target_audience: data.targetAudience || null,
+        themes: data.themes || null,
+        status: 'pending',
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('[useProjects] Failed to create project:', insertError);
+      throw new Error(insertError.message);
+    }
+
+    const storedProject = dbToStoredProject(newProject as DbProject);
+    console.log('[useProjects] Created project:', storedProject.id);
     
-    // Use functional update to avoid stale closure
-    setProjects(prev => [newProject, ...prev]);
-    console.log('[useProjects] Created project:', newProject.id);
-    return newProject;
-  }, []);
+    // Optimistically update local state
+    setProjects(prev => [storedProject, ...prev]);
+    
+    return storedProject;
+  }, [user]);
 
   // Update a project
-  const updateProject = useCallback((id: string, updates: Partial<StoredProject>) => {
-    // Use functional update to avoid stale closure
+  const updateProject = useCallback(async (id: string, updates: Partial<StoredProject>) => {
+    const dbUpdates: Partial<DbProject> = {};
+    
+    if (updates.name !== undefined) dbUpdates.name = updates.name;
+    if (updates.seedIdea !== undefined) dbUpdates.seed_idea = updates.seedIdea;
+    if (updates.moralCompass !== undefined) dbUpdates.moral_compass = updates.moralCompass;
+    if (updates.targetAudience !== undefined) dbUpdates.target_audience = updates.targetAudience || null;
+    if (updates.themes !== undefined) dbUpdates.themes = updates.themes || null;
+    if (updates.runId !== undefined) dbUpdates.run_id = updates.runId;
+    if (updates.status !== undefined) dbUpdates.status = updates.status;
+    if (updates.result !== undefined) dbUpdates.result = updates.result;
+
+    const { error: updateError } = await supabase
+      .from('projects')
+      .update(dbUpdates)
+      .eq('id', id);
+
+    if (updateError) {
+      console.error('[useProjects] Failed to update project:', updateError);
+      throw new Error(updateError.message);
+    }
+
+    // Optimistically update local state
     setProjects(prev => prev.map(p => 
       p.id === id 
         ? { ...p, ...updates, updatedAt: new Date().toISOString() }
         : p
     ));
+    
     console.log('[useProjects] Updated project:', id);
   }, []);
 
   // Start generation for a project
-  const startGeneration = useCallback((projectId: string, runId: string) => {
-    updateProject(projectId, {
+  const startGeneration = useCallback(async (projectId: string, runId: string) => {
+    await updateProject(projectId, {
       runId,
       status: 'generating',
     });
   }, [updateProject]);
 
   // Complete generation for a project
-  const completeGeneration = useCallback((projectId: string, result: ProjectResult) => {
-    updateProject(projectId, {
+  const completeGeneration = useCallback(async (projectId: string, result: ProjectResult) => {
+    await updateProject(projectId, {
       status: 'completed',
       result,
     });
   }, [updateProject]);
 
   // Mark generation as failed
-  const failGeneration = useCallback((projectId: string, error: string) => {
-    updateProject(projectId, {
+  const failGeneration = useCallback(async (projectId: string, errorMsg: string) => {
+    await updateProject(projectId, {
       status: 'error',
-      result: { error },
+      result: { error: errorMsg },
     });
   }, [updateProject]);
 
   // Delete a project
-  const deleteProject = useCallback((id: string) => {
-    // Use functional update to avoid stale closure
+  const deleteProject = useCallback(async (id: string) => {
+    const { error: deleteError } = await supabase
+      .from('projects')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) {
+      console.error('[useProjects] Failed to delete project:', deleteError);
+      throw new Error(deleteError.message);
+    }
+
+    // Optimistically update local state
     setProjects(prev => prev.filter(p => p.id !== id));
     console.log('[useProjects] Deleted project:', id);
   }, []);
@@ -164,7 +264,7 @@ export function useProjects() {
   return {
     projects,
     loading,
-    profileId,
+    error,
     createProject,
     updateProject,
     startGeneration,

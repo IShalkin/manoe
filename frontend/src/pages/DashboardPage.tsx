@@ -85,7 +85,7 @@ export function DashboardPage() {
       
       if (data.success && data.run_id) {
         // Create project in persistent storage
-        const newProject = createProject({
+        const newProject = await createProject({
           name: formData.name || 'Untitled Project',
           seedIdea: formData.seedIdea,
           moralCompass: formData.moralCompass,
@@ -94,7 +94,7 @@ export function DashboardPage() {
         });
         
         // Start generation for this project
-        startGeneration(newProject.id, data.run_id);
+        await startGeneration(newProject.id, data.run_id);
         
         // Show the agent chat to visualize communication
         setCurrentRunId(data.run_id);
@@ -180,15 +180,19 @@ export function DashboardPage() {
           <AgentChat
             runId={currentRunId}
             orchestratorUrl={ORCHESTRATOR_URL}
-            onComplete={(result) => {
+            onComplete={async (result) => {
               // Update project with generation result
               if (currentProjectId) {
-                if (result.error) {
-                  failGeneration(currentProjectId, result.error);
-                } else {
-                  completeGeneration(currentProjectId, {
-                    narrativePossibility: result.narrative_possibility,
-                  });
+                try {
+                  if (result.error) {
+                    await failGeneration(currentProjectId, result.error);
+                  } else {
+                    await completeGeneration(currentProjectId, {
+                      narrativePossibility: result.narrative_possibility,
+                    });
+                  }
+                } catch (e) {
+                  console.error('[DashboardPage] Failed to update project:', e);
                 }
               }
             }}
@@ -385,9 +389,14 @@ export function DashboardPage() {
                 {new Date(project.createdAt).toLocaleDateString()}
               </span>
               <button 
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
-                  deleteProject(project.id);
+                  try {
+                    await deleteProject(project.id);
+                  } catch (err) {
+                    console.error('[DashboardPage] Failed to delete project:', err);
+                    setError(err instanceof Error ? err.message : 'Failed to delete project');
+                  }
                 }}
                 className="text-xs text-red-400 hover:text-red-300 transition-colors"
               >
