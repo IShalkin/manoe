@@ -158,8 +158,11 @@ export function SettingsPage() {
                     <select
                       value={currentModel}
                       onChange={(e) => updateAgentConfig(agent.id, currentProvider, e.target.value)}
-                      className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary-500"
+                      className={`w-full bg-slate-900/50 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary-500 ${!currentModel ? 'border-amber-500 text-slate-400' : 'border-slate-600'}`}
                     >
+                      {!currentModel && (
+                        <option value="" disabled>Select a model...</option>
+                      )}
                       {availableModels.map(m => (
                         <option key={m.id} value={m.id}>
                           {m.name} {m.contextWindow ? `(${m.contextWindow >= 1000000 ? `${m.contextWindow / 1000000}M` : `${m.contextWindow / 1000}K`})` : ''}

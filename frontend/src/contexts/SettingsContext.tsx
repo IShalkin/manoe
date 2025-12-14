@@ -3,23 +3,20 @@ import { UserSettings, ProviderConfig, AgentConfig, LLMProvider, AGENTS, MODELS,
 
 const STORAGE_KEY = 'manoe_settings';
 const MODELS_CACHE_KEY = 'manoe_models_cache';
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 
 const OLD_DEFAULT_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
 
 function migrateSettings(parsed: UserSettings & { schemaVersion?: number }): UserSettings & { schemaVersion: number } {
   const currentVersion = parsed.schemaVersion || 1;
   
-  if (currentVersion < 2) {
-    const hasNoApiKeys = !parsed.providers || parsed.providers.length === 0 || 
-      parsed.providers.every(p => !p.apiKey || p.apiKey.length === 0);
-    
-    if (hasNoApiKeys) {
-      parsed.agents = parsed.agents.map(agent => ({
-        ...agent,
-        model: OLD_DEFAULT_MODELS.includes(agent.model) ? '' : agent.model,
-      }));
-    }
+  if (currentVersion < 3) {
+    // Clear outdated default models for ALL users
+    // Users should explicitly select their preferred model
+    parsed.agents = parsed.agents.map(agent => ({
+      ...agent,
+      model: OLD_DEFAULT_MODELS.includes(agent.model) ? '' : agent.model,
+    }));
     
     localStorage.removeItem(MODELS_CACHE_KEY);
   }
