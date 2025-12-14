@@ -95,7 +95,9 @@ export const MODELS: Record<LLMProvider, LLMModel[]> = {
     { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', provider: 'gemini', contextWindow: 1000000, inputPrice: 0.075, outputPrice: 0.3, capabilities: ['vision'] },
   ],
   anthropic: [
-    { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision', 'computer_use'], recommended: ['architect', 'critic'] },
+    { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision', 'computer_use'], recommended: ['architect', 'critic'] },
+    { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Oct 2024)', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision', 'computer_use'], recommended: ['architect', 'critic'] },
+    { id: 'claude-3-5-sonnet-20240620', name: 'Claude 3.5 Sonnet (Jun 2024)', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision'], recommended: ['architect', 'critic'] },
     { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', provider: 'anthropic', contextWindow: 200000, inputPrice: 0.8, outputPrice: 4, capabilities: ['vision'], recommended: ['writer'] },
     { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'anthropic', contextWindow: 200000, inputPrice: 15, outputPrice: 75, capabilities: ['vision'], recommended: ['strategist'] },
   ],
