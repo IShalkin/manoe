@@ -1,24 +1,144 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 
-function formatAgentContent(content: string): string {
-  try {
-    const parsed = JSON.parse(content);
-    return formatJsonAsMarkdown(parsed);
-  } catch {
-    if (content.includes('```json')) {
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[1]);
-          return formatJsonAsMarkdown(parsed);
-        } catch {
-          return content;
+function formatAnyAsMarkdown(parsed: unknown): string {
+  if (parsed === null || parsed === undefined) {
+    return '';
+  }
+  if (typeof parsed === 'string') {
+    // Check if the string itself is JSON (double-encoded)
+    const trimmed = parsed.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const innerParsed = JSON.parse(trimmed);
+        return formatAnyAsMarkdown(innerParsed);
+      } catch {
+        return parsed;
+      }
+    }
+    return parsed;
+  }
+  if (typeof parsed === 'number' || typeof parsed === 'boolean') {
+    return String(parsed);
+  }
+  if (Array.isArray(parsed)) {
+    return parsed.map((item, i) => {
+      if (typeof item === 'object' && item !== null) {
+        return `${i + 1}. ${formatObjectInline(item as Record<string, unknown>)}`;
+      }
+      return `${i + 1}. ${item}`;
+    }).join('\n');
+  }
+  if (typeof parsed === 'object') {
+    return formatJsonAsMarkdown(parsed as Record<string, unknown>);
+  }
+  return String(parsed);
+}
+
+function extractJsonFromString(content: string): string | null {
+  // Try to find balanced JSON object or array
+  const trimmed = content.trim();
+  let startChar = '';
+  let endChar = '';
+  let startIdx = -1;
+  
+  // Find the first { or [
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] === '{') {
+      startChar = '{';
+      endChar = '}';
+      startIdx = i;
+      break;
+    } else if (trimmed[i] === '[') {
+      startChar = '[';
+      endChar = ']';
+      startIdx = i;
+      break;
+    }
+  }
+  
+  if (startIdx === -1) return null;
+  
+  // Count brackets to find balanced end
+  let depth = 0;
+  let inString = false;
+  let escapeNext = false;
+  
+  for (let i = startIdx; i < trimmed.length; i++) {
+    const char = trimmed[i];
+    
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+    
+    if (char === '\\' && inString) {
+      escapeNext = true;
+      continue;
+    }
+    
+    if (char === '"' && !escapeNext) {
+      inString = !inString;
+      continue;
+    }
+    
+    if (!inString) {
+      if (char === startChar) depth++;
+      else if (char === endChar) {
+        depth--;
+        if (depth === 0) {
+          return trimmed.substring(startIdx, i + 1);
         }
       }
     }
-    return content;
   }
+  
+  return null; // Incomplete JSON
+}
+
+function formatAgentContent(content: string): string {
+  if (!content || typeof content !== 'string') {
+    return '';
+  }
+  
+  const trimmed = content.trim();
+  
+  // First, try direct JSON parse
+  try {
+    const parsed = JSON.parse(trimmed);
+    return formatAnyAsMarkdown(parsed);
+  } catch {
+    // Continue to other methods
+  }
+  
+  // Check for ```json code blocks
+  if (content.includes('```json')) {
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[1]);
+        return formatAnyAsMarkdown(parsed);
+      } catch {
+        // Continue
+      }
+    }
+  }
+  
+  // Try to extract JSON from string (handles prefix/suffix text)
+  if (trimmed.includes('{') || trimmed.includes('[')) {
+    const extracted = extractJsonFromString(trimmed);
+    if (extracted) {
+      try {
+        const parsed = JSON.parse(extracted);
+        return formatAnyAsMarkdown(parsed);
+      } catch {
+        // Continue
+      }
+    }
+  }
+  
+  // Return original content if nothing worked
+  return content;
 }
 
 function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
