@@ -198,7 +198,8 @@ export function useProjects() {
 
     if (insertError) {
       console.error('[useProjects] Failed to create project:', insertError);
-      throw new Error(insertError.message);
+      const errorMsg = insertError.message || insertError.details || insertError.hint || JSON.stringify(insertError);
+      throw new Error(errorMsg);
     }
 
     const storedProject = dbToStoredProject(newProject as DbProject);
@@ -230,7 +231,8 @@ export function useProjects() {
 
     if (updateError) {
       console.error('[useProjects] Failed to update project:', updateError);
-      throw new Error(updateError.message);
+      const errorMsg = updateError.message || updateError.details || updateError.hint || JSON.stringify(updateError);
+      throw new Error(errorMsg);
     }
 
     // Optimistically update local state
@@ -276,7 +278,8 @@ export function useProjects() {
 
     if (deleteError) {
       console.error('[useProjects] Failed to delete project:', deleteError);
-      throw new Error(deleteError.message);
+      const errorMsg = deleteError.message || deleteError.details || deleteError.hint || JSON.stringify(deleteError);
+      throw new Error(errorMsg);
     }
 
     // Optimistically update local state
