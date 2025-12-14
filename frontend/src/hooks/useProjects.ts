@@ -16,6 +16,12 @@ export interface StoredProject {
   updatedAt: string;
 }
 
+export interface AgentEdit {
+  content: string;
+  comment: string;
+  updatedAt: string;
+}
+
 export interface ProjectResult {
   narrativePossibility?: {
     plot_summary?: string;
@@ -27,6 +33,15 @@ export interface ProjectResult {
   characters?: unknown[];
   outline?: unknown;
   error?: string;
+  agentOutputs?: {
+    [agentName: string]: string;
+  };
+  edits?: {
+    [agentName: string]: AgentEdit;
+  };
+  locks?: {
+    [agentName: string]: boolean;
+  };
 }
 
 interface DbProject {

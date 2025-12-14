@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import type { ProjectResult } from '../hooks/useProjects';
 
 function formatAnyAsMarkdown(parsed: unknown): string {
   if (parsed === null || parsed === undefined) {
@@ -249,9 +250,35 @@ interface AgentChatProps {
   orchestratorUrl: string;
   onComplete?: (result: GenerationResult) => void;
   onClose?: () => void;
+  projectResult?: ProjectResult | null;
+  onUpdateResult?: (result: ProjectResult) => void;
+  onRegenerate?: (constraints: RegenerationConstraints) => void;
+}
+
+interface RegenerationConstraints {
+  editComment: string;
+  editedAgent: string;
+  editedContent: string;
+  lockedAgents: Record<string, string>;
+  agentsToRegenerate: string[];
+}
+
+interface EditState {
+  agent: string;
+  content: string;
+  originalContent: string;
 }
 
 const AGENTS = ['Architect', 'Profiler', 'Strategist', 'Writer', 'Critic'] as const;
+type AgentName = typeof AGENTS[number];
+
+const AGENT_DEPENDENCIES: Record<AgentName, AgentName[]> = {
+  Architect: ['Profiler', 'Strategist', 'Writer', 'Critic'],
+  Profiler: ['Strategist', 'Writer', 'Critic'],
+  Strategist: ['Writer', 'Critic'],
+  Writer: ['Critic'],
+  Critic: ['Writer', 'Critic'],
+};
 
 const AGENT_COLORS: Record<string, string> = {
   Architect: 'bg-blue-500',
@@ -312,7 +339,7 @@ interface AgentState {
   lastUpdate: string;
 }
 
-export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: AgentChatProps) {
+export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate }: AgentChatProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -324,6 +351,129 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
   const currentRoundRef = useRef(1);
   const hasMessageInCurrentRoundRef = useRef(false);
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const [editState, setEditState] = useState<EditState | null>(null);
+  const [lockedAgents, setLockedAgents] = useState<Record<string, boolean>>(() => projectResult?.locks || {});
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [editComment, setEditComment] = useState('');
+  const [agentsToRegenerate, setAgentsToRegenerate] = useState<string[]>([]);
+  const [pendingEdit, setPendingEdit] = useState<{ agent: string; content: string } | null>(null);
+
+  useEffect(() => {
+    if (projectResult?.locks) {
+      setLockedAgents(projectResult.locks);
+    }
+  }, [projectResult?.locks]);
+
+  const getAgentContent = useCallback((agent: string): string => {
+    if (projectResult?.edits?.[agent]) {
+      return projectResult.edits[agent].content;
+    }
+    if (projectResult?.agentOutputs?.[agent]) {
+      return projectResult.agentOutputs[agent];
+    }
+    const agentMessages = messages.filter(
+      m => m.type === 'agent_message' && m.data.agent === agent && m.data.content?.trim()
+    );
+    if (agentMessages.length > 0) {
+      return agentMessages[agentMessages.length - 1].data.content || '';
+    }
+    return '';
+  }, [messages, projectResult]);
+
+  const handleStartEdit = useCallback((agent: string) => {
+    const content = getAgentContent(agent);
+    setEditState({
+      agent,
+      content,
+      originalContent: content,
+    });
+  }, [getAgentContent]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditState(null);
+  }, []);
+
+  const handleApplyEdit = useCallback(() => {
+    if (!editState) return;
+    
+    const affectedAgents = AGENT_DEPENDENCIES[editState.agent as AgentName] || [];
+    const unlockedAffected = affectedAgents.filter(a => !lockedAgents[a]);
+    
+    setPendingEdit({ agent: editState.agent, content: editState.content });
+    setAgentsToRegenerate(unlockedAffected);
+    setEditComment('');
+    setShowConfirmModal(true);
+  }, [editState, lockedAgents]);
+
+  const handleToggleLock = useCallback((agent: string) => {
+    const newLocks = { ...lockedAgents, [agent]: !lockedAgents[agent] };
+    setLockedAgents(newLocks);
+    
+    if (onUpdateResult && projectResult) {
+      onUpdateResult({
+        ...projectResult,
+        locks: newLocks,
+      });
+    }
+  }, [lockedAgents, onUpdateResult, projectResult]);
+
+  const handleToggleAgentRegenerate = useCallback((agent: string) => {
+    setAgentsToRegenerate(prev => 
+      prev.includes(agent) 
+        ? prev.filter(a => a !== agent)
+        : [...prev, agent]
+    );
+  }, []);
+
+  const handleConfirmRegenerate = useCallback(() => {
+    if (!pendingEdit || !editComment.trim()) return;
+    
+    const lockedAgentContents: Record<string, string> = {};
+    AGENTS.forEach(agent => {
+      if (lockedAgents[agent]) {
+        lockedAgentContents[agent] = getAgentContent(agent);
+      }
+    });
+    
+    if (onUpdateResult && projectResult) {
+      const newEdits = {
+        ...projectResult.edits,
+        [pendingEdit.agent]: {
+          content: pendingEdit.content,
+          comment: editComment,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+      onUpdateResult({
+        ...projectResult,
+        edits: newEdits,
+      });
+    }
+    
+    if (onRegenerate) {
+      onRegenerate({
+        editComment,
+        editedAgent: pendingEdit.agent,
+        editedContent: pendingEdit.content,
+        lockedAgents: lockedAgentContents,
+        agentsToRegenerate,
+      });
+    }
+    
+    setShowConfirmModal(false);
+    setEditState(null);
+    setPendingEdit(null);
+    setEditComment('');
+    setAgentsToRegenerate([]);
+  }, [pendingEdit, editComment, lockedAgents, agentsToRegenerate, onUpdateResult, onRegenerate, projectResult, getAgentContent]);
+
+  const handleCancelConfirm = useCallback(() => {
+    setShowConfirmModal(false);
+    setPendingEdit(null);
+    setEditComment('');
+    setAgentsToRegenerate([]);
+  }, []);
 
   useEffect(() => {
     if (!runId) return;
@@ -733,6 +883,9 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
               const isActive = activeAgent === agent;
               const displayMessage = getDisplayMessage(state);
               const formattedContent = displayMessage ? formatAgentContent(displayMessage.content) : '';
+              const isEditing = editState?.agent === agent;
+              const isLocked = lockedAgents[agent] || false;
+              const hasContent = displayMessage || getAgentContent(agent);
               
               return (
                 <div 
@@ -740,7 +893,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
                   className={`
                     relative rounded-xl overflow-hidden transition-all duration-500
                     ${isActive ? `border-2 ${borderColor} shadow-lg ${glowColor}` : 'border border-slate-700/50'}
-                    ${state.status === 'idle' ? 'opacity-40' : 'opacity-100'}
+                    ${state.status === 'idle' && !hasContent ? 'opacity-40' : 'opacity-100'}
+                    ${isLocked ? 'ring-2 ring-amber-500/30' : ''}
                     hover:border-slate-600 hover:shadow-md
                     bg-gradient-to-b from-slate-800/80 to-slate-900/80
                   `}
@@ -766,6 +920,11 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className={`font-semibold ${textColor}`}>{agent}</span>
+                        {isLocked && (
+                          <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                        )}
                         {state.status === 'thinking' && (
                           <span className="flex items-center gap-1 text-xs text-slate-400">
                             <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -773,7 +932,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
                             <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '300ms' }} />
                           </span>
                         )}
-                        {state.status === 'complete' && (
+                        {state.status === 'complete' && !isLocked && (
                           <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                           </svg>
@@ -781,18 +940,76 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
                       </div>
                       <span className="text-xs text-slate-500">{description}</span>
                     </div>
+                    
+                    {/* Edit and Lock buttons */}
+                    {(isComplete || hasContent) && !isEditing && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleToggleLock(agent)}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            isLocked 
+                              ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30' 
+                              : 'text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                          }`}
+                          title={isLocked ? 'Unlock agent' : 'Lock agent'}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            {isLocked ? (
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                            ) : (
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                            )}
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleStartEdit(agent)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-300 transition-colors"
+                          title="Edit content"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
                   </div>
                   
                   {/* Agent Content */}
-                  <div className="p-4 min-h-[120px] max-h-[200px] overflow-y-auto">
-                    {!displayMessage ? (
+                  <div className="p-4 min-h-[120px] max-h-[300px] overflow-y-auto">
+                    {isEditing ? (
+                      <div className="space-y-3">
+                        <textarea
+                          value={editState.content}
+                          onChange={(e) => setEditState({ ...editState, content: e.target.value })}
+                          className="w-full h-40 bg-slate-900 border border-slate-600 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                          placeholder="Edit agent content..."
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={handleCancelEdit}
+                            className="px-3 py-1.5 text-sm rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleApplyEdit}
+                            className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </div>
+                    ) : !displayMessage && !getAgentContent(agent) ? (
                       <div className="flex items-center justify-center h-full">
                         <p className="text-sm text-slate-500 italic">
                           {state.status === 'thinking' ? 'Processing...' : 'Awaiting turn...'}
                         </p>
                       </div>
                     ) : (
-                      <MarkdownContent content={formattedContent} className="text-sm" />
+                      <MarkdownContent 
+                        content={formattedContent || formatAgentContent(getAgentContent(agent))} 
+                        className="text-sm" 
+                      />
                     )}
                   </div>
                 </div>
@@ -895,6 +1112,181 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
         <span>Run ID: {runId.substring(0, 8)}...</span>
         <span>{messages.length} events</span>
       </div>
+
+      {/* Edit Confirmation Modal */}
+      {showConfirmModal && pendingEdit && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-slate-700">
+              <h3 className="text-xl font-bold text-white">Confirm Edit & Regenerate</h3>
+              <p className="text-sm text-slate-400 mt-1">
+                You edited <span className={AGENT_TEXT_COLORS[pendingEdit.agent]}>{pendingEdit.agent}</span>. 
+                This will affect downstream agents.
+              </p>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              {/* Edit Comment */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  What did you change? <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  value={editComment}
+                  onChange={(e) => setEditComment(e.target.value)}
+                  className="w-full h-24 bg-slate-900 border border-slate-600 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                  placeholder="Describe your changes so the AI can understand the context..."
+                />
+              </div>
+              
+              {/* Dependency Graph */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-3">
+                  Agent Dependency Flow
+                </label>
+                <div className="bg-slate-900/50 rounded-lg p-4">
+                  <div className="flex items-center justify-center gap-2 flex-wrap">
+                    {AGENTS.map((agent, idx) => {
+                      const isEdited = agent === pendingEdit.agent;
+                      const isAffected = AGENT_DEPENDENCIES[pendingEdit.agent as AgentName]?.includes(agent as AgentName);
+                      const isLocked = lockedAgents[agent];
+                      const willRegenerate = agentsToRegenerate.includes(agent);
+                      
+                      return (
+                        <div key={agent} className="flex items-center gap-2">
+                          <div 
+                            className={`
+                              px-3 py-2 rounded-lg text-sm font-medium transition-all
+                              ${isEdited ? 'bg-blue-500/30 border-2 border-blue-500 text-blue-300' : ''}
+                              ${isAffected && !isEdited ? (isLocked ? 'bg-amber-500/20 border border-amber-500/50 text-amber-300' : willRegenerate ? 'bg-green-500/20 border border-green-500/50 text-green-300' : 'bg-slate-700 border border-slate-600 text-slate-400') : ''}
+                              ${!isEdited && !isAffected ? 'bg-slate-800 border border-slate-700 text-slate-500' : ''}
+                            `}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              {isLocked && (
+                                <svg className="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                </svg>
+                              )}
+                              {isEdited && (
+                                <svg className="w-3 h-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                              )}
+                              {agent}
+                            </div>
+                          </div>
+                          {idx < AGENTS.length - 1 && (
+                            <svg className="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center justify-center gap-4 mt-4 text-xs text-slate-500">
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-blue-500/30 border border-blue-500"></span> Edited
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-green-500/20 border border-green-500/50"></span> Will Regenerate
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-amber-500/20 border border-amber-500/50"></span> Locked
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Agents to Regenerate */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-3">
+                  Select agents to regenerate
+                </label>
+                <div className="space-y-2">
+                  {AGENTS.filter(agent => agent !== pendingEdit.agent).map(agent => {
+                    const isAffected = AGENT_DEPENDENCIES[pendingEdit.agent as AgentName]?.includes(agent as AgentName);
+                    const isLocked = lockedAgents[agent];
+                    const willRegenerate = agentsToRegenerate.includes(agent);
+                    
+                    return (
+                      <div 
+                        key={agent}
+                        className={`
+                          flex items-center justify-between p-3 rounded-lg border transition-all
+                          ${isLocked ? 'bg-amber-500/10 border-amber-500/30' : willRegenerate ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-800/50 border-slate-700'}
+                        `}
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={willRegenerate}
+                            onChange={() => handleToggleAgentRegenerate(agent)}
+                            disabled={isLocked}
+                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500/50 disabled:opacity-50"
+                          />
+                          <div className={`w-8 h-8 rounded-full ${AGENT_COLORS[agent]} flex items-center justify-center`}>
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={AGENT_ICONS[agent]} />
+                            </svg>
+                          </div>
+                          <div>
+                            <span className={`font-medium ${AGENT_TEXT_COLORS[agent]}`}>{agent}</span>
+                            <span className="text-xs text-slate-500 ml-2">{AGENT_DESCRIPTIONS[agent]}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isAffected && !isLocked && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400">Affected</span>
+                          )}
+                          <button
+                            onClick={() => handleToggleLock(agent)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              isLocked 
+                                ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30' 
+                                : 'text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                            }`}
+                            title={isLocked ? 'Unlock agent' : 'Lock agent'}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              {isLocked ? (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                              ) : (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                              )}
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-slate-700 flex justify-end gap-3">
+              <button
+                onClick={handleCancelConfirm}
+                className="px-4 py-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmRegenerate}
+                disabled={!editComment.trim()}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Regenerate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
