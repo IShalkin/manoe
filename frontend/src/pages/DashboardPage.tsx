@@ -1,9 +1,9 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { useSettings } from '../hooks/useSettings';
 import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
 import { MoralCompass } from '../types';
-import { AgentChat } from '../components/AgentChat';
 
 // Helper to format any value as readable Markdown
 function formatValueAsMarkdown(value: unknown, depth = 0): string {
@@ -101,14 +101,13 @@ interface ProjectFormData {
 }
 
 export function DashboardPage() {
+  const navigate = useNavigate();
   const { hasAnyApiKey, getAgentConfig, getProviderKey } = useSettings();
   const { 
     projects, 
     createProject, 
     updateProject,
     startGeneration, 
-    completeGeneration, 
-    failGeneration,
     deleteProject,
   } = useProjects();
   
@@ -155,9 +154,6 @@ export function DashboardPage() {
   };
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [showAgentChat, setShowAgentChat] = useState(false);
   const [viewingProject, setViewingProject] = useState<StoredProject | null>(null);
 
   // Open result viewer for completed/error projects
@@ -165,12 +161,10 @@ export function DashboardPage() {
     setViewingProject(project);
   };
 
-  // Continue an in-progress generation
+  // Continue an in-progress generation - navigate to generation page
   const continueGeneration = (project: StoredProject) => {
     if (project.runId) {
-      setCurrentRunId(project.runId);
-      setCurrentProjectId(project.id);
-      setShowAgentChat(true);
+      navigate(`/generate/${project.id}?runId=${project.runId}`);
     }
   };
 
@@ -179,7 +173,6 @@ export function DashboardPage() {
     e.preventDefault();
     setIsGenerating(true);
     setError(null);
-    setCurrentRunId(null);
     
     const architectConfig = getAgentConfig('architect');
     if (!architectConfig) {
@@ -242,10 +235,9 @@ export function DashboardPage() {
         
         await startGeneration(projectId, data.run_id);
         
-        setCurrentRunId(data.run_id);
-        setCurrentProjectId(projectId);
-        setShowAgentChat(true);
         closeProjectModal();
+        // Navigate to the separate generation page
+        navigate(`/generate/${projectId}?runId=${data.run_id}`);
       } else {
         setError(data.error || 'Failed to start generation. Please try again.');
       }
@@ -318,36 +310,6 @@ export function DashboardPage() {
               </svg>
             </button>
           </div>
-        </div>
-      )}
-
-      {showAgentChat && currentRunId && (
-        <div className="mb-6">
-          <AgentChat
-            runId={currentRunId}
-            orchestratorUrl={ORCHESTRATOR_URL}
-            onComplete={async (result) => {
-              // Update project with generation result
-              if (currentProjectId) {
-                try {
-                  if (result.error) {
-                    await failGeneration(currentProjectId, result.error);
-                  } else {
-                    await completeGeneration(currentProjectId, {
-                      narrativePossibility: result.narrative_possibility,
-                    });
-                  }
-                } catch (e) {
-                  console.error('[DashboardPage] Failed to update project:', e);
-                }
-              }
-            }}
-            onClose={() => {
-              setShowAgentChat(false);
-              setCurrentRunId(null);
-              setCurrentProjectId(null);
-            }}
-          />
         </div>
       )}
 
