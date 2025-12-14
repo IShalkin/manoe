@@ -20,13 +20,15 @@ export function DashboardPage() {
   const { 
     projects, 
     createProject, 
+    updateProject,
     startGeneration, 
     completeGeneration, 
     failGeneration,
     deleteProject,
   } = useProjects();
   
-  const [showNewProject, setShowNewProject] = useState(false);
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [editingProject, setEditingProject] = useState<StoredProject | null>(null);
   const [formData, setFormData] = useState<ProjectFormData>({
     name: '',
     seedIdea: '',
@@ -34,8 +36,39 @@ export function DashboardPage() {
     targetAudience: '',
     themes: '',
   });
+
+  const openNewProjectModal = () => {
+    setEditingProject(null);
+    setFormData({
+      name: '',
+      seedIdea: '',
+      moralCompass: 'ambiguous',
+      targetAudience: '',
+      themes: '',
+    });
+    setError(null);
+    setShowProjectModal(true);
+  };
+
+  const openEditProjectModal = (project: StoredProject) => {
+    setEditingProject(project);
+    setFormData({
+      name: project.name,
+      seedIdea: project.seedIdea,
+      moralCompass: (project.moralCompass as MoralCompass) || 'ambiguous',
+      targetAudience: project.targetAudience,
+      themes: project.themes,
+    });
+    setError(null);
+    setShowProjectModal(true);
+  };
+
+  const closeProjectModal = () => {
+    setShowProjectModal(false);
+    setEditingProject(null);
+    setError(null);
+  };
   const [isGenerating, setIsGenerating] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<StoredProject | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -47,7 +80,6 @@ export function DashboardPage() {
     setError(null);
     setCurrentRunId(null);
     
-    // Get the Writer agent's configuration (or use Architect for initial generation)
     const architectConfig = getAgentConfig('architect');
     if (!architectConfig) {
       setError('No agent configuration found. Please configure agents in Settings.');
@@ -64,7 +96,6 @@ export function DashboardPage() {
     }
     
     try {
-      // Call the multi-agent orchestrator
       const response = await fetch(`${ORCHESTRATOR_URL}/generate`, {
         method: 'POST',
         headers: {
@@ -84,31 +115,36 @@ export function DashboardPage() {
       const data = await response.json();
       
       if (data.success && data.run_id) {
-        // Create project in persistent storage
-        const newProject = await createProject({
-          name: formData.name || 'Untitled Project',
-          seedIdea: formData.seedIdea,
-          moralCompass: formData.moralCompass,
-          targetAudience: formData.targetAudience,
-          themes: formData.themes,
-        });
+        let projectId: string;
         
-        // Start generation for this project
-        await startGeneration(newProject.id, data.run_id);
+        if (editingProject) {
+          await updateProject(editingProject.id, {
+            name: formData.name || 'Untitled Project',
+            seedIdea: formData.seedIdea,
+            moralCompass: formData.moralCompass,
+            targetAudience: formData.targetAudience,
+            themes: formData.themes,
+            status: 'pending',
+            result: null,
+          });
+          projectId = editingProject.id;
+        } else {
+          const newProject = await createProject({
+            name: formData.name || 'Untitled Project',
+            seedIdea: formData.seedIdea,
+            moralCompass: formData.moralCompass,
+            targetAudience: formData.targetAudience,
+            themes: formData.themes,
+          });
+          projectId = newProject.id;
+        }
         
-        // Show the agent chat to visualize communication
+        await startGeneration(projectId, data.run_id);
+        
         setCurrentRunId(data.run_id);
-        setCurrentProjectId(newProject.id);
+        setCurrentProjectId(projectId);
         setShowAgentChat(true);
-        setShowNewProject(false);
-        
-        setFormData({
-          name: '',
-          seedIdea: '',
-          moralCompass: 'ambiguous',
-          targetAudience: '',
-          themes: '',
-        });
+        closeProjectModal();
       } else {
         setError(data.error || 'Failed to start generation. Please try again.');
       }
@@ -146,7 +182,7 @@ export function DashboardPage() {
           <p className="text-slate-400">Create and manage your narrative projects</p>
         </div>
         <button
-          onClick={() => setShowNewProject(true)}
+          onClick={openNewProjectModal}
           className="bg-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-500 transition-colors flex items-center gap-2"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -205,40 +241,13 @@ export function DashboardPage() {
         </div>
       )}
 
-      {selectedProject && (
-        <div className="mb-6 bg-green-500/10 border border-green-500/30 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-green-400">{selectedProject.name}</h3>
-            <button onClick={() => setSelectedProject(null)} className="text-slate-400 hover:text-white">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div className="prose prose-invert max-w-none">
-            <div className="mb-4">
-              <span className="text-xs text-slate-500">Seed Idea:</span>
-              <p className="text-sm text-slate-300">{selectedProject.seedIdea}</p>
-            </div>
-            {selectedProject.result?.narrativePossibility && (
-              <pre className="whitespace-pre-wrap text-sm text-slate-300 bg-slate-900/50 p-4 rounded-lg overflow-auto max-h-96">
-                {JSON.stringify(selectedProject.result.narrativePossibility, null, 2)}
-              </pre>
-            )}
-            {selectedProject.result?.error && (
-              <div className="text-red-400 text-sm">{selectedProject.result.error}</div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {showNewProject && (
+      {showProjectModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-700">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold">Create New Project</h2>
+              <h2 className="text-2xl font-bold">{editingProject ? 'Edit Project' : 'Create New Project'}</h2>
               <button
-                onClick={() => { setShowNewProject(false); setError(null); }}
+                onClick={closeProjectModal}
                 className="text-slate-400 hover:text-white transition-colors"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -332,7 +341,7 @@ export function DashboardPage() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowNewProject(false)}
+                  onClick={closeProjectModal}
                   className="flex-1 px-6 py-3 border border-slate-600 rounded-xl hover:bg-slate-700 transition-colors"
                 >
                   Cancel
@@ -350,6 +359,8 @@ export function DashboardPage() {
                       </svg>
                       Generating...
                     </>
+                  ) : editingProject ? (
+                    'Generate'
                   ) : (
                     'Create Project'
                   )}
@@ -365,7 +376,7 @@ export function DashboardPage() {
           <div 
             key={project.id} 
             className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 hover:border-primary-500/50 transition-colors cursor-pointer"
-            onClick={() => setSelectedProject(project)}
+            onClick={() => openEditProjectModal(project)}
           >
             <div className="flex items-start justify-between mb-3">
               <h3 className="font-semibold text-lg">{project.name}</h3>
@@ -406,7 +417,7 @@ export function DashboardPage() {
           </div>
         ))}
         
-        <div className="bg-slate-800/30 border-2 border-dashed border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:border-primary-500/50 transition-colors cursor-pointer" onClick={() => setShowNewProject(true)}>
+        <div className="bg-slate-800/30 border-2 border-dashed border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:border-primary-500/50 transition-colors cursor-pointer" onClick={openNewProjectModal}>
           <div className="w-16 h-16 rounded-full bg-slate-700/50 flex items-center justify-center mb-4">
             <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
