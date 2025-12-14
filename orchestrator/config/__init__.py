@@ -5,12 +5,14 @@ LLM provider configuration and settings.
 
 from .llm_providers import (
     CLAUDE_MODELS,
+    DEEPSEEK_MODELS,
     GEMINI_MODELS,
     # Model Definitions
     OPENAI_MODELS,
     OPENROUTER_MODELS,
     AgentModelConfig,
     ClaudeConfig,
+    DeepSeekConfig,
     GeminiConfig,
     LLMConfiguration,
     # Enums
@@ -31,11 +33,13 @@ __all__ = [
     "OPENROUTER_MODELS",
     "GEMINI_MODELS",
     "CLAUDE_MODELS",
+    "DEEPSEEK_MODELS",
     "ProviderConfig",
     "OpenAIConfig",
     "OpenRouterConfig",
     "GeminiConfig",
     "ClaudeConfig",
+    "DeepSeekConfig",
     "AgentModelConfig",
     "LLMConfiguration",
     "get_all_models",
