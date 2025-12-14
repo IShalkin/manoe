@@ -3,6 +3,29 @@ import { UserSettings, ProviderConfig, AgentConfig, LLMProvider, AGENTS, MODELS,
 
 const STORAGE_KEY = 'manoe_settings';
 const MODELS_CACHE_KEY = 'manoe_models_cache';
+const SETTINGS_VERSION = 2;
+
+const OLD_DEFAULT_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
+
+function migrateSettings(parsed: UserSettings & { schemaVersion?: number }): UserSettings & { schemaVersion: number } {
+  const currentVersion = parsed.schemaVersion || 1;
+  
+  if (currentVersion < 2) {
+    const hasNoApiKeys = !parsed.providers || parsed.providers.length === 0 || 
+      parsed.providers.every(p => !p.apiKey || p.apiKey.length === 0);
+    
+    if (hasNoApiKeys) {
+      parsed.agents = parsed.agents.map(agent => ({
+        ...agent,
+        model: OLD_DEFAULT_MODELS.includes(agent.model) ? '' : agent.model,
+      }));
+    }
+    
+    localStorage.removeItem(MODELS_CACHE_KEY);
+  }
+  
+  return { ...parsed, schemaVersion: SETTINGS_VERSION };
+}
 
 interface DynamicModel {
   id: string;
@@ -56,8 +79,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
-        setSettings(parsed);
-        console.log('[SettingsContext] Loaded providers:', parsed.providers?.length || 0);
+        const migrated = migrateSettings(parsed);
+        setSettings(migrated);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+        console.log('[SettingsContext] Loaded providers:', migrated.providers?.length || 0);
       } catch (e) {
         console.error('[SettingsContext] Failed to parse settings:', e);
       }

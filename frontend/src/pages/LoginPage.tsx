@@ -47,11 +47,11 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+    <div className="min-h-screen flex items-center justify-center bg-neutral-900">
       <div className="max-w-md w-full mx-4">
         <div className="bg-slate-800/50 backdrop-blur-sm rounded-2xl p-8 shadow-2xl border border-slate-700">
           <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-primary-400 to-accent-500 bg-clip-text text-transparent mb-2">
+            <h1 className="text-4xl font-bold text-white mb-2">
               MANOE
             </h1>
             <p className="text-slate-400 text-lg">
@@ -125,7 +125,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-primary-500 to-accent-500 text-white font-medium py-3 px-4 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="w-full bg-blue-600 text-white font-medium py-3 px-4 rounded-lg hover:bg-blue-500 transition-colors disabled:opacity-50"
             >
               {loading ? 'Loading...' : isSignUp ? 'Create Account' : 'Sign In'}
             </button>

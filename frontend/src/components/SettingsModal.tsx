@@ -34,7 +34,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-slate-700">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
@@ -94,7 +94,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <div key={provider.id} className="bg-slate-900/50 rounded-xl p-4 border border-slate-700">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center font-bold text-white">
+                        <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white">
                           {provider.icon}
                         </div>
                         <div>
@@ -236,7 +236,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         <div className="p-4 border-t border-slate-700 bg-slate-800/50">
           <button
             onClick={onClose}
-            className="w-full bg-gradient-to-r from-primary-500 to-accent-500 text-white px-6 py-3 rounded-xl font-medium hover:opacity-90 transition-opacity"
+            className="w-full bg-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-500 transition-colors"
           >
             Done
           </button>

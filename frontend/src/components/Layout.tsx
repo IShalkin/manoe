@@ -30,13 +30,13 @@ export function Layout({ children }: LayoutProps) {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+    <div className="min-h-screen bg-neutral-900">
       <nav className="bg-slate-800/50 backdrop-blur-sm border-b border-slate-700 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-8">
               <Link to="/" className="flex items-center gap-2">
-                <span className="text-2xl font-bold bg-gradient-to-r from-primary-400 to-accent-500 bg-clip-text text-transparent">
+                <span className="text-2xl font-bold text-white">
                   MANOE
                 </span>
               </Link>
@@ -70,7 +70,7 @@ export function Layout({ children }: LayoutProps) {
               )}
               <button
                 onClick={() => setIsSettingsOpen(true)}
-                className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center hover:opacity-90 transition-opacity"
+                className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center hover:bg-blue-500 transition-colors"
                 title="Profile & Settings"
               >
                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

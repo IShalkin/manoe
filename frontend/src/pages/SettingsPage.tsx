@@ -43,7 +43,7 @@ export function SettingsPage() {
               <div key={provider.id} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center font-bold text-white">
+                    <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white">
                       {provider.icon}
                     </div>
                     <div>

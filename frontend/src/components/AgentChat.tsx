@@ -30,11 +30,11 @@ interface AgentChatProps {
 
 const AGENT_COLORS: Record<string, string> = {
   Architect: 'bg-blue-500',
-  Profiler: 'bg-purple-500',
+  Profiler: 'bg-cyan-500',
   Strategist: 'bg-green-500',
   Writer: 'bg-amber-500',
   Critic: 'bg-red-500',
-  System: 'bg-slate-500',
+  System: 'bg-neutral-500',
 };
 
 const AGENT_ICONS: Record<string, string> = {
@@ -206,7 +206,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
     if (type === 'phase_start') {
       return (
         <div key={msg.id} className="flex items-center justify-center py-4">
-          <div className="bg-gradient-to-r from-primary-500/20 to-accent-500/20 border border-primary-500/30 rounded-full px-4 py-1">
+          <div className="bg-blue-500/20 border border-blue-500/30 rounded-full px-4 py-1">
             <span className="text-sm font-medium text-primary-400">
               Phase: {data.phase?.charAt(0).toUpperCase()}{data.phase?.slice(1)}
             </span>
