@@ -320,6 +320,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
   const [isPlaying, setIsPlaying] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const currentRoundRef = useRef(1);
+  const hasMessageInCurrentRoundRef = useRef(false);
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -344,10 +345,16 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose }: Agent
         
         if (data.type === 'agent_message') {
           data.data.round = currentRoundRef.current;
+          hasMessageInCurrentRoundRef.current = true;
         }
         
         if (data.type === 'agent_complete') {
-          currentRoundRef.current += 1;
+          // Only increment round if we've seen at least one message in the current round
+          // This prevents starting from round 2 if agent_complete arrives before agent_message
+          if (hasMessageInCurrentRoundRef.current) {
+            currentRoundRef.current += 1;
+            hasMessageInCurrentRoundRef.current = false;
+          }
         }
         
         setMessages((prev) => [...prev, data]);
