@@ -2,6 +2,63 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { ProjectResult } from '../hooks/useProjects';
 
+// Tolerant JSON parser that handles common LLM output issues
+function tolerantJsonParse(str: string): unknown | null {
+  const trimmed = str.trim();
+  
+  // Try standard JSON.parse first
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Continue to tolerant parsing
+  }
+  
+  // Try to fix common issues
+  let fixed = trimmed;
+  
+  // Remove trailing commas before } or ]
+  fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
+  
+  // Replace Python-style booleans and None
+  fixed = fixed.replace(/\bTrue\b/g, 'true');
+  fixed = fixed.replace(/\bFalse\b/g, 'false');
+  fixed = fixed.replace(/\bNone\b/g, 'null');
+  
+  // Replace single quotes with double quotes (careful with apostrophes)
+  // Only do this if there are no double quotes in the string
+  if (!fixed.includes('"') && fixed.includes("'")) {
+    fixed = fixed.replace(/'/g, '"');
+  }
+  
+  try {
+    return JSON.parse(fixed);
+  } catch {
+    // Continue
+  }
+  
+  // Try to extract JSON from the string
+  const jsonMatch = fixed.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      // Try with fixes on extracted JSON
+      let extracted = jsonMatch[0];
+      extracted = extracted.replace(/,(\s*[}\]])/g, '$1');
+      extracted = extracted.replace(/\bTrue\b/g, 'true');
+      extracted = extracted.replace(/\bFalse\b/g, 'false');
+      extracted = extracted.replace(/\bNone\b/g, 'null');
+      try {
+        return JSON.parse(extracted);
+      } catch {
+        // Give up
+      }
+    }
+  }
+  
+  return null;
+}
+
 function formatAnyAsMarkdown(parsed: unknown): string {
   if (parsed === null || parsed === undefined) {
     return '';
@@ -104,23 +161,19 @@ function formatAgentContent(content: string): string {
   
   const trimmed = content.trim();
   
-  // First, try direct JSON parse
-  try {
-    const parsed = JSON.parse(trimmed);
+  // First, try tolerant JSON parse (handles common LLM issues)
+  const parsed = tolerantJsonParse(trimmed);
+  if (parsed !== null) {
     return formatAnyAsMarkdown(parsed);
-  } catch {
-    // Continue to other methods
   }
   
   // Check for ```json code blocks
   if (content.includes('```json')) {
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[1]);
-        return formatAnyAsMarkdown(parsed);
-      } catch {
-        // Continue
+      const blockParsed = tolerantJsonParse(jsonMatch[1]);
+      if (blockParsed !== null) {
+        return formatAnyAsMarkdown(blockParsed);
       }
     }
   }
@@ -129,11 +182,9 @@ function formatAgentContent(content: string): string {
   if (trimmed.includes('{') || trimmed.includes('[')) {
     const extracted = extractJsonFromString(trimmed);
     if (extracted) {
-      try {
-        const parsed = JSON.parse(extracted);
-        return formatAnyAsMarkdown(parsed);
-      } catch {
-        // Continue
+      const extractedParsed = tolerantJsonParse(extracted);
+      if (extractedParsed !== null) {
+        return formatAnyAsMarkdown(extractedParsed);
       }
     }
   }
@@ -345,6 +396,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const [error, setError] = useState<string | null>(null);
   const [currentPhase, setCurrentPhase] = useState<string>('Initializing');
   const [isComplete, setIsComplete] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -379,6 +432,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       setError(null);
       setCurrentPhase('Initializing');
       setIsComplete(false);
+      setIsCancelled(false);
+      setIsCancelling(false);
       setSelectedRound(null);
       setIsPlaying(false);
       currentRoundRef.current = 1;
@@ -391,6 +446,36 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       setPendingEdit(null);
     }
   }, [runId]);
+
+  // Handle stop generation
+  const handleStopGeneration = useCallback(async () => {
+    if (!runId || !orchestratorUrl || isCancelling || isComplete) return;
+    
+    setIsCancelling(true);
+    
+    try {
+      // Close SSE connection first
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      
+      // Call cancel endpoint
+      const response = await fetch(`${orchestratorUrl}/runs/${runId}/cancel`, {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        setIsCancelled(true);
+        setIsConnected(false);
+        setCurrentPhase('Cancelled');
+      }
+    } catch (err) {
+      console.error('Failed to cancel generation:', err);
+    } finally {
+      setIsCancelling(false);
+    }
+  }, [runId, orchestratorUrl, isCancelling, isComplete]);
 
   const getAgentContent = useCallback((agent: string): string => {
     if (projectResult?.edits?.[agent]) {
@@ -792,22 +877,53 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
           <h3 className="font-bold text-base sm:text-lg">Multi-Agent Orchestration</h3>
           <div className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs font-medium ${
+            isCancelled ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
             isConnected ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 
             isComplete ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 
             'bg-red-500/20 text-red-400 border border-red-500/30'
           }`}>
             <div className={`w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full ${
+              isCancelled ? 'bg-amber-400' :
               isConnected ? 'bg-green-400 animate-pulse' : 
               isComplete ? 'bg-blue-400' : 
               'bg-red-400'
             }`} />
-            {isConnected ? 'Live' : isComplete ? 'Complete' : 'Disconnected'}
+            {isCancelled ? 'Cancelled' : isConnected ? 'Live' : isComplete ? 'Complete' : 'Disconnected'}
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
           <span className="text-xs sm:text-sm text-slate-400">
             Phase: <span className="text-white font-medium">{currentPhase}</span>
           </span>
+          {isConnected && !isComplete && !isCancelled && (
+            <button 
+              onClick={handleStopGeneration}
+              disabled={isCancelling}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                isCancelling 
+                  ? 'bg-slate-700 text-slate-500 cursor-not-allowed' 
+                  : 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
+              }`}
+            >
+              {isCancelling ? (
+                <>
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Stopping...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                  </svg>
+                  Stop
+                </>
+              )}
+            </button>
+          )}
           {onClose && (
             <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-700 transition-colors">
               <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
