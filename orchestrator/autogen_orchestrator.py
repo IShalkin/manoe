@@ -3041,6 +3041,12 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             # Use previous genesis result
             narrative = get_previous_artifact("genesis", "narrative_possibility")
             if narrative:
+                # Parse the narrative if it's a string (JSON)
+                if isinstance(narrative, str):
+                    try:
+                        narrative = self._extract_json(narrative)
+                    except Exception:
+                        pass
                 genesis_result = {"narrative_possibility": narrative}
                 results["phases"]["genesis"] = genesis_result
                 self._emit_event("phase_skipped", {"phase": "genesis", "reason": "using_previous_artifact"})
