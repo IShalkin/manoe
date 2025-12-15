@@ -2876,6 +2876,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         scenes_to_regenerate: Optional[List[int]] = None,
         previous_run_id: Optional[str] = None,
         change_request: Optional[str] = None,
+        supabase_project_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration
@@ -2962,14 +2963,18 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 "scenes_to_regenerate": scenes_to_regenerate,
             })
 
-        # Generate a unique project ID for memory storage
-        project_id = project.seed_idea[:20].replace(" ", "_") + "_" + str(hash(project.seed_idea))[:8]
+        # Generate a unique project ID for memory storage (Qdrant)
+        memory_project_id = project.seed_idea[:20].replace(" ", "_") + "_" + str(hash(project.seed_idea))[:8]
+        
+        # Use Supabase project UUID for persistence if provided, otherwise fall back to memory_project_id
+        # Note: Supabase persistence requires a valid UUID that exists in the projects table
+        persistence_project_id = supabase_project_id if supabase_project_id else memory_project_id
 
         # Initialize state early so it's available for all phases (including skipped ones)
         # This is needed because _call_agent accesses self.state.phase
         self.state = GenerationState(
             phase=GenerationPhase.GENESIS,
-            project_id=project_id,
+            project_id=memory_project_id,  # Use memory_project_id for state (used by Qdrant)
             messages=[],
             current_scene=0,
             max_revisions=max_revisions,
@@ -2982,9 +2987,9 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Helper function to store artifact in Supabase
         async def store_artifact(phase: str, artifact_type: str, content: Dict[str, Any]) -> None:
-            if persistence_service and run_id and persistence_service.is_connected:
+            if persistence_service and run_id and persistence_service.is_connected and supabase_project_id:
                 await persistence_service.store_run_artifact(
-                    project_id=project_id,
+                    project_id=persistence_project_id,
                     run_id=run_id,
                     phase=phase,
                     artifact_type=artifact_type,
@@ -2993,9 +2998,9 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Helper function to store individual scene artifact
         async def store_scene(scene_number: int, draft: Dict[str, Any], polished: Optional[Dict[str, Any]] = None) -> None:
-            if persistence_service and run_id and persistence_service.is_connected:
+            if persistence_service and run_id and persistence_service.is_connected and supabase_project_id:
                 await persistence_service.store_scene_artifact(
-                    project_id=project_id,
+                    project_id=persistence_project_id,
                     run_id=run_id,
                     scene_number=scene_number,
                     draft=draft,

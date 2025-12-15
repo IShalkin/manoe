@@ -122,6 +122,7 @@ export function GenerationPage() {
           previous_run_id: runId,
           edited_content: editedContent,
           scenes_to_regenerate: constraints.scenesToRegenerate,
+          supabase_project_id: project.id,
         }),
       });
 
@@ -197,6 +198,7 @@ export function GenerationPage() {
           model: agentConfig.model,
           api_key: apiKey,
           generation_mode: 'full',
+          supabase_project_id: project.id,
         }),
       });
 
