@@ -545,3 +545,190 @@ class SupabasePersistenceService:
         except Exception as e:
             print(f"Failed to get worldbuilding: {e}")
             return []
+
+    async def store_scene_artifact(
+        self, project_id: str, run_id: str, scene_number: int, 
+        draft: Dict[str, Any], polished: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
+        """
+        Store an individual scene artifact for a generation run.
+        
+        Args:
+            project_id: UUID of the project
+            run_id: UUID of the generation run
+            scene_number: Scene number (1-indexed)
+            draft: Draft content for the scene
+            polished: Optional polished content for the scene
+            
+        Returns:
+            Created artifact ID or None
+        """
+        if not self.is_connected:
+            return None
+            
+        try:
+            content = {
+                "scene_number": scene_number,
+                "draft": draft,
+                "polished": polished,
+            }
+            
+            data = {
+                "project_id": project_id,
+                "run_id": run_id,
+                "phase": "drafting",
+                "artifact_type": f"scene_{scene_number}",
+                "content": content,
+            }
+            
+            result = self.client.table("run_artifacts").upsert(
+                data,
+                on_conflict="run_id,phase,artifact_type"
+            ).execute()
+            if result.data:
+                return result.data[0]["id"]
+        except Exception as e:
+            print(f"Failed to store scene artifact for scene {scene_number}: {e}")
+            
+        return None
+
+    async def get_scene_artifact(
+        self, run_id: str, scene_number: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a specific scene artifact for a generation run.
+        
+        Args:
+            run_id: UUID of the generation run
+            scene_number: Scene number (1-indexed)
+            
+        Returns:
+            Scene content (with draft and polished) or None
+        """
+        if not self.is_connected:
+            return None
+            
+        try:
+            result = (
+                self.client.table("run_artifacts")
+                .select("content")
+                .eq("run_id", run_id)
+                .eq("phase", "drafting")
+                .eq("artifact_type", f"scene_{scene_number}")
+                .single()
+                .execute()
+            )
+            return result.data.get("content") if result.data else None
+        except Exception as e:
+            print(f"Failed to get scene artifact for scene {scene_number}: {e}")
+            return None
+
+    async def get_all_scene_artifacts(self, run_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all scene artifacts for a generation run.
+        
+        Args:
+            run_id: UUID of the generation run
+            
+        Returns:
+            List of scene contents ordered by scene number
+        """
+        if not self.is_connected:
+            return []
+            
+        try:
+            result = (
+                self.client.table("run_artifacts")
+                .select("content, artifact_type")
+                .eq("run_id", run_id)
+                .eq("phase", "drafting")
+                .like("artifact_type", "scene_%")
+                .execute()
+            )
+            
+            scenes = []
+            for row in result.data or []:
+                content = row.get("content")
+                if content:
+                    scenes.append(content)
+            
+            # Sort by scene number
+            scenes.sort(key=lambda x: x.get("scene_number", 0))
+            return scenes
+        except Exception as e:
+            print(f"Failed to get all scene artifacts: {e}")
+            return []
+
+    async def update_scene_polished(
+        self, run_id: str, scene_number: int, polished: Dict[str, Any]
+    ) -> bool:
+        """
+        Update the polished content for a scene artifact.
+        
+        Args:
+            run_id: UUID of the generation run
+            scene_number: Scene number (1-indexed)
+            polished: Polished content for the scene
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.is_connected:
+            return False
+            
+        try:
+            # First get the existing artifact
+            existing = await self.get_scene_artifact(run_id, scene_number)
+            if not existing:
+                return False
+            
+            # Update with polished content
+            existing["polished"] = polished
+            
+            data = {
+                "content": existing,
+            }
+            
+            self.client.table("run_artifacts").update(data).eq(
+                "run_id", run_id
+            ).eq(
+                "phase", "drafting"
+            ).eq(
+                "artifact_type", f"scene_{scene_number}"
+            ).execute()
+            
+            return True
+        except Exception as e:
+            print(f"Failed to update scene polished for scene {scene_number}: {e}")
+            return False
+
+    async def delete_scene_artifacts(
+        self, run_id: str, scene_numbers: List[int]
+    ) -> bool:
+        """
+        Delete specific scene artifacts for selective regeneration.
+        
+        Args:
+            run_id: UUID of the generation run
+            scene_numbers: List of scene numbers to delete
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.is_connected:
+            return False
+            
+        try:
+            for scene_number in scene_numbers:
+                self.client.table("run_artifacts").delete().eq(
+                    "run_id", run_id
+                ).eq(
+                    "phase", "drafting"
+                ).eq(
+                    "artifact_type", f"scene_{scene_number}"
+                ).execute()
+            
+            return True
+        except Exception as e:
+            print(f"Failed to delete scene artifacts: {e}")
+            return False
