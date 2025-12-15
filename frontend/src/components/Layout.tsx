@@ -10,6 +10,7 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, signOut } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -35,32 +36,47 @@ export function Layout({ children }: LayoutProps) {
       <nav className="bg-slate-800/50 backdrop-blur-sm border-b border-slate-700 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-8">
-              <Link to="/" className="flex items-center gap-2">
-                <span className="text-2xl font-bold text-white">
-                  MANOE
-                </span>
-              </Link>
+                        <div className="flex items-center gap-4 md:gap-8">
+                          {/* Mobile menu button */}
+                          <button
+                            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                            className="md:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors"
+                            aria-label="Toggle menu"
+                          >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              {isMobileMenuOpen ? (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              ) : (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                              )}
+                            </svg>
+                          </button>
               
-              <div className="hidden md:flex items-center gap-1">
-                {navItems.map((item) => (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-                      location.pathname === item.path
-                        ? 'bg-primary-500/20 text-primary-400'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-                    }`}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-                    </svg>
-                    {item.label}
-                  </Link>
-                ))}
-              </div>
-            </div>
+                          <Link to="/" className="flex items-center gap-2">
+                            <span className="text-xl md:text-2xl font-bold text-white">
+                              MANOE
+                            </span>
+                          </Link>
+              
+                          <div className="hidden md:flex items-center gap-1">
+                            {navItems.map((item) => (
+                              <Link
+                                key={item.path}
+                                to={item.path}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                                  location.pathname === item.path
+                                    ? 'bg-primary-500/20 text-primary-400'
+                                    : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                                }`}
+                              >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
+                                </svg>
+                                {item.label}
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
 
             <div className="flex items-center gap-4">
               <span className="text-sm text-slate-400">v2.3</span>
@@ -98,9 +114,34 @@ export function Layout({ children }: LayoutProps) {
             </div>
           </div>
         </div>
-      </nav>
+            </nav>
 
-      <main className="min-h-[calc(100vh-4rem)]">
+            {/* Mobile menu dropdown */}
+            {isMobileMenuOpen && (
+              <div className="md:hidden bg-slate-800/95 backdrop-blur-sm border-b border-slate-700">
+                <div className="px-4 py-3 space-y-1">
+                  {navItems.map((item) => (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                        location.pathname === item.path
+                          ? 'bg-primary-500/20 text-primary-400'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                      }`}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
+                      </svg>
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <main className="min-h-[calc(100vh-4rem)]">
         {children}
       </main>
 
