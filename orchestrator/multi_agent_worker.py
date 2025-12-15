@@ -613,6 +613,182 @@ async def get_run_status(run_id: str):
     return {"run_id": run_id, "status": status}
 
 
+class ModelsRequest(BaseModel):
+    provider: str
+    api_key: str
+
+
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    context_length: Optional[int] = None
+    description: Optional[str] = None
+
+
+class ModelsResponse(BaseModel):
+    success: bool
+    models: Optional[List[ModelInfo]] = None
+    error: Optional[str] = None
+
+
+@app.post("/models", response_model=ModelsResponse)
+async def get_available_models(request: ModelsRequest):
+    """
+    Fetch available models from a provider using the user's API key.
+    This validates the API key and returns the list of models the user has access to.
+    """
+    import httpx
+    
+    provider = request.provider.lower()
+    api_key = request.api_key
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if provider == "openai":
+                # OpenAI Models API
+                response = await client.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"}
+                )
+                if response.status_code != 200:
+                    return ModelsResponse(success=False, error=f"OpenAI API error: {response.status_code}")
+                
+                data = response.json()
+                models = []
+                # Filter to chat models only
+                chat_model_prefixes = ["gpt-4", "gpt-3.5", "o1", "o3"]
+                for model in data.get("data", []):
+                    model_id = model.get("id", "")
+                    if any(model_id.startswith(prefix) for prefix in chat_model_prefixes):
+                        models.append(ModelInfo(
+                            id=model_id,
+                            name=model_id,
+                            context_length=model.get("context_window"),
+                        ))
+                # Sort by name
+                models.sort(key=lambda m: m.id, reverse=True)
+                return ModelsResponse(success=True, models=models)
+            
+            elif provider == "anthropic":
+                # Anthropic doesn't have a models list API, return static list
+                # but validate the key first
+                response = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": "claude-3-5-haiku-20241022",
+                        "max_tokens": 1,
+                        "messages": [{"role": "user", "content": "hi"}]
+                    }
+                )
+                # Check if key is valid (even error responses indicate valid key format)
+                if response.status_code == 401:
+                    return ModelsResponse(success=False, error="Invalid Anthropic API key")
+                
+                # Return available Claude models
+                models = [
+                    ModelInfo(id="claude-opus-4.5-20251124", name="Claude Opus 4.5 (S+ Prose)", context_length=200000, description="Best for living prose and roleplay"),
+                    ModelInfo(id="claude-sonnet-4-20250514", name="Claude Sonnet 4", context_length=200000),
+                    ModelInfo(id="claude-opus-4-20250514", name="Claude Opus 4", context_length=200000),
+                    ModelInfo(id="claude-3-5-sonnet-20241022", name="Claude 3.5 Sonnet", context_length=200000),
+                    ModelInfo(id="claude-3-5-haiku-20241022", name="Claude 3.5 Haiku", context_length=200000),
+                ]
+                return ModelsResponse(success=True, models=models)
+            
+            elif provider == "gemini":
+                # Google Gemini Models API
+                response = await client.get(
+                    f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+                )
+                if response.status_code != 200:
+                    return ModelsResponse(success=False, error=f"Gemini API error: {response.status_code}")
+                
+                data = response.json()
+                models = []
+                for model in data.get("models", []):
+                    model_name = model.get("name", "").replace("models/", "")
+                    if "gemini" in model_name.lower():
+                        models.append(ModelInfo(
+                            id=model_name,
+                            name=model.get("displayName", model_name),
+                            context_length=model.get("inputTokenLimit"),
+                            description=model.get("description"),
+                        ))
+                return ModelsResponse(success=True, models=models)
+            
+            elif provider == "openrouter":
+                # OpenRouter Models API
+                response = await client.get(
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"}
+                )
+                if response.status_code != 200:
+                    return ModelsResponse(success=False, error=f"OpenRouter API error: {response.status_code}")
+                
+                data = response.json()
+                models = []
+                for model in data.get("data", []):
+                    models.append(ModelInfo(
+                        id=model.get("id", ""),
+                        name=model.get("name", model.get("id", "")),
+                        context_length=model.get("context_length"),
+                        description=model.get("description"),
+                    ))
+                # Sort by name
+                models.sort(key=lambda m: m.name)
+                return ModelsResponse(success=True, models=models)
+            
+            elif provider == "deepseek":
+                # DeepSeek uses OpenAI-compatible API
+                response = await client.get(
+                    "https://api.deepseek.com/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"}
+                )
+                if response.status_code != 200:
+                    return ModelsResponse(success=False, error=f"DeepSeek API error: {response.status_code}")
+                
+                data = response.json()
+                models = []
+                for model in data.get("data", []):
+                    models.append(ModelInfo(
+                        id=model.get("id", ""),
+                        name=model.get("id", ""),
+                    ))
+                return ModelsResponse(success=True, models=models)
+            
+            elif provider == "venice":
+                # Venice AI Models API
+                response = await client.get(
+                    "https://api.venice.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"}
+                )
+                if response.status_code != 200:
+                    return ModelsResponse(success=False, error=f"Venice API error: {response.status_code}")
+                
+                data = response.json()
+                models = []
+                for model in data.get("data", []):
+                    model_id = model.get("id", "")
+                    models.append(ModelInfo(
+                        id=model_id,
+                        name=model.get("name", model_id),
+                        context_length=model.get("context_length"),
+                    ))
+                return ModelsResponse(success=True, models=models)
+            
+            else:
+                return ModelsResponse(success=False, error=f"Unknown provider: {provider}")
+    
+    except httpx.TimeoutException:
+        return ModelsResponse(success=False, error="Request timed out")
+    except Exception as e:
+        return ModelsResponse(success=False, error=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
