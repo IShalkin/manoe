@@ -31,7 +31,7 @@ jobs:
             # Wait for orchestrator to be healthy (container needs time to start)
             sleep 30
             
-            # Verify orchestrator is running
-            curl -f http://localhost:8001/health || exit 1
+            # Verify orchestrator is running (check inside container since it's not exposed on localhost)
+            docker exec manoe-orchestrator curl -f http://localhost:8001/health || exit 1
             
             echo "Deployment completed successfully!"
