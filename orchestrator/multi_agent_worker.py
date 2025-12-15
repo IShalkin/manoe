@@ -164,11 +164,14 @@ class MultiAgentWorker:
             # Run generation based on selected mode
             if generation_mode == "full":
                 # Full pipeline: Genesis → Characters → Outlining → Drafting with Writer↔Critic loop
+                # Pass OpenAI API key for Qdrant memory embeddings (only works with OpenAI provider)
+                openai_key = api_key if provider == "openai" else None
                 result = await group_chat.run_full_generation(
                     project,
                     target_word_count=target_word_count,
                     estimated_scenes=estimated_scenes,
                     preferred_structure=preferred_structure,
+                    openai_api_key=openai_key,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow
