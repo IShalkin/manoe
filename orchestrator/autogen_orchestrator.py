@@ -2947,6 +2947,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # This is needed because _call_agent accesses self.state.phase
         self.state = GenerationState(
             phase=GenerationPhase.GENESIS,
+            project_id=project_id,
             messages=[],
             current_scene=0,
             max_revisions=max_revisions,
