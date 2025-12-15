@@ -18,12 +18,17 @@ from models import (
 )
 from prompts import (
     ARCHITECT_SYSTEM_PROMPT,
+    COMPLEXITY_CHECKLIST_PROMPT,
+    CONTRADICTION_MAPS_PROMPT,
     CRITIC_SYSTEM_PROMPT,
+    EMOTIONAL_BEAT_SHEET_PROMPT,
     IMPACT_ASSESSMENT_SYSTEM_PROMPT,
     ORIGINALITY_CHECK_SYSTEM_PROMPT,
     POLISH_SYSTEM_PROMPT,
     PROFILER_SYSTEM_PROMPT,
+    SENSORY_BLUEPRINT_PROMPT,
     STRATEGIST_SYSTEM_PROMPT,
+    SUBTEXT_DESIGN_PROMPT,
     WORLDBUILDER_SYSTEM_PROMPT,
     WRITER_SYSTEM_PROMPT,
 )
@@ -2057,6 +2062,396 @@ Output your revised scene as valid JSON with the same structure as the original 
             "retries_exhausted": True,
         }
 
+    # =========================================================================
+    # Priority 3: Advanced Features
+    # =========================================================================
+
+    async def run_contradiction_maps(
+        self,
+        characters: List[Dict[str, Any]],
+        narrative: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate Internal Contradiction Maps for characters.
+        Maps contradictory desires, beliefs, and behaviors within each character.
+
+        Args:
+            characters: List of character profiles from Profiler
+            narrative: Narrative context from Genesis phase
+        """
+        self._emit_event("phase_start", {"phase": "contradiction_maps"})
+
+        # Format character profiles for analysis
+        characters_str = json.dumps(characters, indent=2)
+
+        user_prompt = f"""
+## Characters to Analyze
+
+{characters_str}
+
+## Narrative Context
+
+**Plot Summary:** {narrative.get("plot_summary", "")}
+**Main Conflict:** {narrative.get("main_conflict", "")}
+**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+
+---
+
+{CONTRADICTION_MAPS_PROMPT}
+
+Analyze each character and output the contradiction maps as valid JSON.
+"""
+
+        response = await self._call_agent(self.profiler, user_prompt)
+        msg = self._parse_agent_message("Profiler", response)
+        self.state.messages.append(msg)
+
+        contradiction_maps = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("phase_complete", {
+            "phase": "contradiction_maps",
+            "character_count": len(characters),
+        })
+
+        return {
+            "contradiction_maps": contradiction_maps,
+            "characters_analyzed": len(characters),
+        }
+
+    async def run_emotional_beat_sheet(
+        self,
+        outline: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        narrative: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate a comprehensive Emotional Beat Sheet for the entire story.
+        Maps emotional trajectory across all scenes.
+
+        Args:
+            outline: Plot outline with scenes
+            characters: Character profiles
+            narrative: Narrative context
+        """
+        self._emit_event("phase_start", {"phase": "emotional_beat_sheet"})
+
+        scenes = outline.get("scenes", [])
+        scenes_summary = "\n".join([
+            f"Scene {s.get('scene_number', i+1)}: {s.get('title', 'Untitled')} - {s.get('conflict_description', '')}"
+            for i, s in enumerate(scenes)
+        ])
+
+        protagonist = characters[0] if characters else {}
+
+        user_prompt = f"""
+## Story Structure
+
+**Total Scenes:** {len(scenes)}
+**Structure Type:** {outline.get("structure_type", "ThreeAct")}
+
+**Key Structure Points:**
+- Inciting Incident: Scene {outline.get("inciting_incident_scene", 1)}
+- Midpoint: Scene {outline.get("midpoint_scene", len(scenes)//2)}
+- Climax: Scene {outline.get("climax_scene", len(scenes)-1)}
+- Resolution: Scene {outline.get("resolution_scene", len(scenes))}
+
+## Scene Overview
+
+{scenes_summary}
+
+## Protagonist
+
+**Name:** {protagonist.get("name", "Unknown")}
+**Core Motivation:** {protagonist.get("core_motivation", "")}
+**Psychological Wound:** {protagonist.get("psychological_wound", "")}
+**Deepest Fear:** {protagonist.get("deepest_fear", "")}
+
+## Narrative Context
+
+**Plot Summary:** {narrative.get("plot_summary", "")}
+**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+
+---
+
+{EMOTIONAL_BEAT_SHEET_PROMPT}
+
+Create the emotional beat sheet as valid JSON.
+"""
+
+        response = await self._call_agent(self.strategist, user_prompt)
+        msg = self._parse_agent_message("Strategist", response)
+        self.state.messages.append(msg)
+
+        beat_sheet = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("phase_complete", {
+            "phase": "emotional_beat_sheet",
+            "scene_count": len(scenes),
+        })
+
+        return {
+            "emotional_beat_sheet": beat_sheet,
+            "scene_count": len(scenes),
+        }
+
+    async def run_sensory_blueprint(
+        self,
+        scene: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        worldbuilding: Optional[Dict[str, Any]] = None,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a Sensory Imagery Blueprint for a specific scene.
+        Plans sensory details before drafting.
+
+        Args:
+            scene: Scene outline
+            characters: Characters present in the scene
+            worldbuilding: Worldbuilding context
+            emotional_beat: Emotional beat for this scene
+        """
+        scene_number = scene.get("scene_number", 1)
+        self._emit_event("sensory_blueprint_start", {"scene_number": scene_number})
+
+        # Get characters present in this scene
+        present_chars = [
+            c for c in characters
+            if c.get("name") in scene.get("characters_present", [])
+        ]
+
+        user_prompt = f"""
+## Scene Context
+
+**Scene Number:** {scene_number}
+**Scene Title:** {scene.get("title", "Untitled")}
+**Setting:** {scene.get("setting", "")}
+
+**Conflict:** {scene.get("conflict_description", "")}
+
+**Emotional Beat:**
+- Initial: {emotional_beat.get("initial_state", "") if emotional_beat else scene.get("emotional_beat", {}).get("initial_state", "")}
+- Climax: {emotional_beat.get("climax", "") if emotional_beat else scene.get("emotional_beat", {}).get("climax", "")}
+- Final: {emotional_beat.get("final_state", "") if emotional_beat else scene.get("emotional_beat", {}).get("final_state", "")}
+
+## Characters Present
+
+{json.dumps(present_chars, indent=2) if present_chars else "No specific characters"}
+
+## Worldbuilding Context
+
+{json.dumps(worldbuilding, indent=2) if worldbuilding else "N/A"}
+
+---
+
+{SENSORY_BLUEPRINT_PROMPT}
+
+Create the sensory blueprint for this scene as valid JSON.
+"""
+
+        response = await self._call_agent(self.writer, user_prompt)
+        msg = self._parse_agent_message("Writer", response)
+        self.state.messages.append(msg)
+
+        blueprint = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("sensory_blueprint_complete", {
+            "scene_number": scene_number,
+        })
+
+        return {
+            "sensory_blueprint": blueprint,
+            "scene_number": scene_number,
+        }
+
+    async def run_subtext_design(
+        self,
+        scene: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        contradiction_maps: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Design the Subtext Layer for a scene using the Iceberg Principle.
+        Ensures 60%+ of meanings remain implicit.
+
+        Args:
+            scene: Scene outline
+            characters: Characters in the scene
+            contradiction_maps: Character contradiction maps for deeper subtext
+        """
+        scene_number = scene.get("scene_number", 1)
+        self._emit_event("subtext_design_start", {"scene_number": scene_number})
+
+        # Get characters present
+        present_chars = [
+            c for c in characters
+            if c.get("name") in scene.get("characters_present", [])
+        ]
+
+        # Get relevant contradictions
+        relevant_contradictions = []
+        if contradiction_maps and "character_contradictions" in contradiction_maps:
+            for char_map in contradiction_maps["character_contradictions"]:
+                if char_map.get("character_name") in scene.get("characters_present", []):
+                    relevant_contradictions.append(char_map)
+
+        user_prompt = f"""
+## Scene Context
+
+**Scene Number:** {scene_number}
+**Scene Title:** {scene.get("title", "Untitled")}
+**Setting:** {scene.get("setting", "")}
+
+**Conflict:** {scene.get("conflict_description", "")}
+**Plot Advancement:** {scene.get("plot_advancement", "")}
+
+**Existing Subtext Layer:** {scene.get("subtext_layer", "")}
+
+## Characters Present
+
+{json.dumps(present_chars, indent=2) if present_chars else "No specific characters"}
+
+## Character Contradictions (for deeper subtext)
+
+{json.dumps(relevant_contradictions, indent=2) if relevant_contradictions else "N/A"}
+
+---
+
+{SUBTEXT_DESIGN_PROMPT}
+
+Design the subtext layer for this scene as valid JSON.
+"""
+
+        response = await self._call_agent(self.strategist, user_prompt)
+        msg = self._parse_agent_message("Strategist", response)
+        self.state.messages.append(msg)
+
+        subtext_design = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("subtext_design_complete", {
+            "scene_number": scene_number,
+            "iceberg_ratio": subtext_design.get("iceberg_ratio", {}),
+        })
+
+        return {
+            "subtext_design": subtext_design,
+            "scene_number": scene_number,
+        }
+
+    async def run_complexity_checklist(
+        self,
+        outline: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        narrative: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate a Complexity Layer Checklist for the story.
+        Tracks Main Plot, Subplot, Character Arc, Symbolic, and Thematic layers.
+
+        Args:
+            outline: Plot outline with scenes
+            characters: Character profiles
+            narrative: Narrative context
+        """
+        self._emit_event("phase_start", {"phase": "complexity_checklist"})
+
+        scenes = outline.get("scenes", [])
+        scenes_str = json.dumps(scenes, indent=2)
+
+        user_prompt = f"""
+## Story Overview
+
+**Plot Summary:** {narrative.get("plot_summary", "")}
+**Main Conflict:** {narrative.get("main_conflict", "")}
+**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+
+## Characters
+
+{json.dumps([{"name": c.get("name"), "archetype": c.get("archetype"), "potential_arc": c.get("potential_arc")} for c in characters], indent=2)}
+
+## Scene Outline
+
+{scenes_str}
+
+---
+
+{COMPLEXITY_CHECKLIST_PROMPT}
+
+Generate the complexity layer checklist as valid JSON.
+"""
+
+        response = await self._call_agent(self.strategist, user_prompt)
+        msg = self._parse_agent_message("Strategist", response)
+        self.state.messages.append(msg)
+
+        checklist = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("phase_complete", {
+            "phase": "complexity_checklist",
+            "layers_tracked": 5,
+        })
+
+        return {
+            "complexity_checklist": checklist,
+            "scene_count": len(scenes),
+        }
+
+    async def run_advanced_planning(
+        self,
+        outline: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        narrative: Dict[str, Any],
+        worldbuilding: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run all advanced planning phases before drafting.
+        This is a convenience method that runs:
+        1. Contradiction Maps
+        2. Emotional Beat Sheet
+        3. Complexity Checklist
+
+        Per-scene planning (Sensory Blueprint, Subtext Design) is done in drafting.
+
+        Args:
+            outline: Plot outline with scenes
+            characters: Character profiles
+            narrative: Narrative context
+            worldbuilding: Worldbuilding context
+        """
+        self._emit_event("phase_start", {"phase": "advanced_planning"})
+
+        results = {}
+
+        # 1. Generate Contradiction Maps for characters
+        contradiction_result = await self.run_contradiction_maps(
+            characters=characters,
+            narrative=narrative,
+        )
+        results["contradiction_maps"] = contradiction_result.get("contradiction_maps", {})
+
+        # 2. Generate Emotional Beat Sheet
+        beat_sheet_result = await self.run_emotional_beat_sheet(
+            outline=outline,
+            characters=characters,
+            narrative=narrative,
+        )
+        results["emotional_beat_sheet"] = beat_sheet_result.get("emotional_beat_sheet", {})
+
+        # 3. Generate Complexity Checklist
+        complexity_result = await self.run_complexity_checklist(
+            outline=outline,
+            characters=characters,
+            narrative=narrative,
+        )
+        results["complexity_checklist"] = complexity_result.get("complexity_checklist", {})
+
+        self._emit_event("phase_complete", {
+            "phase": "advanced_planning",
+            "features_completed": ["contradiction_maps", "emotional_beat_sheet", "complexity_checklist"],
+        })
+
+        return results
+
     async def run_demo_generation(
         self,
         project: StoryProject,
@@ -2416,9 +2811,25 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         if not outlining_result.get("outline"):
             return {"error": "Outlining phase failed", **results}
 
-        # Phase 5: Drafting (all scenes)
         outline = outlining_result["outline"]
         scenes = outline.get("scenes", [])
+
+        # Phase 5: Advanced Planning (Contradiction Maps, Emotional Beat Sheet, Complexity Checklist)
+        # This runs global planning before per-scene drafting
+        advanced_planning_result = await self.run_advanced_planning(
+            outline=outline,
+            characters=characters_result["characters"],
+            narrative=genesis_result["narrative_possibility"],
+            worldbuilding=worldbuilding,
+        )
+        results["phases"]["advanced_planning"] = advanced_planning_result
+
+        # Extract advanced planning artifacts for use in drafting
+        contradiction_maps = advanced_planning_result.get("contradiction_maps", {})
+        emotional_beat_sheet = advanced_planning_result.get("emotional_beat_sheet", {})
+        complexity_checklist = advanced_planning_result.get("complexity_checklist", {})
+
+        # Phase 6: Drafting (all scenes)
         drafts = []
 
         previous_summary = "N/A"
