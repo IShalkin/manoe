@@ -159,7 +159,35 @@ cp .env.example .env
 docker-compose up -d
 
 # Access the frontend at http://localhost:5173
-# Access the orchestrator at http://localhost:8001
+# Access the orchestrator API at http://localhost:8001
+```
+
+### Docker Services
+
+The docker-compose.yml includes the following services:
+
+| Service | Port | Description |
+|---------|------|-------------|
+| **frontend** | 5173 | React + TypeScript + Vite web interface |
+| **orchestrator** | 8001 | Python FastAPI AI orchestrator with SSE |
+| **redis** | 6379 | Message broker for real-time SSE events |
+| **qdrant** | 6333 | Vector database for character/worldbuilding memory |
+
+### Environment Variables for Docker
+
+Create a `.env` file in the root directory with your API keys:
+
+```env
+# Required: At least one LLM provider
+OPENAI_API_KEY=your-openai-key
+# Or use other providers:
+# ANTHROPIC_API_KEY=your-anthropic-key
+# GEMINI_API_KEY=your-gemini-key
+# VENICE_API_KEY=your-venice-key
+
+# Optional: Supabase for persistence
+VITE_SUPABASE_URL=your-supabase-url
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 ```
 
 ## Supported LLM Providers (BYOK)
