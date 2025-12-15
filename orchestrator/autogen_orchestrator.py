@@ -1807,6 +1807,256 @@ Assess the emotional impact of this scene. Evaluate how well the intended emotio
             "thresholds": thresholds,
         }
 
+    async def run_quality_revision(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        quality_result: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        scene_context: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Revise a scene draft based on quality gate feedback.
+        Sends the draft back to Writer with specific issues to address.
+
+        Args:
+            scene_number: The scene number being revised
+            draft: The current scene draft
+            quality_result: The quality gate result with issues
+            characters: List of character profiles
+            moral_compass: Moral compass setting
+            scene_context: Context about the scene for continuity
+        """
+        self._emit_event("quality_revision_start", {
+            "scene_number": scene_number,
+            "issues_count": len(quality_result.get("revision_issues", [])),
+            "scores": quality_result.get("scores", {}),
+        })
+
+        # Format the quality feedback for Writer
+        issues = quality_result.get("revision_issues", [])
+        scores = quality_result.get("scores", {})
+        originality_result = quality_result.get("originality_result", {})
+        impact_result = quality_result.get("impact_result", {})
+
+        # Build detailed feedback
+        feedback_sections = []
+
+        # Score summary
+        feedback_sections.append(f"""## Quality Gate Results
+
+Your scene did not pass the quality gate. Please revise to address the following issues:
+
+**Current Scores:**
+- Originality: {scores.get('originality', 'N/A')} (threshold: 6.0)
+- Impact: {scores.get('impact', 'N/A')} (threshold: 6.0)
+- Critic Overall: {scores.get('critic_overall', 'N/A')} (threshold: 7.0)
+""")
+
+        # Originality issues
+        if originality_result.get("originality_score", 10) < 6.0:
+            flagged = originality_result.get("flagged_sections", [])
+            suggestions = originality_result.get("suggestions", [])
+            feedback_sections.append("""## Originality Issues
+
+The scene contains clichés or overused tropes that reduce its freshness:
+""")
+            for section in flagged[:5]:
+                feedback_sections.append(f"- **{section.get('type', 'Issue')}**: {section.get('text', section.get('description', 'Unknown'))}")
+            if suggestions:
+                feedback_sections.append("\n**Suggestions:**")
+                for sug in suggestions[:3]:
+                    feedback_sections.append(f"- {sug}")
+
+        # Impact issues
+        if impact_result.get("impact_score", 10) < 6.0:
+            weak_sections = impact_result.get("weak_sections", [])
+            enhancements = impact_result.get("enhancement_suggestions", [])
+            feedback_sections.append("""## Impact Issues
+
+The scene's emotional impact needs strengthening:
+""")
+            for section in weak_sections[:5]:
+                feedback_sections.append(f"- **{section.get('location', 'Section')}**: {section.get('issue', section.get('description', 'Weak impact'))}")
+            if enhancements:
+                feedback_sections.append("\n**Enhancement Suggestions:**")
+                for enh in enhancements[:3]:
+                    feedback_sections.append(f"- {enh}")
+
+        # General issues
+        if issues:
+            feedback_sections.append("\n## All Issues to Address\n")
+            for issue in issues:
+                feedback_sections.append(f"- {issue}")
+
+        feedback_text = "\n".join(feedback_sections)
+
+        # Format character profiles for context
+        character_profiles_str = "\n\n".join([
+            f"**{c.get('name', 'Unknown')}**: {c.get('role', 'Unknown role')}"
+            for c in characters[:5]
+        ])
+
+        # Create revision prompt for Writer
+        revision_prompt = f"""
+## Quality Revision Required - Scene {scene_number}
+
+{feedback_text}
+
+## Current Draft
+
+**Scene Title:** {draft.get('scene_title', 'Untitled')}
+
+**Narrative Content:**
+{draft.get('narrative_content', json.dumps(draft, indent=2))}
+
+## Characters Present
+{character_profiles_str}
+
+## Moral Compass
+{moral_compass}
+
+---
+
+## Revision Instructions
+
+Please revise this scene to address the quality issues above. Focus on:
+
+1. **Originality**: Replace clichés with fresh, unexpected alternatives. Subvert tropes or find unique angles.
+2. **Impact**: Strengthen emotional resonance. Show don't tell. Use sensory details and character reactions.
+3. **Maintain Continuity**: Keep all plot points, character actions, and story facts intact.
+4. **Preserve Structure**: Output the revised scene in the same JSON format with all required fields.
+
+Output your revised scene as valid JSON with the same structure as the original draft.
+"""
+
+        # Call Writer for revision
+        revision_response = await self._call_agent(self.writer, revision_prompt)
+        revision_msg = self._parse_agent_message("Writer", revision_response)
+        self.state.messages.append(revision_msg)
+
+        revised_draft = revision_msg.content if isinstance(revision_msg.content, dict) else draft
+
+        self._emit_event("quality_revision_complete", {
+            "scene_number": scene_number,
+            "revised": True,
+        })
+
+        return {
+            "revised_draft": revised_draft,
+            "original_draft": draft,
+            "feedback_given": feedback_text,
+        }
+
+    async def enforce_quality_for_scene(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        target_audience: str,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+        critique: Optional[Dict[str, Any]] = None,
+        max_quality_retries: int = 2,
+        scene_context: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Enforce quality standards for a scene with retry logic.
+        Runs quality gate and revises the scene if it fails, up to max_quality_retries.
+
+        Args:
+            scene_number: The scene number
+            draft: The initial scene draft
+            characters: List of character profiles
+            moral_compass: Moral compass setting
+            target_audience: Target audience
+            emotional_beat: Intended emotional beat
+            critique: Optional critique from Critic
+            max_quality_retries: Maximum revision attempts (default: 2)
+            scene_context: Context for continuity
+
+        Returns:
+            Dict with final draft, quality results, and attempt history
+        """
+        current_draft = draft
+        current_critique = critique
+        attempts = []
+
+        for attempt in range(max_quality_retries + 1):
+            self._emit_event("quality_enforcement_attempt", {
+                "scene_number": scene_number,
+                "attempt": attempt + 1,
+                "max_attempts": max_quality_retries + 1,
+            })
+
+            # Run quality gate
+            quality_result = await self.run_quality_gate(
+                scene_number=scene_number,
+                draft=current_draft,
+                characters=characters,
+                moral_compass=moral_compass,
+                target_audience=target_audience,
+                emotional_beat=emotional_beat,
+                critique=current_critique,
+            )
+
+            attempts.append({
+                "attempt": attempt + 1,
+                "quality_passed": quality_result["quality_passed"],
+                "scores": quality_result["scores"],
+                "issues": quality_result["revision_issues"],
+            })
+
+            # If quality passed, we're done
+            if quality_result["quality_passed"]:
+                self._emit_event("quality_enforcement_passed", {
+                    "scene_number": scene_number,
+                    "attempt": attempt + 1,
+                    "scores": quality_result["scores"],
+                })
+                return {
+                    "final_draft": current_draft,
+                    "quality_passed": True,
+                    "quality_result": quality_result,
+                    "attempts": attempts,
+                    "retries_used": attempt,
+                }
+
+            # If this was the last attempt, exit loop
+            if attempt >= max_quality_retries:
+                break
+
+            # Revise the draft based on quality feedback
+            revision_result = await self.run_quality_revision(
+                scene_number=scene_number,
+                draft=current_draft,
+                quality_result=quality_result,
+                characters=characters,
+                moral_compass=moral_compass,
+                scene_context=scene_context,
+            )
+
+            current_draft = revision_result["revised_draft"]
+            # Note: We don't re-run Critic here to save time/cost
+            # The quality gate will still check originality and impact
+
+        # Max retries exhausted, quality still not passed
+        self._emit_event("quality_enforcement_exhausted", {
+            "scene_number": scene_number,
+            "max_attempts": max_quality_retries + 1,
+            "final_scores": quality_result["scores"],
+        })
+
+        return {
+            "final_draft": current_draft,
+            "quality_passed": False,
+            "quality_result": quality_result,
+            "attempts": attempts,
+            "retries_used": max_quality_retries,
+            "retries_exhausted": True,
+        }
+
     async def run_demo_generation(
         self,
         project: StoryProject,
@@ -2207,24 +2457,14 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 } if (relevant_characters or relevant_scenes) else None,
                 narrator_config=narrator_config,
             )
-            drafts.append(draft_result)
 
-            # Store drafted scene in memory for continuity
+            # Phase 6: Quality Gate with retry logic (per scene)
+            # Run quality enforcement immediately after drafting each scene
+            # so revised drafts are stored in memory for continuity
+            quality_enforcement_result = None
             if draft_result.get("draft"):
-                draft = draft_result["draft"]
-                await self._store_scene_in_memory(project_id, i + 1, draft)
-                previous_summary = draft.get("narrative_content", "")[:500] + "..."
-
-        results["phases"]["drafting"] = {"scenes": drafts}
-
-        # Phase 6: Quality Gate (Originality Check + Impact Assessment)
-        quality_results = []
-        for i, draft_result in enumerate(drafts):
-            if draft_result.get("draft"):
-                scene = scenes[i] if i < len(scenes) else {}
                 emotional_beat = scene.get("emotional_beat", {})
-
-                quality_result = await self.run_quality_gate(
+                quality_enforcement_result = await self.enforce_quality_for_scene(
                     scene_number=i + 1,
                     draft=draft_result["draft"],
                     characters=characters_result["characters"],
@@ -2232,12 +2472,31 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     target_audience=project.target_audience,
                     emotional_beat=emotional_beat,
                     critique=draft_result.get("critique"),
+                    max_quality_retries=2,
+                    scene_context=scene_context,
                 )
-                quality_results.append(quality_result)
+                # Update draft_result with the final (possibly revised) draft
+                draft_result["draft"] = quality_enforcement_result["final_draft"]
+                draft_result["quality_enforcement"] = quality_enforcement_result
 
+            drafts.append(draft_result)
+
+            # Store final draft (after quality revisions) in memory for continuity
+            if draft_result.get("draft"):
+                draft = draft_result["draft"]
+                await self._store_scene_in_memory(project_id, i + 1, draft)
+                previous_summary = draft.get("narrative_content", "")[:500] + "..."
+
+        results["phases"]["drafting"] = {"scenes": drafts}
+
+        # Collect quality gate results from drafts
+        quality_results = [
+            d.get("quality_enforcement", {}).get("quality_result", {})
+            for d in drafts if d.get("quality_enforcement")
+        ]
         results["phases"]["quality_gate"] = {"scenes": quality_results}
 
-        # Phase 7: Polish (all approved scenes)
+        # Phase 7: Polish (all scenes - even if quality gate failed, we still polish)
         polished_drafts = []
         for i, draft_result in enumerate(drafts):
             if draft_result.get("draft"):
