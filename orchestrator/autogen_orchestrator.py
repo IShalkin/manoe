@@ -1213,13 +1213,39 @@ Now create the plot outline as valid JSON.
 
             if relevant_chars:
                 memory_context_str += "\n## Retrieved Character Context (from memory)\n\n"
+                memory_context_str += "These characters are semantically relevant to this scene. Use this context to maintain consistency:\n\n"
                 for char in relevant_chars:
-                    memory_context_str += f"**{char.get('name', 'Unknown')}**: {char.get('core_motivation', '')} - {char.get('inner_trap', '')}\n"
+                    char_name = char.get('name', 'Unknown')
+                    memory_context_str += f"**{char_name}**\n"
+                    if char.get('core_motivation'):
+                        memory_context_str += f"- Core Motivation: {char.get('core_motivation')}\n"
+                    if char.get('inner_trap'):
+                        memory_context_str += f"- Inner Trap: {char.get('inner_trap')}\n"
+                    if char.get('psychological_wound'):
+                        memory_context_str += f"- Psychological Wound: {char.get('psychological_wound')}\n"
+                    if char.get('visual_signature'):
+                        memory_context_str += f"- Visual Signature: {char.get('visual_signature')}\n"
+                    if char.get('quirks'):
+                        quirks = char.get('quirks', [])
+                        if isinstance(quirks, list) and quirks:
+                            memory_context_str += f"- Quirks: {', '.join(quirks)}\n"
+                    if char.get('coping_mechanism'):
+                        memory_context_str += f"- Coping Mechanism: {char.get('coping_mechanism')}\n"
+                    memory_context_str += "\n"
 
             if relevant_scenes:
                 memory_context_str += "\n## Related Previous Scenes (from memory)\n\n"
+                memory_context_str += "These scenes are semantically related. Use them for continuity and consistency:\n\n"
                 for scene_mem in relevant_scenes:
-                    memory_context_str += f"- {scene_mem.get('title', 'Scene')}: {scene_mem.get('narrative_content', '')[:200]}...\n"
+                    scene_title = scene_mem.get('title', 'Scene')
+                    memory_context_str += f"**{scene_title}**\n"
+                    if scene_mem.get('setting_description'):
+                        memory_context_str += f"- Setting: {scene_mem.get('setting_description')[:150]}...\n"
+                    if scene_mem.get('emotional_shift'):
+                        memory_context_str += f"- Emotional Shift: {scene_mem.get('emotional_shift')}\n"
+                    if scene_mem.get('narrative_content'):
+                        memory_context_str += f"- Content Preview: {scene_mem.get('narrative_content', '')[:300]}...\n"
+                    memory_context_str += "\n"
 
         # Format narrator config for the prompt
         narrator_str = ""
