@@ -122,12 +122,15 @@ function formatResultAsMarkdown(result: ProjectResult): string {
 // Multi-agent orchestrator URL (separate subdomain)
 const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
 
+type GenerationMode = 'demo' | 'full';
+
 interface ProjectFormData {
   name: string;
   seedIdea: string;
   moralCompass: MoralCompass;
   targetAudience: string;
   themes: string;
+  generationMode: GenerationMode;
 }
 
 export function DashboardPage() {
@@ -143,39 +146,42 @@ export function DashboardPage() {
   
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [editingProject, setEditingProject] = useState<StoredProject | null>(null);
-  const [formData, setFormData] = useState<ProjectFormData>({
-    name: '',
-    seedIdea: '',
-    moralCompass: 'ambiguous',
-    targetAudience: '',
-    themes: '',
-  });
-
-  const openNewProjectModal = () => {
-    setEditingProject(null);
-    setFormData({
+    const [formData, setFormData] = useState<ProjectFormData>({
       name: '',
       seedIdea: '',
       moralCompass: 'ambiguous',
       targetAudience: '',
       themes: '',
+      generationMode: 'demo',
     });
-    setError(null);
-    setShowProjectModal(true);
-  };
 
-  const openEditProjectModal = (project: StoredProject) => {
-    setEditingProject(project);
-    setFormData({
-      name: project.name,
-      seedIdea: project.seedIdea,
-      moralCompass: (project.moralCompass as MoralCompass) || 'ambiguous',
-      targetAudience: project.targetAudience,
-      themes: project.themes,
-    });
-    setError(null);
-    setShowProjectModal(true);
-  };
+    const openNewProjectModal = () => {
+      setEditingProject(null);
+      setFormData({
+        name: '',
+        seedIdea: '',
+        moralCompass: 'ambiguous',
+        targetAudience: '',
+        themes: '',
+        generationMode: 'demo',
+      });
+      setError(null);
+      setShowProjectModal(true);
+    };
+
+    const openEditProjectModal = (project: StoredProject) => {
+      setEditingProject(project);
+      setFormData({
+        name: project.name,
+        seedIdea: project.seedIdea,
+        moralCompass: (project.moralCompass as MoralCompass) || 'ambiguous',
+        targetAudience: project.targetAudience,
+        themes: project.themes,
+        generationMode: 'demo',
+      });
+      setError(null);
+      setShowProjectModal(true);
+    };
 
   const closeProjectModal = () => {
     setShowProjectModal(false);
@@ -220,15 +226,16 @@ export function DashboardPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          provider: architectConfig.provider,
-          model: architectConfig.model,
-          api_key: apiKey,
-          seed_idea: formData.seedIdea,
-          moral_compass: formData.moralCompass,
-          target_audience: formData.targetAudience || undefined,
-          themes: formData.themes || undefined,
-        }),
+                body: JSON.stringify({
+                  provider: architectConfig.provider,
+                  model: architectConfig.model,
+                  api_key: apiKey,
+                  seed_idea: formData.seedIdea,
+                  moral_compass: formData.moralCompass,
+                  target_audience: formData.targetAudience || undefined,
+                  themes: formData.themes || undefined,
+                  generation_mode: formData.generationMode,
+                }),
       });
       
       const data = await response.json();
@@ -424,18 +431,48 @@ export function DashboardPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-2">Core Themes (comma-separated)</label>
-                <input
-                  type="text"
-                  value={formData.themes}
-                  onChange={(e) => setFormData({ ...formData, themes: e.target.value })}
-                  placeholder="Identity, redemption, the nature of evil"
-                  className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-primary-500 transition-colors"
-                />
-              </div>
+                            <div>
+                              <label className="block text-sm font-medium mb-2">Core Themes (comma-separated)</label>
+                              <input
+                                type="text"
+                                value={formData.themes}
+                                onChange={(e) => setFormData({ ...formData, themes: e.target.value })}
+                                placeholder="Identity, redemption, the nature of evil"
+                                className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-primary-500 transition-colors"
+                              />
+                            </div>
 
-              <div className="flex gap-3 pt-4">
+                            <div>
+                              <label className="block text-sm font-medium mb-2">Generation Mode</label>
+                              <div className="grid grid-cols-2 gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setFormData({ ...formData, generationMode: 'demo' })}
+                                  className={`p-4 rounded-xl border text-left transition-all ${
+                                    formData.generationMode === 'demo'
+                                      ? 'border-blue-500 bg-blue-500/10'
+                                      : 'border-slate-600 hover:border-slate-500'
+                                  }`}
+                                >
+                                  <div className="font-medium">Demo</div>
+                                  <div className="text-xs text-slate-500">Quick preview with all 5 agents</div>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setFormData({ ...formData, generationMode: 'full' })}
+                                  className={`p-4 rounded-xl border text-left transition-all ${
+                                    formData.generationMode === 'full'
+                                      ? 'border-blue-500 bg-blue-500/10'
+                                      : 'border-slate-600 hover:border-slate-500'
+                                  }`}
+                                >
+                                  <div className="font-medium">Full Pipeline</div>
+                                  <div className="text-xs text-slate-500">Complete story generation with multiple scenes</div>
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
                 <button
                   type="button"
                   onClick={closeProjectModal}
