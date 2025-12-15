@@ -74,6 +74,10 @@ class MultiAgentWorker:
         provider: str = "openai",
         model: str = "gpt-4o",
         constraints: Optional[Dict[str, Any]] = None,
+        generation_mode: str = "demo",
+        target_word_count: int = 50000,
+        estimated_scenes: int = 20,
+        preferred_structure: str = "ThreeAct",
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -157,9 +161,18 @@ class MultiAgentWorker:
                 }
             )
 
-            # Run demo generation that involves all 5 agents
-            # This gives users visibility into the multi-agent flow
-            result = await group_chat.run_demo_generation(project, constraints=constraints)
+            # Run generation based on selected mode
+            if generation_mode == "full":
+                # Full pipeline: Genesis → Characters → Outlining → Drafting with Writer↔Critic loop
+                result = await group_chat.run_full_generation(
+                    project,
+                    target_word_count=target_word_count,
+                    estimated_scenes=estimated_scenes,
+                    preferred_structure=preferred_structure,
+                )
+            else:
+                # Demo mode: Quick preview with all 5 agents in simplified flow
+                result = await group_chat.run_demo_generation(project, constraints=constraints)
 
             # Flush all pending events before publishing completion
             # This ensures agent_complete events arrive before generation_complete
@@ -237,6 +250,10 @@ class GenerateRequest(BaseModel):
     model: str = "gpt-4o"
     api_key: str
     constraints: Optional[RegenerationConstraints] = None  # For partial regeneration
+    generation_mode: str = "demo"  # "demo" for quick preview, "full" for complete pipeline
+    target_word_count: int = 50000  # For full mode
+    estimated_scenes: int = 20  # For full mode
+    preferred_structure: str = "ThreeAct"  # For full mode
 
 
 class GenerateResponse(BaseModel):
@@ -301,6 +318,10 @@ async def generate(request: GenerateRequest):
         provider=request.provider,
         model=request.model,
         constraints=constraints_dict,
+        generation_mode=request.generation_mode,
+        target_word_count=request.target_word_count,
+        estimated_scenes=request.estimated_scenes,
+        preferred_structure=request.preferred_structure,
     ))
 
     return GenerateResponse(
