@@ -1040,7 +1040,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
               const textColor = AGENT_TEXT_COLORS[agent];
               const icon = AGENT_ICONS[agent];
               const description = AGENT_DESCRIPTIONS[agent];
-              const isActive = activeAgent === agent;
+              const isActive = activeAgent === agent && !isCancelled;
               const displayMessage = getDisplayMessage(state);
               const formattedContent = displayMessage ? formatAgentContent(displayMessage.content) : '';
               const isEditing = editState?.agent === agent;
@@ -1085,7 +1085,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                           </svg>
                         )}
-                        {state.status === 'thinking' && (
+                        {state.status === 'thinking' && !isCancelled && (
                           <span className="flex items-center gap-1 text-xs text-slate-400">
                             <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '0ms' }} />
                             <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '150ms' }} />
