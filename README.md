@@ -1,15 +1,145 @@
-# MANOE - Distributed Multi-Agent Narrative Engine
+# MANOE - Multi-Agent Narrative Orchestration Engine
 
-A scalable, event-driven platform designed to automate the creation of exceptional narratives by strictly adhering to proven storytelling principles from the "Storyteller" framework.
+A scalable, event-driven platform designed to automate the creation of exceptional narratives by strictly adhering to proven storytelling principles from the "Storyteller" framework. MANOE uses a multi-agent architecture where specialized AI agents collaborate in real-time to generate compelling stories.
+
+## System Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client["Frontend (React + TypeScript)"]
+        UI[Web Interface]
+        SSE[SSE Client]
+    end
+
+    subgraph Orchestrator["Orchestrator (Python + FastAPI)"]
+        API[REST API]
+        Worker[Multi-Agent Worker]
+        
+        subgraph Agents["AI Agents"]
+            Architect[Architect Agent]
+            Profiler[Profiler Agent]
+            Strategist[Strategist Agent]
+            Writer[Writer Agent]
+            Critic[Critic Agent]
+        end
+        
+        ModelClient[Unified Model Client]
+    end
+
+    subgraph Infrastructure["Infrastructure"]
+        Redis[(Redis Streams)]
+        Supabase[(Supabase)]
+        Qdrant[(Qdrant Vector DB)]
+    end
+
+    subgraph LLMProviders["LLM Providers (BYOK)"]
+        OpenAI[OpenAI]
+        Anthropic[Anthropic Claude]
+        Gemini[Google Gemini]
+        OpenRouter[OpenRouter]
+        DeepSeek[DeepSeek]
+    end
+
+    UI -->|POST /generate| API
+    API -->|Start Generation| Worker
+    Worker --> Agents
+    Agents --> ModelClient
+    ModelClient --> LLMProviders
+    
+    Worker -->|Publish Events| Redis
+    Redis -->|Stream Events| SSE
+    SSE -->|Real-time Updates| UI
+    
+    Worker -->|Store Results| Supabase
+    Agents -->|Vector Memory| Qdrant
+```
+
+## Agent Workflow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant O as Orchestrator
+    participant A as Architect
+    participant P as Profiler
+    participant S as Strategist
+    participant W as Writer
+    participant C as Critic
+
+    U->>F: Submit Seed Idea
+    F->>O: POST /generate
+    O->>O: Create Run ID
+    O-->>F: Return Run ID
+    F->>O: Connect SSE /runs/{id}/events
+
+    rect rgb(59, 130, 246, 0.1)
+        Note over A: Phase 1: Genesis
+        O->>A: Generate Narrative Possibility
+        A->>C: Submit for Audit
+        C-->>A: Feedback/Approval
+        A-->>O: Narrative JSON
+    end
+
+    rect rgb(6, 182, 212, 0.1)
+        Note over P: Phase 2: Characters
+        O->>P: Create Character Profiles
+        P->>A: Questions (if needed)
+        A-->>P: Clarifications
+        P-->>O: Character Profiles JSON
+    end
+
+    rect rgb(34, 197, 94, 0.1)
+        Note over S: Phase 3: Outlining
+        O->>S: Generate Plot Outline
+        S->>P: Questions about Characters
+        P-->>S: Character Details
+        S-->>O: Plot Outline JSON
+    end
+
+    rect rgb(245, 158, 11, 0.1)
+        Note over W,C: Phase 4: Drafting & Critique Loop
+        loop Max 2 Revisions
+            O->>W: Draft Scene
+            W->>C: Submit Draft
+            C-->>W: REVISION_REQUEST or APPROVED
+        end
+        W-->>O: Final Scene Draft
+    end
+
+    O-->>F: generation_complete Event
+    F-->>U: Display Results
+```
+
+## Agent Communication Protocol
+
+```mermaid
+flowchart LR
+    subgraph Messages["Message Types"]
+        ARTIFACT[ARTIFACT<br/>Final Output]
+        QUESTION[QUESTION<br/>Ask Clarification]
+        OBJECTION[OBJECTION<br/>Challenge Issues]
+        REVISION[REVISION_REQUEST<br/>Request Changes]
+        RESPONSE[RESPONSE<br/>Answer Questions]
+        APPROVED[APPROVED<br/>Quality Passed]
+    end
+
+    subgraph Flow["Communication Flow"]
+        A[Architect] -->|ARTIFACT| P[Profiler]
+        P -->|QUESTION| A
+        A -->|RESPONSE| P
+        P -->|ARTIFACT| S[Strategist]
+        S -->|OBJECTION| P
+        S -->|ARTIFACT| W[Writer]
+        W -->|ARTIFACT| C[Critic]
+        C -->|REVISION_REQUEST| W
+        C -->|APPROVED| W
+    end
+```
 
 ## Features
 
-- **Multi-Agent Architecture**: Specialized AI agents (Architect, Profiler, Strategist, Writer, Critic) collaborate to create narratives
-- **BYOK (Bring Your Own Key)**: Support for OpenAI, OpenRouter, Google Gemini, and Anthropic Claude
-- **Model Selection**: Choose different models for each agent based on your needs and budget
-- **Self-Hosting Ready**: Complete Docker Compose setup for easy deployment
-- **Vector Memory**: Qdrant integration for character and worldbuilding consistency
-- **Moral Compass Framework**: Ethical, Unethical, Amoral, or Ambiguous narrative lenses
+MANOE provides a comprehensive set of features for narrative generation. The multi-agent architecture employs specialized AI agents including Architect, Profiler, Strategist, Writer, and Critic that collaborate to create narratives. The system supports BYOK (Bring Your Own Key) integration with OpenAI, OpenRouter, Google Gemini, Anthropic Claude, and DeepSeek. Users can select different models for each agent based on their needs and budget. The platform is self-hosting ready with a complete Docker Compose setup for easy deployment. Vector memory through Qdrant integration ensures character and worldbuilding consistency. The Moral Compass Framework allows narratives to be generated through Ethical, Unethical, Amoral, or Ambiguous lenses. Real-time progress updates are delivered via Server-Sent Events (SSE) through Redis Streams. The agent editing feature allows users to edit agent outputs and regenerate dependent agents while locking approved content.
 
 ## Quick Start with Docker
 
@@ -27,7 +157,8 @@ cp .env.example .env
 # Start all services
 docker-compose up -d
 
-# Access the API at http://localhost:3000
+# Access the frontend at http://localhost:5173
+# Access the orchestrator at http://localhost:8001
 ```
 
 ## Supported LLM Providers (BYOK)
@@ -40,6 +171,7 @@ MANOE supports multiple LLM providers. Configure at least one:
 | **OpenRouter** | Access to 100+ models from multiple providers | Cost optimization, model variety |
 | **Google Gemini** | gemini-2.0-flash-exp, gemini-1.5-pro, gemini-1.5-flash | Long context (1M tokens) |
 | **Anthropic Claude** | claude-3.5-sonnet, claude-3.5-haiku, claude-3-opus | Creative writing, safety |
+| **DeepSeek** | deepseek-chat, deepseek-coder | Cost-effective alternative |
 
 ### Per-Agent Model Configuration
 
@@ -59,48 +191,30 @@ CRITIC_PROVIDER=claude
 CRITIC_MODEL=claude-3-5-sonnet-20241022
 ```
 
-## Architecture
-
-The system employs a hybrid architecture with the following components:
-
-| Component | Technology | Function |
-|-----------|------------|----------|
-| API Gateway | TypeScript + Ts.ED | Entry point, validation, user management |
-| AI Orchestrator | Python | Manages agent collaboration and LLM calls |
-| Message Broker | Redis | Decouples API from AI workers using Producer-Consumer pattern |
-| Long-Term Memory | Qdrant | Stores worldbuilding and character attributes as vectors |
-| Persistence | PostgreSQL | Stores plot outlines and audit logs |
-
 ## Project Structure
 
 ```
 manoe/
-├── api-gateway/           # TypeScript/Ts.ED API Gateway
+├── frontend/              # React + TypeScript + Vite Frontend
 │   ├── src/
-│   │   ├── controllers/   # HTTP endpoint controllers
-│   │   ├── services/      # Business logic services
-│   │   ├── models/        # Data models and DTOs
-│   │   ├── middleware/    # Authentication, validation
-│   │   └── config/        # Configuration management
-│   ├── package.json
-│   └── tsconfig.json
-├── orchestrator/          # Python/AutoGen AI Orchestrator
-│   ├── agents/            # Agent definitions (Architect, Writer, Critic)
+│   │   ├── components/    # UI components (AgentChat, Layout, etc.)
+│   │   ├── contexts/      # React contexts (Auth, Settings)
+│   │   ├── hooks/         # Custom hooks (useProjects, useSettings)
+│   │   ├── pages/         # Page components
+│   │   └── lib/           # Utilities and Supabase client
+│   └── package.json
+├── orchestrator/          # Python/FastAPI AI Orchestrator
+│   ├── agents/            # Agent definitions
 │   ├── prompts/           # System prompts derived from Storyteller
-│   ├── memory/            # Qdrant vector memory integration
+│   ├── services/          # Redis Streams, Model Client
 │   ├── models/            # Pydantic data models
-│   ├── services/          # Redis queue, Supabase integration
-│   └── config/            # Configuration management
-├── shared/                # Shared types and utilities
-│   ├── types/             # TypeScript/Python shared type definitions
-│   └── utils/             # Common utilities
+│   ├── config/            # Configuration management
+│   ├── autogen_orchestrator.py  # StorytellerGroupChat implementation
+│   ├── multi_agent_worker.py    # FastAPI app with SSE endpoints
+│   └── pyproject.toml
+├── supabase/              # Supabase configuration and migrations
 ├── docs/                  # Documentation
-│   ├── ARCHITECTURE.md    # Detailed architecture documentation
-│   ├── API.md             # API documentation
-│   └── AGENTS.md          # Agent behavior documentation
-└── infrastructure/        # Docker, deployment configs
-    ├── docker-compose.yml
-    └── .env.example
+└── docker-compose.yml     # Docker Compose configuration
 ```
 
 ## Agentic Workflow
@@ -108,90 +222,92 @@ manoe/
 The system implements a four-phase narrative generation workflow:
 
 ### Phase 1: Genesis (Architect Agent)
-- Accepts "Seed Idea" from user (What If? questions, image prompts)
-- Configures "Moral Compass" (Ethical, Unethical, Amoral, Ambiguous)
-- Generates structured "Narrative Possibility" JSON
+The Architect accepts a "Seed Idea" from the user (What If? questions, image prompts) and configures the "Moral Compass" (Ethical, Unethical, Amoral, Ambiguous). It generates a structured "Narrative Possibility" JSON that defines the story's foundation, including plot summary, setting, main conflict, and thematic elements.
 
 ### Phase 2: Character & World Design (Profiler Agent)
-- Assigns archetypes (Hero, Shadow, Trickster) to characters
-- Generates "Core Psychological Wound" and "Inner Trap" for protagonists
-- Stores character attributes as vectors in Qdrant
+The Profiler assigns archetypes (Hero, Shadow, Trickster) to characters and generates "Core Psychological Wound" and "Inner Trap" for protagonists. Character attributes can be stored as vectors in Qdrant for consistency across the narrative.
 
 ### Phase 3: Plotting & Outlining (Strategist Agent)
-- Maps plot onto "Mythic Structure" (Hero's Journey, Three-Act Structure)
-- Creates scene-by-scene outline with conflict, emotional beats, and subtext
+The Strategist maps the plot onto "Mythic Structure" (Hero's Journey, Three-Act Structure) and creates a scene-by-scene outline with conflict, emotional beats, and subtext.
 
 ### Phase 4: Drafting & Critique Loop (Writer + Critic Agents)
-- Writer drafts scenes using "Show, Don't Tell" principles
-- Critic validates pacing, originality, dialogue, and subtext
-- Iterative refinement until quality standards are met
+The Writer drafts scenes using "Show, Don't Tell" principles while the Critic validates pacing, originality, dialogue, and subtext. This phase involves iterative refinement with a maximum of 2 revision rounds per scene until quality standards are met.
 
-## Prerequisites
+## API Endpoints
 
-- Node.js 20+
-- Python 3.11+
-- Redis (running on VPS)
-- Qdrant (running on VPS)
-- Supabase (running on VPS)
+### Orchestrator API (Port 8001)
 
-## Quick Start
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/generate` | POST | Start multi-agent generation |
+| `/runs/{run_id}/events` | GET | SSE stream for real-time events |
+| `/runs/{run_id}/messages` | GET | Get all agent messages for a run |
 
-### API Gateway Setup
+### Generate Request Body
+
+```json
+{
+  "seed_idea": "What if a detective could see the last 10 seconds of a murder victim's life?",
+  "moral_compass": "ambiguous",
+  "target_audience": "Adult thriller readers",
+  "themes": "justice,memory,truth",
+  "provider": "openai",
+  "model": "gpt-4o",
+  "api_key": "your-api-key",
+  "constraints": null
+}
+```
+
+## Environment Variables
+
+### Frontend
+- `VITE_SUPABASE_URL` - Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` - Supabase anonymous key
+- `VITE_ORCHESTRATOR_URL` - Orchestrator API URL
+
+### Orchestrator
+- `REDIS_URL` - Redis connection URL
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_KEY` - Supabase service key
+- `QDRANT_URL` - Qdrant server URL (optional)
+
+## Development Setup
+
+### Frontend
 
 ```bash
-cd api-gateway
+cd frontend
 npm install
 cp .env.example .env
 # Configure environment variables
 npm run dev
 ```
 
-### Orchestrator Setup
+### Orchestrator
 
 ```bash
 cd orchestrator
 poetry install
 cp .env.example .env
 # Configure environment variables
-poetry run python main.py
+poetry run python multi_agent_worker.py
 ```
 
-## Environment Variables
+## Deployment
 
-### API Gateway
-- `PORT` - Server port (default: 3000)
-- `REDIS_URL` - Redis connection URL
-- `SUPABASE_URL` - Supabase project URL
-- `SUPABASE_KEY` - Supabase service key
+For VPS deployment, use the provided `docker-compose.vps.yml`:
 
-### Orchestrator
-- `OPENAI_API_KEY` - OpenAI API key for LLM
-- `REDIS_URL` - Redis connection URL
-- `QDRANT_URL` - Qdrant server URL
-- `SUPABASE_URL` - Supabase project URL
-- `SUPABASE_KEY` - Supabase service key
+```bash
+# On your VPS
+docker-compose -f docker-compose.vps.yml up -d
+```
 
-## API Endpoints
-
-### Project Management
-- `POST /api/project/init` - Initialize new narrative project
-- `GET /api/project/:id` - Get project status and details
-- `POST /api/project/:id/approve` - Approve current phase and proceed
-
-### Generation
-- `POST /api/generate/characters` - Generate character profiles
-- `POST /api/generate/outline` - Generate plot outline
-- `POST /api/generate/draft` - Generate narrative draft
-
-### Memory
-- `GET /api/memory/characters/:projectId` - Retrieve character vectors
-- `GET /api/memory/worldbuilding/:projectId` - Retrieve worldbuilding vectors
+The VPS configuration includes nginx-proxy integration for automatic SSL certificates via Let's Encrypt.
 
 ## Success Metrics
 
-- **Structural Adherence**: 100% of scenes match the generated outline
-- **Psychological Depth**: Every protagonist has defined "Inner Trap" and "Breaking Point"
-- **Sensory Density**: Every scene contains at least 3 distinct sensory details
+The system aims for high-quality narrative output measured by structural adherence (100% of scenes match the generated outline), psychological depth (every protagonist has defined "Inner Trap" and "Breaking Point"), and sensory density (every scene contains at least 3 distinct sensory details).
 
 ## License
 
