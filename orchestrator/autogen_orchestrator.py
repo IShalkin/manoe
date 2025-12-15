@@ -3018,7 +3018,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 results["phases"]["genesis"] = genesis_result
                 self._emit_event("phase_overridden", {"phase": "genesis", "reason": "user_edited_content"})
                 # Emit agent message with the edited content
-                self._emit_agent_message("Architect", edited)
+                self._emit_agent_message("Architect", "locked", json.dumps(edited) if isinstance(edited, dict) else str(edited))
         
         if not genesis_result:
             await self._check_pause()  # Pause checkpoint
@@ -3053,7 +3053,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 characters_result = {"characters": edited.get("characters", edited) if isinstance(edited, dict) else edited}
                 results["phases"]["characters"] = characters_result
                 self._emit_event("phase_overridden", {"phase": "characters", "reason": "user_edited_content"})
-                self._emit_agent_message("Profiler", edited)
+                self._emit_agent_message("Profiler", "locked", json.dumps(edited) if isinstance(edited, dict) else str(edited))
 
         if not characters_result:
             await self._check_pause()  # Pause checkpoint
@@ -3095,7 +3095,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 worldbuilding_result = {"worldbuilding": edited.get("worldbuilding", edited) if isinstance(edited, dict) else edited}
                 results["phases"]["worldbuilding"] = worldbuilding_result
                 self._emit_event("phase_overridden", {"phase": "worldbuilding", "reason": "user_edited_content"})
-                self._emit_agent_message("Worldbuilder", edited)
+                self._emit_agent_message("Worldbuilder", "locked", json.dumps(edited) if isinstance(edited, dict) else str(edited))
 
         if not worldbuilding_result:
             await self._check_pause()  # Pause checkpoint
@@ -3133,7 +3133,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 outlining_result = {"outline": edited.get("outline", edited) if isinstance(edited, dict) else edited}
                 results["phases"]["outlining"] = outlining_result
                 self._emit_event("phase_overridden", {"phase": "outlining", "reason": "user_edited_content"})
-                self._emit_agent_message("Strategist", edited)
+                self._emit_agent_message("Strategist", "locked", json.dumps(edited) if isinstance(edited, dict) else str(edited))
 
         if not outlining_result:
             await self._check_pause()  # Pause checkpoint
