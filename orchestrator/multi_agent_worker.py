@@ -274,8 +274,10 @@ class NarratorConfig(BaseModel):
 class GenerateRequest(BaseModel):
     seed_idea: str
     moral_compass: str = "ambiguous"
+    custom_moral_system: Optional[str] = None  # Required if moral_compass is user_defined
     target_audience: str = ""
     themes: Optional[str] = None
+    tone_style_references: Optional[str] = None  # Style references (e.g., "Palahniuk-esque cynicism")
     provider: str = "openai"
     model: str = "gpt-4o"
     api_key: str
@@ -327,8 +329,10 @@ async def generate(request: GenerateRequest):
     project_data = {
         "seed_idea": request.seed_idea,
         "moral_compass": moral_compass_capitalized,
+        "custom_moral_system": request.custom_moral_system if moral_compass_capitalized == "UserDefined" else None,
         "target_audience": request.target_audience,
         "theme_core": request.themes.split(",") if request.themes else [],
+        "tone_style_references": request.tone_style_references.split(",") if request.tone_style_references else None,
     }
 
     # Convert constraints to dict if provided
