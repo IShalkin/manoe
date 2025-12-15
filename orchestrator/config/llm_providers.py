@@ -504,6 +504,9 @@ class AgentModelConfig(BaseModel):
     profiler_provider: LLMProvider = LLMProvider.OPENAI
     profiler_model: str = "gpt-4o"
 
+    worldbuilder_provider: LLMProvider = LLMProvider.OPENAI
+    worldbuilder_model: str = "gpt-4o"
+
     strategist_provider: LLMProvider = LLMProvider.OPENAI
     strategist_model: str = "gpt-4o"
 
@@ -572,6 +575,7 @@ class LLMConfiguration(BaseModel):
         agent_configs = [
             ("architect", self.agent_models.architect_provider, self.agent_models.architect_model),
             ("profiler", self.agent_models.profiler_provider, self.agent_models.profiler_model),
+            ("worldbuilder", self.agent_models.worldbuilder_provider, self.agent_models.worldbuilder_model),
             ("strategist", self.agent_models.strategist_provider, self.agent_models.strategist_model),
             ("writer", self.agent_models.writer_provider, self.agent_models.writer_model),
             ("critic", self.agent_models.critic_provider, self.agent_models.critic_model),

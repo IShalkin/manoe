@@ -4,12 +4,12 @@ Implements multi-agent narrative generation with real agent communication.
 """
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-import os
 from autogen_agentchat.agents import AssistantAgent
 
 from config import LLMConfiguration, LLMProvider
@@ -21,6 +21,7 @@ from prompts import (
     CRITIC_SYSTEM_PROMPT,
     PROFILER_SYSTEM_PROMPT,
     STRATEGIST_SYSTEM_PROMPT,
+    WORLDBUILDER_SYSTEM_PROMPT,
     WRITER_SYSTEM_PROMPT,
 )
 from services.model_client import UnifiedModelClient
@@ -31,6 +32,7 @@ class GenerationPhase(str, Enum):
     """Current phase of story generation."""
     GENESIS = "genesis"
     CHARACTERS = "characters"
+    WORLDBUILDING = "worldbuilding"
     OUTLINING = "outlining"
     DRAFTING = "drafting"
     CRITIQUE = "critique"
@@ -54,6 +56,7 @@ class GenerationState:
     project_id: str
     narrative: Optional[Dict] = None
     characters: List[Dict] = field(default_factory=list)
+    worldbuilding: Optional[Dict] = None
     outline: Optional[Dict] = None
     current_scene: int = 0
     drafts: Dict[int, Dict] = field(default_factory=dict)
@@ -89,6 +92,7 @@ class StorytellerGroupChat:
         # Agent instances
         self.architect: Optional[AssistantAgent] = None
         self.profiler: Optional[AssistantAgent] = None
+        self.worldbuilder: Optional[AssistantAgent] = None
         self.strategist: Optional[AssistantAgent] = None
         self.writer: Optional[AssistantAgent] = None
         self.critic: Optional[AssistantAgent] = None
@@ -103,10 +107,10 @@ class StorytellerGroupChat:
 
     async def initialize_memory(self, openai_api_key: Optional[str] = None) -> bool:
         """Initialize Qdrant memory service for character/worldbuilding storage.
-        
+
         Args:
             openai_api_key: OpenAI API key for generating embeddings
-            
+
         Returns:
             True if memory was initialized successfully, False otherwise
         """
@@ -114,7 +118,7 @@ class StorytellerGroupChat:
         if not api_key:
             self._emit_event("memory_init", {"status": "skipped", "reason": "no_api_key"})
             return False
-            
+
         try:
             self.qdrant_memory = QdrantMemoryService(url=self._qdrant_url)
             await self.qdrant_memory.connect(openai_api_key=api_key)
@@ -129,7 +133,7 @@ class StorytellerGroupChat:
         """Store generated characters in Qdrant for later retrieval."""
         if not self.qdrant_memory:
             return
-            
+
         for character in characters:
             try:
                 await self.qdrant_memory.store_character(project_id, character)
@@ -145,7 +149,7 @@ class StorytellerGroupChat:
         """Retrieve relevant characters from memory based on query."""
         if not self.qdrant_memory:
             return []
-            
+
         try:
             results = await self.qdrant_memory.search_characters(project_id, query, limit=limit)
             return [r["character"] for r in results if r.get("character")]
@@ -161,7 +165,7 @@ class StorytellerGroupChat:
         """Store a drafted scene in Qdrant for continuity."""
         if not self.qdrant_memory:
             return
-            
+
         try:
             await self.qdrant_memory.store_scene(project_id, scene_number, scene)
         except Exception as e:
@@ -176,7 +180,7 @@ class StorytellerGroupChat:
         """Retrieve relevant previous scenes for continuity."""
         if not self.qdrant_memory:
             return []
-            
+
         try:
             results = await self.qdrant_memory.search_scenes(project_id, query, limit=limit)
             return [r["scene"] for r in results if r.get("scene")]
@@ -188,6 +192,85 @@ class StorytellerGroupChat:
             })
             return []
 
+    async def _store_worldbuilding_in_memory(self, project_id: str, worldbuilding: Dict) -> None:
+        """Store worldbuilding elements in Qdrant for retrieval during drafting."""
+        if not self.qdrant_memory:
+            return
+
+        try:
+            # Store geography elements
+            for geo in worldbuilding.get("geography", []):
+                await self.qdrant_memory.store_worldbuilding(
+                    project_id, "geography", geo
+                )
+
+            # Store culture elements
+            for culture in worldbuilding.get("cultures", []):
+                await self.qdrant_memory.store_worldbuilding(
+                    project_id, "culture", culture
+                )
+
+            # Store rules
+            for rule in worldbuilding.get("rules", []):
+                await self.qdrant_memory.store_worldbuilding(
+                    project_id, "rule", rule
+                )
+
+            # Store historical events as a single element
+            if worldbuilding.get("historical_events"):
+                await self.qdrant_memory.store_worldbuilding(
+                    project_id, "history", {
+                        "events": worldbuilding["historical_events"],
+                        "technology_level": worldbuilding.get("technology_level", ""),
+                        "magic_system": worldbuilding.get("magic_system", ""),
+                    }
+                )
+
+            self._emit_event("memory_store", {
+                "type": "worldbuilding",
+                "status": "success",
+                "geography_count": len(worldbuilding.get("geography", [])),
+                "culture_count": len(worldbuilding.get("cultures", [])),
+                "rule_count": len(worldbuilding.get("rules", [])),
+            })
+        except Exception as e:
+            self._emit_event("memory_store", {
+                "type": "worldbuilding",
+                "status": "failed",
+                "error": str(e)
+            })
+
+    async def _retrieve_worldbuilding(self, project_id: str, query: str, limit: int = 5) -> Dict[str, List[Dict]]:
+        """Retrieve relevant worldbuilding elements from memory."""
+        if not self.qdrant_memory:
+            return {"geography": [], "cultures": [], "rules": [], "history": []}
+
+        try:
+            results = await self.qdrant_memory.search_worldbuilding(project_id, query, limit=limit)
+
+            # Organize results by type
+            organized = {"geography": [], "cultures": [], "rules": [], "history": []}
+            for r in results:
+                element_type = r.get("element_type", "")
+                element = r.get("element", {})
+                if element_type == "geography":
+                    organized["geography"].append(element)
+                elif element_type == "culture":
+                    organized["cultures"].append(element)
+                elif element_type == "rule":
+                    organized["rules"].append(element)
+                elif element_type == "history":
+                    organized["history"].append(element)
+
+            return organized
+        except Exception as e:
+            self._emit_event("memory_search", {
+                "type": "worldbuilding",
+                "status": "failed",
+                "error": str(e)
+            })
+            return {"geography": [], "cultures": [], "rules": [], "history": []}
+
     def _get_llm_config(self, agent_name: str) -> Dict[str, Any]:
         """Get LLM configuration for a specific agent."""
         agent_configs = self.config.agent_models
@@ -195,6 +278,7 @@ class StorytellerGroupChat:
         provider_map = {
             "architect": (agent_configs.architect_provider, agent_configs.architect_model),
             "profiler": (agent_configs.profiler_provider, agent_configs.profiler_model),
+            "worldbuilder": (agent_configs.worldbuilder_provider, agent_configs.worldbuilder_model),
             "strategist": (agent_configs.strategist_provider, agent_configs.strategist_model),
             "writer": (agent_configs.writer_provider, agent_configs.writer_model),
             "critic": (agent_configs.critic_provider, agent_configs.critic_model),
@@ -233,6 +317,20 @@ If something in the narrative is unclear, ASK the Architect before proceeding.
 Always output character profiles as a JSON array wrapped in ```json``` blocks.
 """
 
+        worldbuilder_prompt = WORLDBUILDER_SYSTEM_PROMPT + """
+
+## Communication Protocol
+
+You can communicate with other agents:
+- ARTIFACT: Output your worldbuilding as final artifact
+- QUESTION to Architect: Ask about narrative setting requirements
+- QUESTION to Profiler: Ask about character cultural backgrounds
+- RESPONSE: Answer questions from other agents
+
+Create rich, sensory worldbuilding that serves the story's themes.
+Always output worldbuilding as valid JSON wrapped in ```json``` blocks.
+"""
+
         strategist_prompt = STRATEGIST_SYSTEM_PROMPT + """
 
 ## Communication Protocol
@@ -241,6 +339,7 @@ You can communicate with other agents:
 - ARTIFACT: Output your plot outline as final artifact
 - QUESTION to Architect: Ask about narrative direction
 - QUESTION to Profiler: Ask about character motivations
+- QUESTION to Worldbuilder: Ask about setting details
 - OBJECTION: If character profiles don't support the plot, raise: "OBJECTION to Profiler: [issue] SUGGESTED_CHANGE: [suggestion]"
 - RESPONSE: Answer questions from other agents
 
@@ -281,6 +380,7 @@ Always output critiques as valid JSON wrapped in ```json``` blocks.
         # Note: We'll use custom message handling instead of AutoGen's built-in
         self.architect = self._create_agent("Architect", architect_prompt)
         self.profiler = self._create_agent("Profiler", profiler_prompt)
+        self.worldbuilder = self._create_agent("Worldbuilder", worldbuilder_prompt)
         self.strategist = self._create_agent("Strategist", strategist_prompt)
         self.writer = self._create_agent("Writer", writer_prompt)
         self.critic = self._create_agent("Critic", critic_prompt)
@@ -645,6 +745,106 @@ Now create the character profiles as a JSON array.
             ],
         }
 
+    async def run_worldbuilding_phase(
+        self,
+        narrative: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        target_audience: str,
+    ) -> Dict[str, Any]:
+        """
+        Run the Worldbuilding phase with Worldbuilder agent.
+        Creates rich, consistent world details for the story.
+        """
+        self.state.phase = GenerationPhase.WORLDBUILDING
+        self._emit_event("phase_start", {"phase": "worldbuilding"})
+
+        # Format character summaries for worldbuilding context
+        characters_summary = "\n\n".join([
+            f"**{c.get('name', 'Unknown')}** ({c.get('archetype', 'Unknown')})\n"
+            f"- Background: {c.get('background', 'Unknown')}\n"
+            f"- Core Motivation: {c.get('core_motivation', 'Unknown')}"
+            for c in characters
+        ])
+
+        # Import the user prompt template
+        from prompts.worldbuilder import WORLDBUILDER_USER_PROMPT_TEMPLATE
+
+        user_prompt = WORLDBUILDER_USER_PROMPT_TEMPLATE.format(
+            plot_summary=narrative.get("plot_summary", ""),
+            setting_description=narrative.get("setting_description", ""),
+            main_conflict=narrative.get("main_conflict", ""),
+            moral_compass=moral_compass,
+            target_audience=target_audience,
+            thematic_elements=", ".join(narrative.get("thematic_elements", [])),
+            characters_summary=characters_summary,
+        )
+
+        worldbuilder_response = await self._call_agent(self.worldbuilder, user_prompt)
+        worldbuilder_msg = self._parse_agent_message("Worldbuilder", worldbuilder_response)
+        self.state.messages.append(worldbuilder_msg)
+
+        # Handle questions to Architect or Profiler
+        if worldbuilder_msg.type == "question":
+            target_agent = worldbuilder_msg.to_agent or "Architect"
+            if target_agent == "Profiler":
+                response = await self._call_agent(
+                    self.profiler,
+                    f"The Worldbuilder asks: {worldbuilder_msg.content}\n\nProvide a helpful response about character backgrounds.",
+                )
+            else:
+                response = await self._call_agent(
+                    self.architect,
+                    f"The Worldbuilder asks: {worldbuilder_msg.content}\n\nProvide a helpful response about the narrative setting.",
+                )
+            self.state.messages.append(AgentMessage(
+                type="response",
+                from_agent=target_agent,
+                to_agent="Worldbuilder",
+                content=response,
+            ))
+
+            # Worldbuilder continues with the answer
+            followup_prompt = f"""
+The {target_agent} responds: {response}
+
+Now create the worldbuilding as valid JSON following the specified schema.
+"""
+            worldbuilder_response = await self._call_agent(
+                self.worldbuilder,
+                followup_prompt,
+                [{"role": "assistant", "content": worldbuilder_response}],
+            )
+            worldbuilder_msg = self._parse_agent_message("Worldbuilder", worldbuilder_response)
+            self.state.messages.append(worldbuilder_msg)
+
+        # Parse worldbuilding
+        worldbuilding = {}
+        if isinstance(worldbuilder_msg.content, dict):
+            worldbuilding = worldbuilder_msg.content
+
+        # Store worldbuilding in state
+        self.state.worldbuilding = worldbuilding
+
+        # Store in Qdrant memory if available
+        if self.qdrant_memory and self.state.project_id:
+            await self._store_worldbuilding_in_memory(self.state.project_id, worldbuilding)
+
+        self._emit_event("phase_complete", {
+            "phase": "worldbuilding",
+            "geography_count": len(worldbuilding.get("geography", [])),
+            "culture_count": len(worldbuilding.get("cultures", [])),
+            "rule_count": len(worldbuilding.get("rules", [])),
+        })
+
+        return {
+            "worldbuilding": worldbuilding,
+            "messages": [
+                {"agent": m.from_agent, "type": m.type}
+                for m in self.state.messages if m.type in ["question", "response"]
+            ],
+        }
+
     async def run_outlining_phase(
         self,
         narrative: Dict[str, Any],
@@ -653,6 +853,7 @@ Now create the character profiles as a JSON array.
         target_word_count: int = 50000,
         estimated_scenes: int = 20,
         preferred_structure: str = "ThreeAct",
+        worldbuilding: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the Outlining phase with Strategist agent.
@@ -671,6 +872,28 @@ Now create the character profiles as a JSON array.
             for c in characters
         ])
 
+        # Format worldbuilding context if available
+        worldbuilding_str = ""
+        if worldbuilding:
+            locations = worldbuilding.get("geography", [])
+            cultures = worldbuilding.get("cultures", [])
+            rules = worldbuilding.get("rules", [])
+
+            if locations:
+                worldbuilding_str += "\n### Key Locations\n"
+                for loc in locations:
+                    worldbuilding_str += f"- **{loc.get('location_name', 'Unknown')}**: {loc.get('description', '')[:200]}\n"
+
+            if cultures:
+                worldbuilding_str += "\n### Cultures\n"
+                for culture in cultures:
+                    worldbuilding_str += f"- **{culture.get('culture_name', 'Unknown')}**: Values: {', '.join(culture.get('values', []))}\n"
+
+            if rules:
+                worldbuilding_str += "\n### World Rules\n"
+                for rule in rules:
+                    worldbuilding_str += f"- **{rule.get('rule_name', 'Unknown')}**: {rule.get('description', '')[:150]}\n"
+
         user_prompt = f"""
 ## Narrative Foundation
 
@@ -688,6 +911,9 @@ Now create the character profiles as a JSON array.
 
 {character_profiles_str}
 
+## Worldbuilding Context
+{worldbuilding_str if worldbuilding_str else "No detailed worldbuilding available - use setting description above."}
+
 ## Requirements
 
 **Target Word Count:** {target_word_count} words total
@@ -696,7 +922,8 @@ Now create the character profiles as a JSON array.
 
 ---
 
-Create a detailed scene-by-scene outline.
+Create a detailed scene-by-scene outline that leverages the worldbuilding elements.
+Each scene should specify which locations and cultural elements are relevant.
 If character profiles don't support the plot, raise: "OBJECTION to Profiler: [issue] SUGGESTED_CHANGE: [suggestion]"
 Otherwise, output the outline as valid JSON.
 """
@@ -773,7 +1000,7 @@ Now create the plot outline as valid JSON.
         """
         Run the Drafting phase with Writer↔Critic loop.
         Maximum 2 revisions per scene.
-        
+
         Args:
             scene: Scene outline with title, conflict, emotional beat, etc.
             characters: List of character profiles
@@ -808,18 +1035,18 @@ Now create the plot outline as valid JSON.
         ])
 
         emotional_beat = scene.get("emotional_beat", {})
-        
+
         # Format memory context if available
         memory_context_str = ""
         if memory_context:
             relevant_chars = memory_context.get("relevant_characters", [])
             relevant_scenes = memory_context.get("relevant_scenes", [])
-            
+
             if relevant_chars:
                 memory_context_str += "\n## Retrieved Character Context (from memory)\n\n"
                 for char in relevant_chars:
                     memory_context_str += f"**{char.get('name', 'Unknown')}**: {char.get('core_motivation', '')} - {char.get('inner_trap', '')}\n"
-            
+
             if relevant_scenes:
                 memory_context_str += "\n## Related Previous Scenes (from memory)\n\n"
                 for scene_mem in relevant_scenes:
@@ -987,7 +1214,7 @@ Output the revised scene as valid JSON.
         }
 
     async def run_demo_generation(
-        self, 
+        self,
         project: StoryProject,
         constraints: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -995,14 +1222,14 @@ Output the revised scene as valid JSON.
         Run a demo generation that involves all 5 agents in a simplified flow.
         This gives users visibility into the multi-agent collaboration without
         the full cost/time of run_full_generation.
-        
+
         Flow:
         1. Architect: Creates initial narrative concept
         2. Profiler: Suggests character archetypes
         3. Strategist: Proposes story structure
         4. Writer: Drafts opening scene
         5. Critic: Reviews and provides feedback
-        
+
         Args:
             project: The story project configuration
             constraints: Optional regeneration constraints with:
@@ -1020,14 +1247,14 @@ Output the revised scene as valid JSON.
         self._emit_event("phase_start", {"phase": "demo"})
 
         results = {}
-        
+
         # Extract constraints if provided
         edited_agent = constraints.get("edited_agent") if constraints else None
         edited_content = constraints.get("edited_content") if constraints else None
         edit_comment = constraints.get("edit_comment") if constraints else None
         locked_agents = constraints.get("locked_agents", {}) if constraints else {}
         agents_to_regenerate = constraints.get("agents_to_regenerate", []) if constraints else []
-        
+
         # Helper to check if an agent should be skipped (locked or not selected for regen)
         def should_skip_agent(agent_name: str) -> bool:
             if not constraints:
@@ -1042,7 +1269,7 @@ Output the revised scene as valid JSON.
             if agents_to_regenerate and agent_name not in agents_to_regenerate:
                 return True
             return False
-        
+
         def get_agent_content(agent_name: str) -> Optional[str]:
             """Get the content for a skipped agent."""
             if agent_name == edited_agent:
@@ -1050,7 +1277,7 @@ Output the revised scene as valid JSON.
             if agent_name in locked_agents:
                 return locked_agents[agent_name]
             return None
-        
+
         # Build constraint context for prompts
         constraint_context = ""
         if constraints and edit_comment:
@@ -1236,7 +1463,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration.
-        
+
         Args:
             project: Story project configuration
             target_word_count: Target word count for the full story
@@ -1250,7 +1477,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             "phases": {},
             "memory_enabled": False,
         }
-        
+
         # Generate a unique project ID for memory storage
         project_id = project.seed_idea[:20].replace(" ", "_") + "_" + str(hash(project.seed_idea))[:8]
 
@@ -1261,7 +1488,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Phase 1: Genesis (this initializes self.state)
         genesis_result = await self.run_genesis_phase(project)
-        
+
         # Set max_revisions in state AFTER genesis phase creates it
         if self.state:
             self.state.max_revisions = max_revisions
@@ -1280,13 +1507,25 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         if not characters_result.get("characters"):
             return {"error": "Characters phase failed", **results}
-            
+
         # Store characters in Qdrant memory for later retrieval
         characters = characters_result.get("characters", [])
         if isinstance(characters, list):
             await self._store_characters_in_memory(project_id, characters)
 
-        # Phase 3: Outlining
+        # Phase 3: Worldbuilding
+        worldbuilding_result = await self.run_worldbuilding_phase(
+            narrative=genesis_result["narrative_possibility"],
+            characters=characters_result["characters"],
+            moral_compass=project.moral_compass.value,
+            target_audience=project.target_audience,
+        )
+        results["phases"]["worldbuilding"] = worldbuilding_result
+
+        # Worldbuilding is optional - continue even if it fails
+        worldbuilding = worldbuilding_result.get("worldbuilding", {})
+
+        # Phase 4: Outlining
         outlining_result = await self.run_outlining_phase(
             narrative=genesis_result["narrative_possibility"],
             characters=characters_result["characters"],
@@ -1294,13 +1533,14 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             target_word_count=target_word_count,
             estimated_scenes=estimated_scenes,
             preferred_structure=preferred_structure,
+            worldbuilding=worldbuilding,
         )
         results["phases"]["outlining"] = outlining_result
 
         if not outlining_result.get("outline"):
             return {"error": "Outlining phase failed", **results}
 
-        # Phase 4: Drafting (all scenes)
+        # Phase 5: Drafting (all scenes)
         outline = outlining_result["outline"]
         scenes = outline.get("scenes", [])
         drafts = []
@@ -1310,14 +1550,30 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             # Retrieve relevant characters from memory for this scene
             scene_context = scene.get("title", "") + " " + scene.get("conflict", "")
             relevant_characters = await self._retrieve_relevant_characters(project_id, scene_context, limit=3)
-            
+
             # Retrieve relevant previous scenes for continuity
             relevant_scenes = await self._retrieve_relevant_scenes(project_id, scene_context, limit=2)
-            
+
+            # Retrieve relevant worldbuilding elements for this scene
+            relevant_worldbuilding = await self._retrieve_worldbuilding(project_id, scene_context, limit=3)
+
+            # Merge static worldbuilding with retrieved elements
+            scene_worldbuilding = worldbuilding.copy() if worldbuilding else {}
+            if relevant_worldbuilding:
+                # Add retrieved elements to the worldbuilding context
+                for key in ["geography", "cultures", "rules", "history"]:
+                    if relevant_worldbuilding.get(key):
+                        existing = scene_worldbuilding.get(key, [])
+                        scene_worldbuilding[key] = existing + [
+                            elem for elem in relevant_worldbuilding[key]
+                            if elem not in existing
+                        ]
+
             draft_result = await self.run_drafting_phase(
                 scene=scene,
                 characters=characters_result["characters"],
                 moral_compass=project.moral_compass.value,
+                worldbuilding=scene_worldbuilding if scene_worldbuilding else None,
                 previous_scene_summary=previous_summary,
                 memory_context={
                     "relevant_characters": relevant_characters,
