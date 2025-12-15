@@ -299,9 +299,16 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
         lines.push('');  // Add blank line before list for proper markdown
         filteredItems.forEach((item, i) => {
           if (typeof item === 'object' && item !== null) {
-            const inlineText = formatObjectInline(item as Record<string, unknown>);
-            if (inlineText.trim()) {
-              lines.push(`${indent}${i + 1}. ${inlineText}`);
+            // Format each field on its own line for better readability
+            const itemLines: string[] = [];
+            for (const [itemKey, itemValue] of Object.entries(item as Record<string, unknown>)) {
+              const formattedItemKey = itemKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              if (itemValue !== null && itemValue !== undefined && itemValue !== '') {
+                itemLines.push(`**${formattedItemKey}**: ${itemValue}`);
+              }
+            }
+            if (itemLines.length > 0) {
+              lines.push(`${indent}${i + 1}. ${itemLines.join(', ')}`);
             }
           } else {
             const itemText = String(item).trim();
@@ -328,7 +335,8 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
     }
   }
   
-  return lines.join('\n');
+  // Use double newlines for proper markdown paragraph breaks
+  return lines.join('\n\n');
 }
 
 function formatObjectInline(obj: Record<string, unknown>): string {
@@ -342,7 +350,8 @@ function formatObjectInline(obj: Record<string, unknown>): string {
       parts.push(`**${formattedKey}**: ${value}`);
     }
   }
-  return parts.slice(0, 4).join(', ');
+  // Join with line breaks for better readability
+  return parts.join(', ');
 }
 
 function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
