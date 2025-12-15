@@ -1161,6 +1161,8 @@ Now create the plot outline as valid JSON.
         memory_context: Optional[Dict[str, Any]] = None,
         narrator_config: Optional[Dict[str, Any]] = None,
         change_request: Optional[str] = None,
+        sensory_blueprint: Optional[Dict[str, Any]] = None,
+        subtext_design: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the Drafting phase with Writer↔Critic loop.
@@ -1179,6 +1181,8 @@ Now create the plot outline as valid JSON.
                 - pov: Point of view (first_person, third_person_limited, etc.)
                 - reliability: Narrator reliability (reliable, unreliable)
                 - stance: Narrator stance (objective, judgmental, sympathetic)
+            sensory_blueprint: Optional pre-planned sensory details for the scene
+            subtext_design: Optional pre-designed subtext layer for the scene
         """
         self.state.phase = GenerationPhase.DRAFTING
         scene_number = scene.get("scene_number", 1)
@@ -1275,6 +1279,90 @@ Now create the plot outline as valid JSON.
 IMPORTANT: Write the entire scene strictly adhering to these narrator settings. The POV determines whose thoughts we can access and how pronouns are used. The reliability affects how events are presented. The stance affects the narrative voice and tone.
 """
 
+        # Format sensory blueprint if available
+        sensory_str = ""
+        if sensory_blueprint:
+            sensory_str = """
+## Sensory Blueprint (Pre-Planned Sensory Details)
+
+IMPORTANT: Use these pre-planned sensory details to enrich your scene. These have been specifically designed for this scene's emotional journey.
+
+"""
+            if sensory_blueprint.get("visual_palette"):
+                visual = sensory_blueprint["visual_palette"]
+                sensory_str += f"**Visual Palette:**\n"
+                sensory_str += f"- Dominant Colors: {visual.get('dominant_colors', 'N/A')}\n"
+                sensory_str += f"- Lighting: {visual.get('lighting', 'N/A')}\n"
+                sensory_str += f"- Key Visual Elements: {visual.get('key_elements', 'N/A')}\n\n"
+            
+            if sensory_blueprint.get("soundscape"):
+                sound = sensory_blueprint["soundscape"]
+                sensory_str += f"**Soundscape:**\n"
+                sensory_str += f"- Ambient Sounds: {sound.get('ambient', 'N/A')}\n"
+                sensory_str += f"- Character Sounds: {sound.get('character_sounds', 'N/A')}\n"
+                sensory_str += f"- Silence Moments: {sound.get('silence_moments', 'N/A')}\n\n"
+            
+            if sensory_blueprint.get("tactile_elements"):
+                tactile = sensory_blueprint["tactile_elements"]
+                sensory_str += f"**Tactile Elements:**\n"
+                sensory_str += f"- Textures: {tactile.get('textures', 'N/A')}\n"
+                sensory_str += f"- Temperature: {tactile.get('temperature', 'N/A')}\n"
+                sensory_str += f"- Physical Sensations: {tactile.get('physical_sensations', 'N/A')}\n\n"
+            
+            if sensory_blueprint.get("olfactory_gustatory"):
+                smell_taste = sensory_blueprint["olfactory_gustatory"]
+                sensory_str += f"**Smell & Taste:**\n"
+                sensory_str += f"- Scents: {smell_taste.get('scents', 'N/A')}\n"
+                sensory_str += f"- Tastes: {smell_taste.get('tastes', 'N/A')}\n\n"
+            
+            if sensory_blueprint.get("internal_sensations"):
+                internal = sensory_blueprint["internal_sensations"]
+                sensory_str += f"**Internal Sensations (Character POV):**\n"
+                sensory_str += f"- Physical: {internal.get('physical', 'N/A')}\n"
+                sensory_str += f"- Emotional: {internal.get('emotional', 'N/A')}\n\n"
+
+        # Format subtext design if available
+        subtext_str = ""
+        if subtext_design:
+            subtext_str = """
+## Subtext Design (Iceberg Principle - 60% Implicit)
+
+IMPORTANT: Use these pre-designed subtext layers. Remember: show, don't tell. Most meaning should remain beneath the surface.
+
+"""
+            if subtext_design.get("iceberg_ratio"):
+                ratio = subtext_design["iceberg_ratio"]
+                subtext_str += f"**Iceberg Ratio Target:** {ratio.get('explicit_percentage', 40)}% explicit / {ratio.get('implicit_percentage', 60)}% implicit\n\n"
+            
+            if subtext_design.get("dialogue_subtext"):
+                dialogue_sub = subtext_design["dialogue_subtext"]
+                subtext_str += f"**Dialogue Subtext Mapping:**\n"
+                for entry in dialogue_sub if isinstance(dialogue_sub, list) else [dialogue_sub]:
+                    if isinstance(entry, dict):
+                        subtext_str += f"- Surface: \"{entry.get('surface_meaning', 'N/A')}\" → Hidden: \"{entry.get('hidden_meaning', 'N/A')}\"\n"
+                subtext_str += "\n"
+            
+            if subtext_design.get("behavioral_subtext"):
+                behavioral = subtext_design["behavioral_subtext"]
+                subtext_str += f"**Behavioral Subtext:**\n"
+                for entry in behavioral if isinstance(behavioral, list) else [behavioral]:
+                    if isinstance(entry, dict):
+                        subtext_str += f"- Action: \"{entry.get('action', 'N/A')}\" reveals \"{entry.get('hidden_emotion', 'N/A')}\"\n"
+                subtext_str += "\n"
+            
+            if subtext_design.get("environmental_subtext"):
+                env_sub = subtext_design["environmental_subtext"]
+                subtext_str += f"**Environmental Subtext:**\n"
+                subtext_str += f"- {env_sub if isinstance(env_sub, str) else json.dumps(env_sub)}\n\n"
+            
+            if subtext_design.get("secret_motivations"):
+                secrets = subtext_design["secret_motivations"]
+                subtext_str += f"**Secret Motivations (Never State Directly):**\n"
+                for entry in secrets if isinstance(secrets, list) else [secrets]:
+                    if isinstance(entry, dict):
+                        subtext_str += f"- {entry.get('character', 'Character')}: {entry.get('motivation', 'N/A')}\n"
+                subtext_str += "\n"
+
         user_prompt = f"""
 ## Scene Context
 
@@ -1314,6 +1402,8 @@ IMPORTANT: Write the entire scene strictly adhering to these narrator settings. 
 {previous_scene_summary}
 {memory_context_str}
 {narrator_str}
+{sensory_str}
+{subtext_str}
 ## Style Guidelines
 
 **Moral Compass:** {moral_compass}
@@ -3353,6 +3443,34 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 if scene_regen_mode and continuity["next_scene_summary"] != "N/A":
                     memory_ctx["next_scene_context"] = continuity["next_scene_summary"]
 
+                # Generate per-scene Sensory Blueprint
+                # This plans specific sensory details before drafting for richer prose
+                emotional_beat = scene.get("emotional_beat", {})
+                # Try to get emotional beat from the emotional_beat_sheet if available
+                if emotional_beat_sheet and emotional_beat_sheet.get("scene_beats"):
+                    scene_beats = emotional_beat_sheet.get("scene_beats", [])
+                    for beat in scene_beats:
+                        if beat.get("scene_number") == scene_number:
+                            emotional_beat = beat
+                            break
+
+                sensory_blueprint_result = await self.run_sensory_blueprint(
+                    scene=scene,
+                    characters=characters_result["characters"],
+                    worldbuilding=scene_worldbuilding if scene_worldbuilding else None,
+                    emotional_beat=emotional_beat,
+                )
+                scene_sensory_blueprint = sensory_blueprint_result.get("sensory_blueprint", {})
+
+                # Generate per-scene Subtext Design
+                # This designs the subtext layer using the Iceberg Principle (60% implicit)
+                subtext_design_result = await self.run_subtext_design(
+                    scene=scene,
+                    characters=characters_result["characters"],
+                    contradiction_maps=contradiction_maps if contradiction_maps else None,
+                )
+                scene_subtext_design = subtext_design_result.get("subtext_design", {})
+
                 draft_result = await self.run_drafting_phase(
                     scene=scene,
                     characters=characters_result["characters"],
@@ -3362,6 +3480,8 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     memory_context=memory_ctx if memory_ctx else None,
                     narrator_config=narrator_config,
                     change_request=change_request,
+                    sensory_blueprint=scene_sensory_blueprint,
+                    subtext_design=scene_subtext_design,
                 )
 
                 # Quality Gate with retry logic (per scene)
