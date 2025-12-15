@@ -399,13 +399,13 @@ async def health():
 
 @app.post("/generate", response_model=GenerateResponse)
 @limiter.limit("10/minute")
-async def generate(request: GenerateRequest, http_request: Request):
+async def generate(gen_request: GenerateRequest, request: Request):
     """Start a multi-agent generation run. Requires authentication."""
     if not worker:
         raise HTTPException(status_code=503, detail="Worker not initialized")
 
     # Authenticate user
-    user_id, _ = await get_current_user(http_request)
+    user_id, _ = await get_current_user(request)
 
     run_id = str(uuid.uuid4())
     
@@ -413,56 +413,56 @@ async def generate(request: GenerateRequest, http_request: Request):
     run_ownership.register_run(run_id, user_id)
 
     # Capitalize moral_compass to match enum values (Ethical, Unethical, Amoral, Ambiguous, UserDefined)
-    moral_compass_capitalized = request.moral_compass.capitalize() if request.moral_compass else "Ambiguous"
+    moral_compass_capitalized = gen_request.moral_compass.capitalize() if gen_request.moral_compass else "Ambiguous"
 
     project_data = {
-        "seed_idea": request.seed_idea,
+        "seed_idea": gen_request.seed_idea,
         "moral_compass": moral_compass_capitalized,
-        "custom_moral_system": request.custom_moral_system if moral_compass_capitalized == "UserDefined" else None,
-        "target_audience": request.target_audience,
-        "theme_core": request.themes.split(",") if request.themes else [],
-        "tone_style_references": request.tone_style_references.split(",") if request.tone_style_references else None,
+        "custom_moral_system": gen_request.custom_moral_system if moral_compass_capitalized == "UserDefined" else None,
+        "target_audience": gen_request.target_audience,
+        "theme_core": gen_request.themes.split(",") if gen_request.themes else [],
+        "tone_style_references": gen_request.tone_style_references.split(",") if gen_request.tone_style_references else None,
     }
 
     # Convert constraints to dict if provided
     constraints_dict = None
-    if request.constraints:
+    if gen_request.constraints:
         constraints_dict = {
-            "edited_agent": request.constraints.edited_agent,
-            "edited_content": request.constraints.edited_content,
-            "edit_comment": request.constraints.edit_comment,
-            "locked_agents": request.constraints.locked_agents,
-            "agents_to_regenerate": request.constraints.agents_to_regenerate,
+            "edited_agent": gen_request.constraints.edited_agent,
+            "edited_content": gen_request.constraints.edited_content,
+            "edit_comment": gen_request.constraints.edit_comment,
+            "locked_agents": gen_request.constraints.locked_agents,
+            "agents_to_regenerate": gen_request.constraints.agents_to_regenerate,
         }
 
     # Convert narrator_config to dict if provided
     narrator_config_dict = None
-    if request.narrator_config:
+    if gen_request.narrator_config:
         narrator_config_dict = {
-            "pov": request.narrator_config.pov,
-            "reliability": request.narrator_config.reliability,
-            "stance": request.narrator_config.stance,
+            "pov": gen_request.narrator_config.pov,
+            "reliability": gen_request.narrator_config.reliability,
+            "stance": gen_request.narrator_config.stance,
         }
 
     # Start generation in background with user's API key
     task = asyncio.create_task(worker.run_generation(
         run_id=run_id,
         project_data=project_data,
-        api_key=request.api_key,
-        provider=request.provider,
-        model=request.model,
+        api_key=gen_request.api_key,
+        provider=gen_request.provider,
+        model=gen_request.model,
         constraints=constraints_dict,
-        generation_mode=request.generation_mode,
-        target_word_count=request.target_word_count,
-        estimated_scenes=request.estimated_scenes,
-        preferred_structure=request.preferred_structure,
-        max_revisions=request.max_revisions,
+        generation_mode=gen_request.generation_mode,
+        target_word_count=gen_request.target_word_count,
+        estimated_scenes=gen_request.estimated_scenes,
+        preferred_structure=gen_request.preferred_structure,
+        max_revisions=gen_request.max_revisions,
         narrator_config=narrator_config_dict,
-        start_from_phase=request.start_from_phase,
-        previous_run_id=request.previous_run_id,
-        edited_content=request.edited_content,
-        scenes_to_regenerate=request.scenes_to_regenerate,
-        supabase_project_id=request.supabase_project_id,
+        start_from_phase=gen_request.start_from_phase,
+        previous_run_id=gen_request.previous_run_id,
+        edited_content=gen_request.edited_content,
+        scenes_to_regenerate=gen_request.scenes_to_regenerate,
+        supabase_project_id=gen_request.supabase_project_id,
     ))
 
     # Track active run for cancellation support
