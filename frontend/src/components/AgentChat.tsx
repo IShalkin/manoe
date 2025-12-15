@@ -1344,6 +1344,12 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                 You edited <span className={AGENT_TEXT_COLORS[pendingEdit.agent]}>{pendingEdit.agent}</span>. 
                 This will affect downstream agents.
               </p>
+              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                <p className="text-xs text-amber-300">
+                  <strong>Note:</strong> Regeneration will start a new complete generation run. 
+                  Your edit will be used as context, but all scenes will be regenerated from scratch.
+                </p>
+              </div>
             </div>
             
             <div className="p-6 space-y-6">
@@ -1458,8 +1464,11 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {isAffected && !isLocked && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400">Affected</span>
+                          {isAffected && !isLocked && !willRegenerate && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-slate-600/50 text-slate-400">Downstream</span>
+                          )}
+                          {willRegenerate && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400">Will Regenerate</span>
                           )}
                           <button
                             onClick={() => handleToggleLock(agent)}
