@@ -246,15 +246,9 @@ function formatAgentContent(content: string): string {
   
   const trimmed = content.trim();
   
-  // First, try tolerant JSON parse (handles common LLM issues)
-  const parsed = tolerantJsonParse(trimmed);
-  if (parsed !== null) {
-    return formatAnyAsMarkdown(parsed);
-  }
-  
-  // Check for ```json code blocks
-  if (content.includes('```json')) {
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+  // Check for ```json code blocks first
+  if (content.includes('```json') || content.includes('```')) {
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
       const blockParsed = tolerantJsonParse(jsonMatch[1]);
       if (blockParsed !== null) {
@@ -263,12 +257,18 @@ function formatAgentContent(content: string): string {
     }
   }
   
+  // Try tolerant JSON parse (handles common LLM issues)
+  const parsed = tolerantJsonParse(trimmed);
+  if (parsed !== null && typeof parsed === 'object') {
+    return formatAnyAsMarkdown(parsed);
+  }
+  
   // Try to extract JSON from string (handles prefix/suffix text)
   if (trimmed.includes('{') || trimmed.includes('[')) {
     const extracted = extractJsonFromString(trimmed);
     if (extracted) {
       const extractedParsed = tolerantJsonParse(extracted);
-      if (extractedParsed !== null) {
+      if (extractedParsed !== null && typeof extractedParsed === 'object') {
         return formatAnyAsMarkdown(extractedParsed);
       }
     }
@@ -372,6 +372,9 @@ function MarkdownContent({ content, className = '' }: { content: string; classNa
           ),
           code: ({ children }) => (
             <code className="bg-slate-800 px-1.5 py-0.5 rounded text-xs text-cyan-400">{children}</code>
+          ),
+          pre: ({ children }) => (
+            <pre className="bg-slate-800/50 p-3 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap break-words">{children}</pre>
           ),
           h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
           h2: ({ children }) => <h2 className="text-base font-semibold text-white mb-2">{children}</h2>,
