@@ -3,9 +3,10 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useSettings } from '../hooks/useSettings';
 import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
 import { AgentChat, RegenerationConstraints } from '../components/AgentChat';
+import { orchestratorFetch, getOrchestratorUrl } from '../lib/api';
 
 // Multi-agent orchestrator URL (separate subdomain)
-const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
+const ORCHESTRATOR_URL = getOrchestratorUrl();
 
 export function GenerationPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -97,11 +98,8 @@ export function GenerationPage() {
       }
 
       // Call orchestrator with phase-based regeneration parameters
-      const response = await fetch(`${ORCHESTRATOR_URL}/generate`, {
+      const response = await orchestratorFetch('/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           seed_idea: project.seedIdea,
           moral_compass: project.moralCompass,
@@ -184,11 +182,8 @@ export function GenerationPage() {
       }
 
       // Call orchestrator to start generation
-      const response = await fetch(`${ORCHESTRATOR_URL}/generate`, {
+      const response = await orchestratorFetch('/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           seed_idea: project.seedIdea,
           moral_compass: project.moralCompass,

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { UserSettings, ProviderConfig, AgentConfig, LLMProvider, AGENTS, MODELS, LLMModel } from '../types';
+import { orchestratorFetch } from '../lib/api';
 
 const STORAGE_KEY = 'manoe_settings';
 const MODELS_CACHE_KEY = 'manoe_models_cache';
@@ -173,11 +174,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setLoadingModels(prev => ({ ...prev, [provider]: true }));
 
     try {
-      // Use orchestrator API for dynamic model loading
-      const orchestratorUrl = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
-      const response = await fetch(`${orchestratorUrl}/models`, {
+      // Use orchestrator API for dynamic model loading with JWT auth
+      const response = await orchestratorFetch('/models', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider, api_key: apiKey }),
       });
 

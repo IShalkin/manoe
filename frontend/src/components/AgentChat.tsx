@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { ProjectResult } from '../hooks/useProjects';
+import { orchestratorFetch, getAuthenticatedSSEUrl } from '../lib/api';
 
 // Tolerant JSON parser that handles common LLM output issues
 function tolerantJsonParse(str: string): unknown | null {
@@ -593,7 +594,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       }
       
       // Call pause endpoint (not cancel) so generation can be resumed
-      const response = await fetch(`${orchestratorUrl}/runs/${runId}/pause`, {
+      const response = await orchestratorFetch(`/runs/${runId}/pause`, {
         method: 'POST',
       });
       
@@ -617,7 +618,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     
     try {
       // Call resume endpoint
-      const response = await fetch(`${orchestratorUrl}/runs/${runId}/resume`, {
+      const response = await orchestratorFetch(`/runs/${runId}/resume`, {
         method: 'POST',
       });
       
@@ -805,14 +806,19 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   useEffect(() => {
     if (!runId) return;
 
-    // Connect to SSE endpoint
-    const eventSource = new EventSource(`${orchestratorUrl}/runs/${runId}/events`);
-    eventSourceRef.current = eventSource;
+    // Connect to SSE endpoint with authentication
+    let eventSource: EventSource | null = null;
+    
+    const connectSSE = async () => {
+      try {
+        const sseUrl = await getAuthenticatedSSEUrl(`/runs/${runId}/events`);
+        eventSource = new EventSource(sseUrl);
+        eventSourceRef.current = eventSource;
 
-    eventSource.onopen = () => {
-      setIsConnected(true);
-      setError(null);
-    };
+        eventSource.onopen = () => {
+          setIsConnected(true);
+          setError(null);
+        };
 
     eventSource.onmessage = (event) => {
       try {
@@ -842,7 +848,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         if (data.type === 'generation_cancelled') {
           setCurrentPhase('Cancelled');
           setIsCancelled(true);
-          eventSource.close();
+          if (eventSource) eventSource.close();
           setIsConnected(false);
           return;
         }
@@ -851,7 +857,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         if (data.type === 'generation_complete' || data.type === 'generation_error') {
           setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : 'Error');
           setIsComplete(true);
-          eventSource.close();
+          if (eventSource) eventSource.close();
           setIsConnected(false);
           
           // Call onComplete callback with result
@@ -920,13 +926,26 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       }
     };
 
-    eventSource.onerror = () => {
-      setIsConnected(false);
-      setError('Connection lost. Reconnecting...');
+        eventSource.onerror = () => {
+          setIsConnected(false);
+          setError('Connection lost. Reconnecting...');
+        };
+      } catch (err) {
+        console.error('Failed to connect to SSE:', err);
+        setError(err instanceof Error ? err.message : 'Failed to connect');
+      }
     };
 
+    connectSSE();
+
     return () => {
-      eventSource.close();
+      if (eventSource) {
+        eventSource.close();
+      }
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
     };
   }, [runId, orchestratorUrl, reconnectTrigger]);
 

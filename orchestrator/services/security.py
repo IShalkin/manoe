@@ -116,26 +116,26 @@ async def get_current_user(
     Raises:
         HTTPException: If authentication fails
     """
-    # Try to get token from Authorization header
+    # Try to get token from Authorization header first
     auth_header = request.headers.get("Authorization")
+    token = None
     
-    if not auth_header:
+    if auth_header:
+        # Extract token from "Bearer <token>" format
+        parts = auth_header.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1]
+    
+    # If no header token, try query parameter (for SSE connections)
+    if not token:
+        token = request.query_params.get("token")
+    
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Authorization header",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # Extract token from "Bearer <token>" format
-    parts = auth_header.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Authorization header format. Use 'Bearer <token>'",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    token = parts[1]
     
     try:
         payload = decode_jwt(token)
