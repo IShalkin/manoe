@@ -78,6 +78,27 @@ class GenerationState:
     max_revisions: int = 2
 
 
+def _safe_join(items: List[Any], separator: str = ", ") -> str:
+    """Safely join a list of items, converting dicts to strings if needed."""
+    if not items:
+        return ""
+    result = []
+    for item in items:
+        if isinstance(item, dict):
+            # Extract a meaningful string from the dict
+            if "name" in item:
+                result.append(str(item["name"]))
+            elif "title" in item:
+                result.append(str(item["title"]))
+            else:
+                result.append(json.dumps(item, ensure_ascii=False))
+        elif isinstance(item, str):
+            result.append(item)
+        else:
+            result.append(str(item))
+    return separator.join(result)
+
+
 class StorytellerGroupChat:
     """
     AutoGen-based multi-agent group chat for narrative generation.
@@ -790,9 +811,9 @@ Make sure your output reflects these requirements.
 
 **Target Audience:** {target_audience}
 
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
-**Required Character Types:** {", ".join(narrative.get("potential_characters", []))}
+**Required Character Types:** {_safe_join(narrative.get("potential_characters", []))}
 {change_request_section}
 ---
 
@@ -886,7 +907,7 @@ Now create the character profiles as a JSON array.
             main_conflict=narrative.get("main_conflict", ""),
             moral_compass=moral_compass,
             target_audience=target_audience,
-            thematic_elements=", ".join(narrative.get("thematic_elements", [])),
+            thematic_elements=_safe_join(narrative.get("thematic_elements", [])),
             characters_summary=characters_summary,
         )
 
@@ -1031,7 +1052,7 @@ Now create the worldbuilding as valid JSON following the specified schema.
 
 **Moral Compass:** {moral_compass}
 
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
 ## Character Profiles
 
@@ -2208,7 +2229,7 @@ Output your revised scene as valid JSON with the same structure as the original 
 
 **Plot Summary:** {narrative.get("plot_summary", "")}
 **Main Conflict:** {narrative.get("main_conflict", "")}
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
 ---
 
@@ -2284,7 +2305,7 @@ Analyze each character and output the contradiction maps as valid JSON.
 ## Narrative Context
 
 **Plot Summary:** {narrative.get("plot_summary", "")}
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
 ---
 
@@ -2478,7 +2499,7 @@ Design the subtext layer for this scene as valid JSON.
 
 **Plot Summary:** {narrative.get("plot_summary", "")}
 **Main Conflict:** {narrative.get("main_conflict", "")}
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
 ## Characters
 
