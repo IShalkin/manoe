@@ -94,10 +94,12 @@ class StorytellerGroupChat:
         event_callback: Optional[Callable[[str, Dict], None]] = None,
         qdrant_url: Optional[str] = None,
         openai_api_key: Optional[str] = None,
+        pause_check_callback: Optional[Callable[[], bool]] = None,
     ):
         self.config = config
         self.model_client = UnifiedModelClient(config)
         self.event_callback = event_callback
+        self.pause_check_callback = pause_check_callback  # Returns True if paused
         self.state: Optional[GenerationState] = None
 
         # Agent instances
@@ -450,6 +452,22 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
             "system_prompt": system_prompt,
             "llm_config": self._get_llm_config(name.lower()),
         }
+
+    async def _check_pause(self) -> bool:
+        """Check if generation is paused and wait if so.
+        
+        Returns:
+            True if generation should continue, False if cancelled/should stop
+        """
+        if not self.pause_check_callback:
+            return True
+        
+        # Check if paused - wait until resumed
+        while self.pause_check_callback():
+            # Wait a bit before checking again
+            await asyncio.sleep(1)
+        
+        return True
 
     def _emit_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """Emit an event to the callback if registered."""
@@ -2758,6 +2776,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             results["memory_enabled"] = memory_initialized
 
         # Phase 1: Genesis (this initializes self.state)
+        await self._check_pause()  # Pause checkpoint
         genesis_result = await self.run_genesis_phase(project)
 
         # Set max_revisions in state AFTER genesis phase creates it
@@ -2769,6 +2788,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             return {"error": "Genesis phase failed", **results}
 
         # Phase 2: Characters
+        await self._check_pause()  # Pause checkpoint
         characters_result = await self.run_characters_phase(
             narrative=genesis_result["narrative_possibility"],
             moral_compass=project.moral_compass.value,
@@ -2785,6 +2805,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             await self._store_characters_in_memory(project_id, characters)
 
         # Phase 3: Worldbuilding
+        await self._check_pause()  # Pause checkpoint
         worldbuilding_result = await self.run_worldbuilding_phase(
             narrative=genesis_result["narrative_possibility"],
             characters=characters_result["characters"],
@@ -2797,6 +2818,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         worldbuilding = worldbuilding_result.get("worldbuilding", {})
 
         # Phase 4: Outlining
+        await self._check_pause()  # Pause checkpoint
         outlining_result = await self.run_outlining_phase(
             narrative=genesis_result["narrative_possibility"],
             characters=characters_result["characters"],
@@ -2816,6 +2838,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Phase 5: Advanced Planning (Contradiction Maps, Emotional Beat Sheet, Complexity Checklist)
         # This runs global planning before per-scene drafting
+        await self._check_pause()  # Pause checkpoint
         advanced_planning_result = await self.run_advanced_planning(
             outline=outline,
             characters=characters_result["characters"],
@@ -2834,6 +2857,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         previous_summary = "N/A"
         for i, scene in enumerate(scenes):
+            await self._check_pause()  # Pause checkpoint before each scene
             # Retrieve relevant characters from memory for this scene
             scene_context = scene.get("title", "") + " " + scene.get("conflict", "")
             relevant_characters = await self._retrieve_relevant_characters(project_id, scene_context, limit=3)
@@ -2910,6 +2934,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Phase 7: Polish (all scenes - even if quality gate failed, we still polish)
         polished_drafts = []
         for i, draft_result in enumerate(drafts):
+            await self._check_pause()  # Pause checkpoint before each polish
             if draft_result.get("draft"):
                 polish_result = await self.run_polish_phase(
                     scene_number=i + 1,
