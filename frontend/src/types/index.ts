@@ -99,10 +99,72 @@ export const AGENTS = [
   { id: 'critic', name: 'Critic', description: 'Reviews and provides feedback' },
 ];
 
+// Model tiers for recommended models display
+export type ModelTier = 'S+' | 'A+' | 'A' | 'B';
+
+export interface RecommendedModel {
+  id: string;
+  name: string;
+  tier: ModelTier;
+  tierCategory: string;
+  provider: LLMProvider;
+  bestFor: string;
+  verdict: string;
+}
+
+// Top recommended models (December 2025)
+export const RECOMMENDED_MODELS: RecommendedModel[] = [
+  {
+    id: 'gemini-3-pro',
+    name: 'Gemini 3 Pro',
+    tier: 'S+',
+    tierCategory: 'Logic',
+    provider: 'gemini',
+    bestFor: 'Complex plot logic',
+    verdict: 'New king of AI. Google finally surpassed everyone. Deep Think integrated into core. Builds dynamic world model of your plot.',
+  },
+  {
+    id: 'claude-opus-4.5-20251124',
+    name: 'Claude Opus 4.5',
+    tier: 'S+',
+    tierCategory: 'Prose',
+    provider: 'anthropic',
+    bestFor: 'Living prose, RP',
+    verdict: 'Most human-like AI. Talented writer. Best for RP and literature. Many prefer it for style over technically stronger models.',
+  },
+  {
+    id: 'dolphin-mistral-24b-venice',
+    name: 'Dolphin Mistral 24B Venice',
+    tier: 'S+',
+    tierCategory: 'Uncensored',
+    provider: 'venice',
+    bestFor: 'Dark plots, roleplay',
+    verdict: 'Best uncensored model for creativity. No moralizing. Perfect for dark plots and political intrigue.',
+  },
+  {
+    id: 'llama-4-maverick-venice',
+    name: 'Llama 4 Maverick (Venice)',
+    tier: 'A+',
+    tierCategory: 'Context',
+    provider: 'venice',
+    bestFor: '256k context',
+    verdict: '256k context with Venice jailbreak. 3x fewer refusals. Technically smarter than Dolphin.',
+  },
+  {
+    id: 'gpt-5.2',
+    name: 'GPT-5.2',
+    tier: 'A',
+    tierCategory: 'Fast Logic',
+    provider: 'openai',
+    bestFor: 'Fast logic',
+    verdict: 'Improved routing (decides when to think deep vs fast). Less moralistic than 5.0.',
+  },
+];
+
 export const MODELS: Record<LLMProvider, LLMModel[]> = {
   openai: [
     // GPT-5 (Latest - December 2025)
-    { id: 'gpt-5.2', name: 'GPT-5.2', provider: 'openai', contextWindow: 256000, inputPrice: 5, outputPrice: 20, capabilities: ['vision', 'function_calling', 'reasoning'], recommended: ['architect', 'strategist'] },
+    { id: 'gpt-5.2', name: 'GPT-5.2 (A Tier)', provider: 'openai', contextWindow: 256000, inputPrice: 5, outputPrice: 20, capabilities: ['vision', 'function_calling', 'reasoning'], recommended: ['architect', 'strategist'] },
     { id: 'gpt-5', name: 'GPT-5', provider: 'openai', contextWindow: 256000, inputPrice: 4, outputPrice: 16, capabilities: ['vision', 'function_calling', 'reasoning'] },
     // GPT-4o Family
     { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', contextWindow: 128000, inputPrice: 2.5, outputPrice: 10, capabilities: ['vision', 'function_calling'], recommended: ['critic'] },
@@ -114,13 +176,13 @@ export const MODELS: Record<LLMProvider, LLMModel[]> = {
   ],
   openrouter: [
     // Top Tier - Claude Opus 4.5 (S+ Prose)
-    { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5', provider: 'openrouter', contextWindow: 200000, inputPrice: 20, outputPrice: 100, capabilities: ['vision', 'prose'], recommended: ['architect', 'writer', 'critic'] },
+    { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5 (S+ Prose)', provider: 'openrouter', contextWindow: 200000, inputPrice: 20, outputPrice: 100, capabilities: ['vision', 'prose'], recommended: ['architect', 'writer', 'critic'] },
+    // Gemini 3 Pro (S+ Logic)
+    { id: 'google/gemini-3-pro', name: 'Gemini 3 Pro (S+ Logic)', provider: 'openrouter', contextWindow: 2000000, inputPrice: 2.5, outputPrice: 10, capabilities: ['vision', 'reasoning'], recommended: ['strategist'] },
     // Llama 4 Maverick (A+ Context - 256k)
-    { id: 'meta-llama/llama-4-maverick', name: 'Llama 4 Maverick', provider: 'openrouter', contextWindow: 256000, inputPrice: 0.5, outputPrice: 1.5, capabilities: ['long_context'], recommended: ['profiler', 'strategist'] },
+    { id: 'meta-llama/llama-4-maverick', name: 'Llama 4 Maverick (A+ Context)', provider: 'openrouter', contextWindow: 256000, inputPrice: 0.5, outputPrice: 1.5, capabilities: ['long_context'], recommended: ['profiler', 'strategist'] },
     // Claude 3.5 Sonnet
     { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'openrouter', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision'], recommended: ['architect', 'critic'] },
-    // Gemini 3 Pro (S+ Logic)
-    { id: 'google/gemini-3-pro', name: 'Gemini 3 Pro', provider: 'openrouter', contextWindow: 2000000, inputPrice: 2.5, outputPrice: 10, capabilities: ['vision', 'reasoning'], recommended: ['strategist'] },
     // Gemini 2.0
     { id: 'google/gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash', provider: 'openrouter', contextWindow: 1000000, inputPrice: 0, outputPrice: 0, capabilities: ['vision', 'grounding'] },
     // Llama 3.3
@@ -132,7 +194,7 @@ export const MODELS: Record<LLMProvider, LLMModel[]> = {
   ],
   gemini: [
     // Gemini 3 (Latest - S+ Logic)
-    { id: 'gemini-3-pro', name: 'Gemini 3 Pro', provider: 'gemini', contextWindow: 2000000, inputPrice: 2.5, outputPrice: 10, capabilities: ['vision', 'reasoning'], recommended: ['architect', 'strategist'] },
+    { id: 'gemini-3-pro', name: 'Gemini 3 Pro (S+ Logic)', provider: 'gemini', contextWindow: 2000000, inputPrice: 2.5, outputPrice: 10, capabilities: ['vision', 'reasoning'], recommended: ['architect', 'strategist'] },
     { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'gemini', contextWindow: 1000000, inputPrice: 0.5, outputPrice: 2, capabilities: ['vision'], recommended: ['writer'] },
     // Gemini 2.0
     { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Exp', provider: 'gemini', contextWindow: 1000000, inputPrice: 0, outputPrice: 0, capabilities: ['vision', 'grounding', 'code_execution'] },
@@ -143,7 +205,7 @@ export const MODELS: Record<LLMProvider, LLMModel[]> = {
   ],
   anthropic: [
     // Claude Opus 4.5 (S+ Prose - Best for living prose)
-    { id: 'claude-opus-4.5-20251201', name: 'Claude Opus 4.5', provider: 'anthropic', contextWindow: 200000, inputPrice: 20, outputPrice: 100, capabilities: ['vision', 'prose'], recommended: ['architect', 'writer', 'critic'] },
+    { id: 'claude-opus-4.5-20251124', name: 'Claude Opus 4.5 (S+ Prose)', provider: 'anthropic', contextWindow: 200000, inputPrice: 20, outputPrice: 100, capabilities: ['vision', 'prose'], recommended: ['architect', 'writer', 'critic'] },
     // Claude 4 models
     { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', contextWindow: 200000, inputPrice: 3, outputPrice: 15, capabilities: ['vision', 'computer_use'], recommended: ['profiler'] },
     { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', provider: 'anthropic', contextWindow: 200000, inputPrice: 15, outputPrice: 75, capabilities: ['vision', 'computer_use'], recommended: ['strategist'] },
@@ -157,11 +219,11 @@ export const MODELS: Record<LLMProvider, LLMModel[]> = {
   ],
   venice: [
     // S+ Uncensored - Best for dialogues, roleplay, dark plots without censorship
-    { id: 'dolphin-mistral-24b-venice', name: 'Dolphin Mistral 24B Venice Edition', provider: 'venice', contextWindow: 32000, inputPrice: 0.5, outputPrice: 1.5, capabilities: ['uncensored', 'roleplay'], recommended: ['writer', 'profiler'] },
+    { id: 'dolphin-mistral-24b-venice', name: 'Dolphin Mistral 24B Venice (S+ Uncensored)', provider: 'venice', contextWindow: 32000, inputPrice: 0.5, outputPrice: 1.5, capabilities: ['uncensored', 'roleplay'], recommended: ['writer', 'profiler'] },
     // Venice Large (Llama 4 Maverick)
-    { id: 'llama-4-maverick-venice', name: 'Llama 4 Maverick (Venice Large)', provider: 'venice', contextWindow: 256000, inputPrice: 0.8, outputPrice: 2.4, capabilities: ['long_context', 'uncensored'], recommended: ['architect', 'strategist'] },
+    { id: 'llama-4-maverick-venice', name: 'Llama 4 Maverick Venice (A+ Context)', provider: 'venice', contextWindow: 256000, inputPrice: 0.8, outputPrice: 2.4, capabilities: ['long_context', 'uncensored'], recommended: ['architect', 'strategist'] },
     // Qwen 3 (Venice Medium/Large alternative - good for Eastern intrigue)
-    { id: 'qwen-3-235b-venice', name: 'Qwen 3 235B (Venice)', provider: 'venice', contextWindow: 131072, inputPrice: 0.4, outputPrice: 1.2, capabilities: ['uncensored'], recommended: ['writer', 'profiler'] },
+    { id: 'qwen-3-235b-venice', name: 'Qwen 3 235B Venice', provider: 'venice', contextWindow: 131072, inputPrice: 0.4, outputPrice: 1.2, capabilities: ['uncensored'], recommended: ['writer', 'profiler'] },
     // Other Venice models
     { id: 'llama-3.3-70b-venice', name: 'Llama 3.3 70B Venice', provider: 'venice', contextWindow: 131072, inputPrice: 0.3, outputPrice: 0.9, capabilities: ['uncensored'] },
     { id: 'mistral-large-venice', name: 'Mistral Large Venice', provider: 'venice', contextWindow: 128000, inputPrice: 0.4, outputPrice: 1.2, capabilities: ['uncensored'] },

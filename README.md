@@ -170,14 +170,24 @@ VITE_SUPABASE_URL=your-supabase-url
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 ```
 
+### Model Tiers (December 2025)
+
+| Tier | Model | Release | Best For | Verdict |
+|------|-------|---------|----------|---------|
+| **S+ Logic** | Gemini 3 Pro | Nov 2025 | Complex plot logic | New king of AI. Google finally surpassed everyone. Deep Think integrated into core. Builds dynamic world model of your plot. |
+| **S+ Prose** | Claude Opus 4.5 | Nov 2025 | Living prose, RP | Most human-like AI. Talented writer. Best for RP and literature. Many prefer it for style over technically stronger models. |
+| **S+ Uncensored** | Dolphin Mistral 24B Venice | Apr 2025 | Dark plots, roleplay | Best uncensored model for creativity. No moralizing. Perfect for dark plots and political intrigue. |
+| **A+ Context** | Llama 4 Maverick (Venice) | May 2025 | 256k context | 256k context with Venice jailbreak. 3x fewer refusals. Technically smarter than Dolphin. |
+| **A** | GPT-5.2 | Dec 2025 | Fast logic | Improved routing (decides when to think deep vs fast). Less moralistic than 5.0. |
+
 ### Supported LLM Providers
 
 | Provider | Top Models | Best For |
 |----------|------------|----------|
-| **OpenAI** | GPT-4o, GPT-4-turbo, O1 | Reasoning, general purpose |
-| **Google Gemini** | Gemini 2.0 Flash, Gemini 1.5 Pro | Long context (2M tokens), complex logic |
-| **Anthropic Claude** | Claude 3.5 Sonnet, Claude 3 Opus | Creative writing, prose quality |
-| **Venice AI** | Dolphin Mistral, Llama 3.1 | Uncensored content, dark themes |
+| **OpenAI** | GPT-5.2, GPT-5, O3, GPT-4o | Reasoning, general purpose |
+| **Google Gemini** | Gemini 3 Pro, Gemini 3 Flash, Gemini 2.0 Flash | Long context (2M tokens), complex logic |
+| **Anthropic Claude** | Claude Opus 4.5, Claude Sonnet 4, Claude 3.5 Sonnet | Creative writing, prose quality |
+| **Venice AI** | Dolphin Mistral 24B, Llama 4 Maverick, Qwen 3 235B | Uncensored content, dark themes |
 | **DeepSeek** | DeepSeek V3, DeepSeek R1 | Cost-effective reasoning |
 | **OpenRouter** | Access to all above via single API | Cost optimization, model variety |
 
