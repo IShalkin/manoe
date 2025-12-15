@@ -87,6 +87,7 @@ export function GenerationPage() {
           provider: agentConfig.provider,
           model: agentConfig.model,
           api_key: apiKey,
+          generation_mode: 'full',
           constraints: {
             edited_agent: constraints.editedAgent,
             edited_content: constraints.editedContent,
@@ -168,6 +169,7 @@ export function GenerationPage() {
           provider: agentConfig.provider,
           model: agentConfig.model,
           api_key: apiKey,
+          generation_mode: 'full',
         }),
       });
 
