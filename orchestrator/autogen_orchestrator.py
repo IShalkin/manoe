@@ -3,6 +3,7 @@ AutoGen-based Storyteller Group Chat Orchestrator
 Implements multi-agent narrative generation with real agent communication.
 """
 
+import asyncio
 import json
 import os
 from dataclasses import dataclass, field
@@ -3043,8 +3044,9 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 genesis_result = {"narrative_possibility": narrative}
                 results["phases"]["genesis"] = genesis_result
                 self._emit_event("phase_skipped", {"phase": "genesis", "reason": "using_previous_artifact"})
-        elif edited_content and "genesis" in edited_content:
+        elif edited_content and "genesis" in edited_content and not change_request:
             # User provided edited content for this phase - use it directly
+            # BUT only if there's no change_request - if user wrote "What did you change?", regenerate instead
             edited = get_previous_artifact("genesis", "narrative_possibility")
             if edited:
                 # Parse the edited content if it's a string (JSON)
@@ -3080,8 +3082,9 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 characters_result = {"characters": characters}
                 results["phases"]["characters"] = characters_result
                 self._emit_event("phase_skipped", {"phase": "characters", "reason": "using_previous_artifact"})
-        elif edited_content and "characters" in edited_content:
+        elif edited_content and "characters" in edited_content and not change_request:
             # User provided edited content for this phase - use it directly
+            # BUT only if there's no change_request - if user wrote "What did you change?", regenerate instead
             edited = get_previous_artifact("characters", "characters")
             if edited:
                 if isinstance(edited, str):
