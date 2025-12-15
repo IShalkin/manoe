@@ -41,6 +41,7 @@ class MultiAgentWorker:
         self._running = False
         self._active_runs: Dict[str, asyncio.Task] = {}
         self._cancelled_runs: set = set()
+        self._paused_runs: set = set()
 
     async def initialize(self) -> None:
         """Initialize Redis Streams connection."""
@@ -140,12 +141,16 @@ class MultiAgentWorker:
                 architect_model=model,
                 profiler_provider=llm_provider,
                 profiler_model=model,
+                worldbuilder_provider=llm_provider,
+                worldbuilder_model=model,
                 strategist_provider=llm_provider,
                 strategist_model=model,
                 writer_provider=llm_provider,
                 writer_model=model,
                 critic_provider=llm_provider,
                 critic_model=model,
+                polish_provider=llm_provider,
+                polish_model=model,
             )
 
             request_config = LLMConfiguration(
@@ -455,6 +460,87 @@ async def cancel_generation(run_id: str):
     )
 
     return {"success": True, "run_id": run_id, "message": "Generation cancelled"}
+
+
+@app.post("/runs/{run_id}/pause")
+async def pause_generation(run_id: str):
+    """Pause an active generation run."""
+    if not worker or not worker.redis_streams:
+        raise HTTPException(status_code=503, detail="Worker not initialized")
+
+    # Check if run exists and is active
+    if run_id not in worker._active_runs:
+        raise HTTPException(status_code=404, detail="Run not found or not active")
+
+    # Check if already paused
+    if run_id in worker._paused_runs:
+        return {"success": True, "run_id": run_id, "message": "Generation already paused"}
+
+    # Mark the run as paused
+    worker._paused_runs.add(run_id)
+
+    # Publish pause event
+    await worker.redis_streams.publish_event(
+        run_id,
+        "generation_paused",
+        {
+            "run_id": run_id,
+            "status": "paused",
+            "message": "Generation paused by user",
+        }
+    )
+
+    return {"success": True, "run_id": run_id, "message": "Generation paused"}
+
+
+@app.post("/runs/{run_id}/resume")
+async def resume_generation(run_id: str):
+    """Resume a paused generation run."""
+    if not worker or not worker.redis_streams:
+        raise HTTPException(status_code=503, detail="Worker not initialized")
+
+    # Check if run is paused
+    if run_id not in worker._paused_runs:
+        raise HTTPException(status_code=400, detail="Run is not paused")
+
+    # Remove from paused set
+    worker._paused_runs.discard(run_id)
+
+    # Publish resume event
+    await worker.redis_streams.publish_event(
+        run_id,
+        "generation_resumed",
+        {
+            "run_id": run_id,
+            "status": "running",
+            "message": "Generation resumed by user",
+        }
+    )
+
+    return {"success": True, "run_id": run_id, "message": "Generation resumed"}
+
+
+@app.get("/runs/{run_id}/status")
+async def get_run_status(run_id: str):
+    """Get the status of a generation run."""
+    if not worker:
+        raise HTTPException(status_code=503, detail="Worker not initialized")
+
+    status = "unknown"
+    if run_id in worker._cancelled_runs:
+        status = "cancelled"
+    elif run_id in worker._paused_runs:
+        status = "paused"
+    elif run_id in worker._active_runs:
+        task = worker._active_runs[run_id]
+        if task.done():
+            status = "completed"
+        else:
+            status = "running"
+    else:
+        status = "not_found"
+
+    return {"run_id": run_id, "status": status}
 
 
 if __name__ == "__main__":
