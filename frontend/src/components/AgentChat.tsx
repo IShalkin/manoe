@@ -402,6 +402,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const [isCancelled, setIsCancelled] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
+  const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -451,7 +452,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     }
   }, [runId]);
 
-  // Handle stop generation
+  // Handle stop generation (uses pause so it can be resumed)
   const handleStopGeneration = useCallback(async () => {
     if (!runId || !orchestratorUrl || isCancelling || isComplete) return;
     
@@ -464,18 +465,18 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         eventSourceRef.current = null;
       }
       
-      // Call cancel endpoint
-      const response = await fetch(`${orchestratorUrl}/runs/${runId}/cancel`, {
+      // Call pause endpoint (not cancel) so generation can be resumed
+      const response = await fetch(`${orchestratorUrl}/runs/${runId}/pause`, {
         method: 'POST',
       });
       
       if (response.ok) {
         setIsCancelled(true);
         setIsConnected(false);
-        setCurrentPhase('Cancelled');
+        setCurrentPhase('Paused');
       }
     } catch (err) {
-      console.error('Failed to cancel generation:', err);
+      console.error('Failed to pause generation:', err);
     } finally {
       setIsCancelling(false);
     }
@@ -496,21 +497,16 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       if (response.ok) {
         setIsCancelled(false);
         setCurrentPhase('Resuming...');
-        
-        // Reconnect to SSE stream
-        const eventSource = new EventSource(`${orchestratorUrl}/runs/${runId}/events`);
-        eventSourceRef.current = eventSource;
-        
-        eventSource.onopen = () => {
-          setIsConnected(true);
-        };
-        
-        eventSource.onerror = () => {
-          setIsConnected(false);
-        };
+        // Trigger SSE reconnection via useEffect
+        setReconnectTrigger(prev => prev + 1);
+      } else {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        console.error('Failed to resume:', errorData);
+        setError(`Failed to resume: ${errorData.detail || 'Unknown error'}`);
       }
     } catch (err) {
       console.error('Failed to resume generation:', err);
+      setError('Failed to resume generation. Please try again.');
     } finally {
       setIsResuming(false);
     }
@@ -752,7 +748,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     return () => {
       eventSource.close();
     };
-  }, [runId, orchestratorUrl]);
+  }, [runId, orchestratorUrl, reconnectTrigger]);
 
   // Compute available rounds from messages
   const rounds = useMemo(() => {
