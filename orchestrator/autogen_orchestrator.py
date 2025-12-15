@@ -2819,6 +2819,12 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Scene-level regeneration mode
         scene_regen_mode = scenes_to_regenerate is not None and len(scenes_to_regenerate) > 0
         if scene_regen_mode:
+            if not previous_artifacts:
+                self._emit_event("scene_regeneration_error", {
+                    "error": "Scene-level regeneration requires previous run artifacts. Please ensure the previous run completed successfully.",
+                    "scenes_to_regenerate": scenes_to_regenerate,
+                })
+                return {"error": "Scene-level regeneration requires previous run artifacts", **results}
             self._emit_event("scene_regeneration_start", {
                 "scenes_to_regenerate": scenes_to_regenerate,
             })
@@ -2861,9 +2867,11 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Helper function to check if we should skip a phase (use previous artifacts)
         def should_skip_phase(phase: str) -> bool:
-            if not start_from_phase or not previous_artifacts:
+            if not start_from_phase:
                 return False
             phase_index = phase_order.index(phase)
+            # Skip phases before start_from_phase, even if previous_artifacts is None
+            # This ensures scene-level regeneration doesn't regenerate earlier phases
             return phase_index < start_phase_index
 
         # Helper function to get previous artifact or edited content
