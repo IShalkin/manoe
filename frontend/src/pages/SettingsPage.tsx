@@ -43,7 +43,7 @@ export function SettingsPage() {
               <div key={provider.id} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center font-bold text-white">
+                    <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white">
                       {provider.icon}
                     </div>
                     <div>
@@ -158,8 +158,11 @@ export function SettingsPage() {
                     <select
                       value={currentModel}
                       onChange={(e) => updateAgentConfig(agent.id, currentProvider, e.target.value)}
-                      className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary-500"
+                      className={`w-full bg-slate-900/50 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary-500 ${!currentModel ? 'border-amber-500 text-slate-400' : 'border-slate-600'}`}
                     >
+                      {!currentModel && (
+                        <option value="" disabled>Select a model...</option>
+                      )}
                       {availableModels.map(m => (
                         <option key={m.id} value={m.id}>
                           {m.name} {m.contextWindow ? `(${m.contextWindow >= 1000000 ? `${m.contextWindow / 1000000}M` : `${m.contextWindow / 1000}K`})` : ''}

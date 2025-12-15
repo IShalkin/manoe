@@ -1,9 +1,126 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import { useSettings } from '../hooks/useSettings';
+import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
 import { MoralCompass } from '../types';
 
-// API is served from the same origin via nginx proxy at /api
-const API_URL = '';
+// Helper to format date as dd/mm/yyyy
+function formatDateDDMMYYYY(isoDate: string): string {
+  const date = new Date(isoDate);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+// Helper to format any value as readable Markdown
+function formatValueAsMarkdown(value: unknown, depth = 0): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  
+  if (typeof value === 'string') {
+    return value;
+  }
+  
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '';
+    // Check if array contains simple strings
+    if (value.every(item => typeof item === 'string')) {
+      return value.map(item => `- ${item}`).join('\n');
+    }
+    // Complex array items
+    return value.map((item, i) => `### Item ${i + 1}\n${formatValueAsMarkdown(item, depth + 1)}`).join('\n\n');
+  }
+  
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const sections: string[] = [];
+    
+    for (const [key, val] of Object.entries(obj)) {
+      if (val === null || val === undefined || val === '') continue;
+      
+      // Format key as title (snake_case to Title Case)
+      const title = key
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+      
+      const content = formatValueAsMarkdown(val, depth + 1);
+      if (content) {
+        if (depth === 0) {
+          sections.push(`## ${title}\n${content}`);
+        } else {
+          sections.push(`**${title}:** ${content}`);
+        }
+      }
+    }
+    
+    return sections.join('\n\n');
+  }
+  
+  return String(value);
+}
+
+// Helper to format result as readable text
+function formatResultAsMarkdown(result: ProjectResult): string {
+  if (result.error) {
+    return `**Error:** ${result.error}`;
+  }
+  
+  // Try story key first (from Writer's output)
+  const story = (result as Record<string, unknown>)['story'];
+  if (story && typeof story === 'string' && story.trim().length > 0) {
+    return story;
+  }
+  
+  // Try agents combined output (check both 'agents' and 'agentOutputs' keys)
+  const agents = (result as Record<string, unknown>)['agents'] || (result as Record<string, unknown>)['agentOutputs'];
+  if (agents && typeof agents === 'object' && Object.keys(agents as object).length > 0) {
+    const agentContent = agents as Record<string, string>;
+    const sections: string[] = [];
+    for (const [agentName, content] of Object.entries(agentContent)) {
+      if (content && content.trim()) {
+        sections.push(`## ${agentName}\n\n${content}`);
+      }
+    }
+    if (sections.length > 0) {
+      return sections.join('\n\n---\n\n');
+    }
+  }
+  
+  // Try narrativePossibility (camelCase from frontend)
+  const np = result.narrativePossibility;
+  if (np && typeof np === 'object' && Object.keys(np).length > 0) {
+    return formatValueAsMarkdown(np);
+  }
+  
+  // Try narrative_possibility (snake_case from backend)
+  const npSnake = (result as Record<string, unknown>)['narrative_possibility'];
+  if (npSnake && typeof npSnake === 'object' && Object.keys(npSnake as object).length > 0) {
+    return formatValueAsMarkdown(npSnake);
+  }
+  
+  // Try other common result keys
+  const commonKeys = ['final_story', 'text', 'content', 'output', 'draft', 'result'];
+  for (const key of commonKeys) {
+    const val = (result as Record<string, unknown>)[key];
+    if (val) {
+      return formatValueAsMarkdown(val);
+    }
+  }
+  
+  // If result has any other keys, format them
+  const resultKeys = Object.keys(result).filter(k => k !== 'error');
+  if (resultKeys.length > 0) {
+    return formatValueAsMarkdown(result);
+  }
+  
+  return '*No content generated yet*';
+}
+
+// Multi-agent orchestrator URL (separate subdomain)
+const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
 
 interface ProjectFormData {
   name: string;
@@ -13,15 +130,19 @@ interface ProjectFormData {
   themes: string;
 }
 
-interface GeneratedProject {
-  name: string;
-  content: string;
-  createdAt: Date;
-}
-
 export function DashboardPage() {
+  const navigate = useNavigate();
   const { hasAnyApiKey, getAgentConfig, getProviderKey } = useSettings();
-  const [showNewProject, setShowNewProject] = useState(false);
+  const { 
+    projects, 
+    createProject, 
+    updateProject,
+    startGeneration, 
+    deleteProject,
+  } = useProjects();
+  
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [editingProject, setEditingProject] = useState<StoredProject | null>(null);
   const [formData, setFormData] = useState<ProjectFormData>({
     name: '',
     seedIdea: '',
@@ -29,17 +150,55 @@ export function DashboardPage() {
     targetAudience: '',
     themes: '',
   });
+
+  const openNewProjectModal = () => {
+    setEditingProject(null);
+    setFormData({
+      name: '',
+      seedIdea: '',
+      moralCompass: 'ambiguous',
+      targetAudience: '',
+      themes: '',
+    });
+    setError(null);
+    setShowProjectModal(true);
+  };
+
+  const openEditProjectModal = (project: StoredProject) => {
+    setEditingProject(project);
+    setFormData({
+      name: project.name,
+      seedIdea: project.seedIdea,
+      moralCompass: (project.moralCompass as MoralCompass) || 'ambiguous',
+      targetAudience: project.targetAudience,
+      themes: project.themes,
+    });
+    setError(null);
+    setShowProjectModal(true);
+  };
+
+  const closeProjectModal = () => {
+    setShowProjectModal(false);
+    setEditingProject(null);
+    setError(null);
+  };
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedContent, setGeneratedContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [projects, setProjects] = useState<GeneratedProject[]>([]);
+  const [viewingProject, setViewingProject] = useState<StoredProject | null>(null);
+
+  // Continue an in-progress generation - navigate to generation page
+  const continueGeneration = (project: StoredProject) => {
+    if (project.runId) {
+      navigate(`/generate/${project.id}?runId=${project.runId}`);
+    }
+  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsGenerating(true);
     setError(null);
     
-    // Get the Writer agent's configuration (or use Architect for initial generation)
     const architectConfig = getAgentConfig('architect');
     if (!architectConfig) {
       setError('No agent configuration found. Please configure agents in Settings.');
@@ -48,14 +207,15 @@ export function DashboardPage() {
     }
     
     const apiKey = getProviderKey(architectConfig.provider);
+    console.log('[DashboardPage] Architect provider:', architectConfig.provider, 'API key present:', !!apiKey);
     if (!apiKey) {
-      setError(`No API key found for ${architectConfig.provider}. Please add your API key in Settings.`);
+      setError(`No API key found for "${architectConfig.provider}". The Architect agent is configured to use ${architectConfig.provider}. Please either add your ${architectConfig.provider} API key in Settings, or change the Architect's provider in "Agent Configuration" tab.`);
       setIsGenerating(false);
       return;
     }
     
     try {
-      const response = await fetch(`${API_URL}/api/generate`, {
+      const response = await fetch(`${ORCHESTRATOR_URL}/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -68,32 +228,55 @@ export function DashboardPage() {
           moral_compass: formData.moralCompass,
           target_audience: formData.targetAudience || undefined,
           themes: formData.themes || undefined,
-          project_name: formData.name,
         }),
       });
       
       const data = await response.json();
       
-      if (data.success && data.content) {
-        setGeneratedContent(data.content);
-        setProjects(prev => [...prev, {
-          name: formData.name || 'Untitled Project',
-          content: data.content,
-          createdAt: new Date(),
-        }]);
-        setShowNewProject(false);
-        setFormData({
-          name: '',
-          seedIdea: '',
-          moralCompass: 'ambiguous',
-          targetAudience: '',
-          themes: '',
-        });
+      if (data.success && data.run_id) {
+        let projectId: string;
+        
+        if (editingProject) {
+          await updateProject(editingProject.id, {
+            name: formData.name || 'Untitled Project',
+            seedIdea: formData.seedIdea,
+            moralCompass: formData.moralCompass,
+            targetAudience: formData.targetAudience,
+            themes: formData.themes,
+            status: 'pending',
+            result: null,
+          });
+          projectId = editingProject.id;
+        } else {
+          const newProject = await createProject({
+            name: formData.name || 'Untitled Project',
+            seedIdea: formData.seedIdea,
+            moralCompass: formData.moralCompass,
+            targetAudience: formData.targetAudience,
+            themes: formData.themes,
+          });
+          projectId = newProject.id;
+        }
+        
+        await startGeneration(projectId, data.run_id);
+        
+        closeProjectModal();
+        // Navigate to the separate generation page
+        navigate(`/generate/${projectId}?runId=${data.run_id}`);
       } else {
-        setError(data.error || 'Failed to generate story. Please try again.');
+        setError(data.error || 'Failed to start generation. Please try again.');
       }
     } catch (err) {
-      setError(`Network error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error('[DashboardPage] Generation error:', err);
+      let errorMsg = 'Unknown error';
+      if (err instanceof Error) {
+        errorMsg = err.message || err.name || String(err);
+      } else if (typeof err === 'string') {
+        errorMsg = err;
+      } else if (err && typeof err === 'object') {
+        errorMsg = JSON.stringify(err, Object.getOwnPropertyNames(err)) || String(err);
+      }
+      setError(`Network error: ${errorMsg}`);
     } finally {
       setIsGenerating(false);
     }
@@ -126,8 +309,8 @@ export function DashboardPage() {
           <p className="text-slate-400">Create and manage your narrative projects</p>
         </div>
         <button
-          onClick={() => setShowNewProject(true)}
-          className="bg-gradient-to-r from-primary-500 to-accent-500 text-white px-6 py-3 rounded-xl font-medium hover:opacity-90 transition-opacity flex items-center gap-2"
+          onClick={openNewProjectModal}
+          className="bg-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-500 transition-colors flex items-center gap-2"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -155,31 +338,13 @@ export function DashboardPage() {
         </div>
       )}
 
-      {generatedContent && (
-        <div className="mb-6 bg-green-500/10 border border-green-500/30 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-green-400">Generated Narrative</h3>
-            <button onClick={() => setGeneratedContent(null)} className="text-slate-400 hover:text-white">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div className="prose prose-invert max-w-none">
-            <pre className="whitespace-pre-wrap text-sm text-slate-300 bg-slate-900/50 p-4 rounded-lg overflow-auto max-h-96">
-              {generatedContent}
-            </pre>
-          </div>
-        </div>
-      )}
-
-      {showNewProject && (
+      {showProjectModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-700">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold">Create New Project</h2>
+              <h2 className="text-2xl font-bold">{editingProject ? 'Edit Project' : 'Create New Project'}</h2>
               <button
-                onClick={() => { setShowNewProject(false); setError(null); }}
+                onClick={closeProjectModal}
                 className="text-slate-400 hover:text-white transition-colors"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -273,7 +438,7 @@ export function DashboardPage() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowNewProject(false)}
+                  onClick={closeProjectModal}
                   className="flex-1 px-6 py-3 border border-slate-600 rounded-xl hover:bg-slate-700 transition-colors"
                 >
                   Cancel
@@ -281,7 +446,7 @@ export function DashboardPage() {
                 <button
                   type="submit"
                   disabled={isGenerating}
-                  className="flex-1 bg-gradient-to-r from-primary-500 to-accent-500 text-white px-6 py-3 rounded-xl font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 bg-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-500 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {isGenerating ? (
                     <>
@@ -291,6 +456,8 @@ export function DashboardPage() {
                       </svg>
                       Generating...
                     </>
+                  ) : editingProject ? (
+                    'Generate'
                   ) : (
                     'Create Project'
                   )}
@@ -301,28 +468,249 @@ export function DashboardPage() {
         </div>
       )}
 
+      {/* Result Viewer Modal */}
+      {viewingProject && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden border border-slate-700 flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                  viewingProject.status === 'completed' ? 'bg-green-600' :
+                  viewingProject.status === 'error' ? 'bg-red-600' :
+                  'bg-slate-600'
+                }`}>
+                  {viewingProject.status === 'completed' ? (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : viewingProject.status === 'error' ? (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  )}
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold">{viewingProject.name}</h2>
+                  <p className="text-xs text-slate-400">
+                    {viewingProject.status === 'completed' ? 'Generation Complete' : 
+                     viewingProject.status === 'error' ? 'Generation Failed' : 'View Result'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingProject(null)}
+                className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700 rounded-lg"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Project Info */}
+            <div className="px-4 py-3 bg-slate-900/50 border-b border-slate-700">
+              <p className="text-sm text-slate-400 italic">"{viewingProject.seedIdea}"</p>
+              <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                <span>Created: {formatDateDDMMYYYY(viewingProject.createdAt)}</span>
+                <span>Moral Compass: {viewingProject.moralCompass}</span>
+                {viewingProject.themes && <span>Themes: {viewingProject.themes}</span>}
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {viewingProject.result ? (
+                <div className="prose prose-invert prose-sm max-w-none">
+                  <ReactMarkdown
+                    components={{
+                      h2: ({ children }) => <h2 className="text-xl font-bold text-white mt-6 mb-3 first:mt-0">{children}</h2>,
+                      p: ({ children }) => <p className="text-slate-300 mb-4 leading-relaxed">{children}</p>,
+                      ul: ({ children }) => <ul className="list-disc list-inside mb-4 space-y-1">{children}</ul>,
+                      li: ({ children }) => <li className="text-slate-300">{children}</li>,
+                      strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
+                    }}
+                  >
+                    {formatResultAsMarkdown(viewingProject.result)}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <svg className="w-16 h-16 text-slate-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-slate-500">No result data available</p>
+                  <p className="text-sm text-slate-600 mt-1">This project hasn't been generated yet</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-700 bg-slate-800/50 flex gap-3">
+              <button
+                onClick={() => {
+                  setViewingProject(null);
+                  openEditProjectModal(viewingProject);
+                }}
+                className="flex-1 px-4 py-2 border border-slate-600 rounded-lg hover:bg-slate-700 transition-colors text-sm"
+              >
+                Regenerate
+              </button>
+              <button
+                onClick={() => setViewingProject(null)}
+                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-500 transition-colors text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {projects.map((project, index) => (
-          <div key={index} className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 hover:border-primary-500/50 transition-colors">
+        {projects.map((project) => (
+          <div 
+            key={project.id} 
+            className={`bg-slate-800/50 border rounded-xl p-6 transition-colors ${
+              project.status === 'completed' ? 'border-green-500/30 hover:border-green-500/50' :
+              project.status === 'generating' ? 'border-amber-500/30 hover:border-amber-500/50' :
+              project.status === 'error' ? 'border-red-500/30 hover:border-red-500/50' :
+              'border-slate-700 hover:border-primary-500/50'
+            }`}
+          >
             <div className="flex items-start justify-between mb-3">
               <h3 className="font-semibold text-lg">{project.name}</h3>
-              <span className="text-xs text-slate-500">
-                {project.createdAt.toLocaleDateString()}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                  project.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                  project.status === 'generating' ? 'bg-amber-500/20 text-amber-400' :
+                  project.status === 'error' ? 'bg-red-500/20 text-red-400' :
+                  'bg-slate-500/20 text-slate-400'
+                }`}>
+                  {project.status === 'generating' ? 'In Progress' : 
+                   project.status.charAt(0).toUpperCase() + project.status.slice(1)}
+                </span>
+              </div>
             </div>
-            <p className="text-sm text-slate-400 line-clamp-3 mb-4">
-              {project.content.substring(0, 150)}...
+            <p className="text-sm text-slate-400 line-clamp-2 mb-4">
+              {project.seedIdea.substring(0, 100)}...
             </p>
-            <button 
-              onClick={() => setGeneratedContent(project.content)}
-              className="text-sm text-primary-400 hover:text-primary-300 transition-colors"
-            >
-              View Full Narrative
-            </button>
+            
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 mb-3">
+              {(project.status === 'completed' || project.status === 'error') && (
+                <>
+                  <button
+                    onClick={() => navigate(`/generate/${project.id}`)}
+                    className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 transition-colors flex items-center justify-center gap-1"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    View
+                  </button>
+                  <a
+                    href={`/generate/${project.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 border border-slate-600 rounded-lg text-sm hover:bg-slate-700 transition-colors"
+                    title="Open in new tab"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </>
+              )}
+              {project.status === 'generating' && project.runId && (
+                <>
+                  <button
+                    onClick={() => continueGeneration(project)}
+                    className="flex-1 px-3 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-500 transition-colors flex items-center justify-center gap-1"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Continue
+                  </button>
+                  <a
+                    href={`/generate/${project.id}?runId=${project.runId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 border border-slate-600 rounded-lg text-sm hover:bg-slate-700 transition-colors"
+                    title="Open in new tab"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </>
+              )}
+              {project.status === 'pending' && (
+                <>
+                  <button
+                    onClick={() => openEditProjectModal(project)}
+                    className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 transition-colors flex items-center justify-center gap-1"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Generate
+                  </button>
+                  <a
+                    href={`/generate/${project.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 border border-slate-600 rounded-lg text-sm hover:bg-slate-700 transition-colors"
+                    title="Open in new tab"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </>
+              )}
+              <button
+                onClick={() => openEditProjectModal(project)}
+                className="px-3 py-2 border border-slate-600 rounded-lg text-sm hover:bg-slate-700 transition-colors"
+                title="Edit & Regenerate"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                {formatDateDDMMYYYY(project.createdAt)}
+              </span>
+              <button 
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    await deleteProject(project.id);
+                  } catch (err) {
+                    console.error('[DashboardPage] Failed to delete project:', err);
+                    setError(err instanceof Error ? err.message : 'Failed to delete project');
+                  }
+                }}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         ))}
         
-        <div className="bg-slate-800/30 border-2 border-dashed border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:border-primary-500/50 transition-colors cursor-pointer" onClick={() => setShowNewProject(true)}>
+        <div className="bg-slate-800/30 border-2 border-dashed border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:border-primary-500/50 transition-colors cursor-pointer" onClick={openNewProjectModal}>
           <div className="w-16 h-16 rounded-full bg-slate-700/50 flex items-center justify-center mb-4">
             <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

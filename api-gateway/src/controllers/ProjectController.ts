@@ -74,13 +74,13 @@ export class ProjectController {
     };
   }
 
-  @Get("/:id/narrative")
-  @Summary("Get narrative possibility")
-  @Description("Retrieve the generated narrative possibility for a project")
-  @Returns(200, NarrativePossibilityDTO)
-  async getNarrativePossibility(@PathParams("id") id: string): Promise<NarrativePossibilityDTO | null> {
-    return await this.supabaseService.getNarrativePossibility(id);
-  }
+    @Get("/:id/narrative")
+    @Summary("Get narrative possibility")
+    @Description("Retrieve the generated narrative possibility for a project")
+    @Returns(200, NarrativePossibilityDTO)
+    async getNarrativePossibility(@PathParams("id") id: string): Promise<NarrativePossibilityDTO | null> {
+      return await this.supabaseService.getNarrativePossibility(id) as NarrativePossibilityDTO | null;
+    }
 
   @Post("/:id/approve")
   @Summary("Approve current phase and proceed")

@@ -3,22 +3,21 @@ Base Agent Implementation for MANOE
 Provides common functionality for all narrative agents.
 """
 
-import json
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Type, TypeVar
+
 from pydantic import BaseModel
 
-from ..config import LLMProvider, LLMConfiguration
-from ..models import AgentEvent
-
+from config import LLMConfiguration, LLMProvider
+from models import AgentEvent
 
 T = TypeVar("T", bound=BaseModel)
 
 
 class LLMClient(ABC):
     """Abstract base class for LLM clients."""
-    
+
     @abstractmethod
     async def generate(
         self,
@@ -29,7 +28,7 @@ class LLMClient(ABC):
     ) -> str:
         """Generate a response from the LLM."""
         pass
-    
+
     @abstractmethod
     async def generate_structured(
         self,
@@ -44,19 +43,19 @@ class LLMClient(ABC):
 
 class OpenAIClient(LLMClient):
     """OpenAI API client implementation."""
-    
+
     def __init__(self, api_key: str, model: str, base_url: str = "https://api.openai.com/v1"):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url
         self._client = None
-    
+
     async def _get_client(self):
         if self._client is None:
             from openai import AsyncOpenAI
             self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
         return self._client
-    
+
     async def generate(
         self,
         system_prompt: str,
@@ -75,7 +74,7 @@ class OpenAIClient(LLMClient):
             max_tokens=max_tokens,
         )
         return response.choices[0].message.content
-    
+
     async def generate_structured(
         self,
         system_prompt: str,
@@ -99,18 +98,18 @@ class OpenAIClient(LLMClient):
 
 class ClaudeClient(LLMClient):
     """Anthropic Claude API client implementation."""
-    
+
     def __init__(self, api_key: str, model: str):
         self.api_key = api_key
         self.model = model
         self._client = None
-    
+
     async def _get_client(self):
         if self._client is None:
             from anthropic import AsyncAnthropic
             self._client = AsyncAnthropic(api_key=self.api_key)
         return self._client
-    
+
     async def generate(
         self,
         system_prompt: str,
@@ -127,7 +126,7 @@ class ClaudeClient(LLMClient):
             temperature=temperature,
         )
         return response.content[0].text
-    
+
     async def generate_structured(
         self,
         system_prompt: str,
@@ -151,19 +150,19 @@ class ClaudeClient(LLMClient):
 
 class GeminiClient(LLMClient):
     """Google Gemini API client implementation."""
-    
+
     def __init__(self, api_key: str, model: str):
         self.api_key = api_key
         self.model = model
         self._client = None
-    
+
     async def _get_client(self):
         if self._client is None:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
             self._client = genai.GenerativeModel(self.model)
         return self._client
-    
+
     async def generate(
         self,
         system_prompt: str,
@@ -178,7 +177,7 @@ class GeminiClient(LLMClient):
             generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
         )
         return response.text
-    
+
     async def generate_structured(
         self,
         system_prompt: str,
@@ -203,7 +202,7 @@ def create_llm_client(
     model: str,
 ) -> LLMClient:
     """Factory function to create appropriate LLM client."""
-    
+
     if provider == LLMProvider.OPENAI:
         if not config.openai:
             raise ValueError("OpenAI configuration not provided")
@@ -212,7 +211,7 @@ def create_llm_client(
             model=model,
             base_url=config.openai.base_url,
         )
-    
+
     elif provider == LLMProvider.OPENROUTER:
         if not config.openrouter:
             raise ValueError("OpenRouter configuration not provided")
@@ -221,7 +220,7 @@ def create_llm_client(
             model=model,
             base_url=config.openrouter.base_url,
         )
-    
+
     elif provider == LLMProvider.CLAUDE:
         if not config.claude:
             raise ValueError("Claude configuration not provided")
@@ -229,7 +228,7 @@ def create_llm_client(
             api_key=config.claude.api_key.get_secret_value(),
             model=model,
         )
-    
+
     elif provider == LLMProvider.GEMINI:
         if not config.gemini:
             raise ValueError("Gemini configuration not provided")
@@ -237,14 +236,14 @@ def create_llm_client(
             api_key=config.gemini.api_key.get_secret_value(),
             model=model,
         )
-    
+
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
 
 class BaseAgent(ABC):
     """Base class for all MANOE agents."""
-    
+
     def __init__(
         self,
         name: str,
@@ -254,12 +253,12 @@ class BaseAgent(ABC):
         self.name = name
         self.llm_client = llm_client
         self.system_prompt = system_prompt
-    
+
     @abstractmethod
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process input and generate output."""
         pass
-    
+
     async def generate_with_logging(
         self,
         user_prompt: str,
@@ -269,16 +268,16 @@ class BaseAgent(ABC):
     ) -> tuple[T, AgentEvent]:
         """Generate response with audit logging."""
         start_time = time.time()
-        
+
         result = await self.llm_client.generate_structured(
             system_prompt=self.system_prompt,
             user_prompt=user_prompt,
             response_model=response_model,
             temperature=temperature,
         )
-        
+
         duration_ms = int((time.time() - start_time) * 1000)
-        
+
         event = AgentEvent(
             project_id=project_id,
             agent_name=self.name,
@@ -288,5 +287,5 @@ class BaseAgent(ABC):
             token_usage={},  # Would be populated from actual API response
             duration_ms=duration_ms,
         )
-        
+
         return result, event

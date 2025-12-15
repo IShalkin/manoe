@@ -3,10 +3,11 @@ Pydantic data models for MANOE - derived from the Storyteller framework.
 These models ensure enterprise-grade reliability with strict schema validation.
 """
 
+from datetime import datetime
 from enum import Enum
 from typing import List, Optional
+
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 
 class MoralCompass(str, Enum):
@@ -132,7 +133,7 @@ class CharacterProfile(BaseModel):
     """
     name: str = Field(..., description="Character name fitting personality and setting")
     archetype: Archetype = Field(..., description="Jungian archetype assignment")
-    
+
     # Core Psychology
     core_motivation: str = Field(
         ...,
@@ -158,7 +159,7 @@ class CharacterProfile(BaseModel):
         ...,
         description="What would cause the character to fundamentally change"
     )
-    
+
     # External Attributes
     occupation_role: str = Field(..., description="Job, social role, or function")
     affiliations: List[str] = Field(
@@ -169,14 +170,14 @@ class CharacterProfile(BaseModel):
         ...,
         description="Defining visual detail (scar, tic, clothing item)"
     )
-    
+
     # Goals
     public_goal: str = Field(..., description="What they openly strive for")
     hidden_goal: Optional[str] = Field(
         default=None,
         description="Secret objective, possibly unconscious"
     )
-    
+
     # Background
     defining_moment: str = Field(
         ...,
@@ -186,7 +187,7 @@ class CharacterProfile(BaseModel):
         default=None,
         description="Family history and relationships"
     )
-    
+
     # Skills and Quirks
     special_skill: Optional[str] = Field(
         default=None,
@@ -196,7 +197,7 @@ class CharacterProfile(BaseModel):
         default_factory=list,
         description="Unique mannerisms, habits, speech patterns"
     )
-    
+
     # Story Role
     moral_stance: str = Field(
         ...,
@@ -272,20 +273,20 @@ class SceneOutline(BaseModel):
     title: str
     setting: str
     characters_present: List[str]
-    
+
     # Conflict
     conflict_type: ConflictType
     conflict_description: str
-    
+
     # Emotional Layer
     emotional_beat: EmotionalBeat
-    
+
     # Subtext
     subtext_layer: str = Field(
         ...,
         description="Hidden intentions or fears not explicitly stated"
     )
-    
+
     # Purpose
     plot_advancement: str = Field(
         ...,
@@ -295,7 +296,7 @@ class SceneOutline(BaseModel):
         default=None,
         description="Character growth or revelation in this scene"
     )
-    
+
     # Technical
     estimated_word_count: int = Field(default=1500)
 
@@ -309,7 +310,7 @@ class PlotOutline(BaseModel):
     structure_type: NarrativeStructure
     total_scenes: int
     scenes: List[SceneOutline]
-    
+
     # Structure Points
     inciting_incident_scene: int
     midpoint_scene: int
@@ -373,18 +374,18 @@ class SceneDraft(BaseModel):
     """
     scene_number: int
     title: str
-    
+
     # Setting
     setting_description: str
     sensory_details: SensoryDetails
-    
+
     # Content
     narrative_content: str = Field(
         ...,
         description="Full prose content of the scene"
     )
     dialogue_entries: List[DialogueEntry] = Field(default_factory=list)
-    
+
     # Layers
     subtext_layer: str = Field(
         ...,
@@ -394,7 +395,7 @@ class SceneDraft(BaseModel):
         ...,
         description="Change in character/reader emotional state"
     )
-    
+
     # Metadata
     word_count: int
     show_dont_tell_ratio: float = Field(
@@ -451,20 +452,20 @@ class SceneCritique(BaseModel):
     scene_number: int
     overall_score: float = Field(..., ge=1.0, le=10.0)
     approved: bool
-    
+
     feedback_items: List[CritiqueFeedback]
-    
+
     # Summary
     strengths: List[str]
     weaknesses: List[str]
-    
+
     # Revision Requirements
     revision_required: bool
     revision_focus: Optional[List[str]] = Field(
         default=None,
         description="Specific areas to focus on in revision"
     )
-    
+
     # Deepening Checkpoint
     creative_risk_assessment: str = Field(
         ...,

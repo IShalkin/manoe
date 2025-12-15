@@ -130,11 +130,11 @@ export class GenerationController {
 
     const jobId = `draft-${projectId}-${Date.now()}`;
 
-    if (options?.allScenes) {
-      // Queue all scenes
-      for (const scene of outline.scenes) {
-        await this.jobQueueService.enqueueJob({
-          jobId: `${jobId}-scene-${scene.scene_number}`,
+        if (options?.allScenes) {
+          // Queue all scenes
+          for (const scene of outline.scenes as Array<{ scene_number: number }>) {
+            await this.jobQueueService.enqueueJob({
+              jobId: `${jobId}-scene-${scene.scene_number}`,
           projectId,
           phase: "drafting",
           inputData: {
@@ -143,10 +143,11 @@ export class GenerationController {
           },
         });
       }
-    } else {
-      // Queue single scene
-      const sceneNumber = options?.sceneNumber || 1;
-      const scene = outline.scenes.find((s: { scene_number: number }) => s.scene_number === sceneNumber);
+        } else {
+          // Queue single scene
+          const sceneNumber = options?.sceneNumber || 1;
+          const scenes = outline.scenes as Array<{ scene_number: number }>;
+          const scene = scenes.find((s) => s.scene_number === sceneNumber);
       
       if (!scene) {
         throw new Error(`Scene ${sceneNumber} not found in outline`);
