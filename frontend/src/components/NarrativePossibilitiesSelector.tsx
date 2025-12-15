@@ -20,7 +20,7 @@ const CONFLICT_TYPE_LABELS: Record<string, string> = {
 
 interface NarrativePossibilitiesSelectorProps {
   possibilities: NarrativePossibility[];
-  recommendation: NarrativePossibilitiesRecommendation;
+  recommendation?: NarrativePossibilitiesRecommendation;
   onSelect: (possibility: NarrativePossibility) => void;
   isLoading?: boolean;
 }

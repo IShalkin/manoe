@@ -287,6 +287,22 @@ export function GenerationPage() {
           </div>
           
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            {/* Branching Mode Toggle */}
+            <button
+              onClick={() => setUseBranchingMode(!useBranchingMode)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                useBranchingMode
+                  ? 'bg-cyan-600/20 text-cyan-400 border border-cyan-600/50'
+                  : 'bg-slate-700/50 text-slate-400 border border-slate-600'
+              }`}
+              title={useBranchingMode ? 'Branching mode: Choose from multiple narrative directions' : 'Direct mode: Generate single narrative'}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+              {useBranchingMode ? 'Branching' : 'Direct'}
+            </button>
+            
             {project.status === 'completed' && (
               <button
                 onClick={startNewGeneration}
