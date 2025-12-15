@@ -131,6 +131,8 @@ export const MODELS: Record<LLMProvider, LLMModel[]> = {
     { id: 'dolphin-mistral-24b-venice', name: 'Dolphin Mistral 24B Venice Edition', provider: 'venice', contextWindow: 32000, inputPrice: 0.5, outputPrice: 1.5, capabilities: ['uncensored', 'roleplay'], recommended: ['writer', 'profiler'] },
     // Venice Large (Llama 4 Maverick)
     { id: 'llama-4-maverick-venice', name: 'Llama 4 Maverick (Venice Large)', provider: 'venice', contextWindow: 256000, inputPrice: 0.8, outputPrice: 2.4, capabilities: ['long_context', 'uncensored'], recommended: ['architect', 'strategist'] },
+    // Qwen 3 (Venice Medium/Large alternative - good for Eastern intrigue)
+    { id: 'qwen-3-235b-venice', name: 'Qwen 3 235B (Venice)', provider: 'venice', contextWindow: 131072, inputPrice: 0.4, outputPrice: 1.2, capabilities: ['uncensored'], recommended: ['writer', 'profiler'] },
     // Other Venice models
     { id: 'llama-3.3-70b-venice', name: 'Llama 3.3 70B Venice', provider: 'venice', contextWindow: 131072, inputPrice: 0.3, outputPrice: 0.9, capabilities: ['uncensored'] },
     { id: 'mistral-large-venice', name: 'Mistral Large Venice', provider: 'venice', contextWindow: 128000, inputPrice: 0.4, outputPrice: 1.2, capabilities: ['uncensored'] },

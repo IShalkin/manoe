@@ -38,6 +38,7 @@ flowchart TB
         Gemini[Google Gemini]
         OpenRouter[OpenRouter]
         DeepSeek[DeepSeek]
+        Venice[Venice AI]
     end
 
     UI -->|POST /generate| API
@@ -163,33 +164,58 @@ docker-compose up -d
 
 ## Supported LLM Providers (BYOK)
 
-MANOE supports multiple LLM providers. Configure at least one:
+MANOE supports multiple LLM providers with BYOK (Bring Your Own Key). Configure at least one provider to get started.
 
-| Provider | Models | Best For |
-|----------|--------|----------|
-| **OpenAI** | gpt-4o, gpt-4o-mini, gpt-4-turbo, o1-preview, o1-mini | General purpose, best quality |
-| **OpenRouter** | Access to 100+ models from multiple providers | Cost optimization, model variety |
-| **Google Gemini** | gemini-2.0-flash-exp, gemini-1.5-pro, gemini-1.5-flash | Long context (1M tokens) |
-| **Anthropic Claude** | claude-3.5-sonnet, claude-3.5-haiku, claude-3-opus | Creative writing, safety |
-| **DeepSeek** | deepseek-chat, deepseek-coder | Cost-effective alternative |
+### Model Tiers (December 2025)
+
+| Tier | Model | Release | Best For | Verdict |
+|------|-------|---------|----------|---------|
+| **S+ Logic** | Gemini 3 Pro | Nov 2025 | Complex plot logic | New king of AI. Deep Think integrated into core. Builds dynamic world model of your plot. Solves tasks GPT-5 fails at. |
+| **S+ Prose** | Claude Opus 4.5 | Nov 2025 | Living prose, RP | Most human-like AI. Talented writer. Best for RP and literature. Many prefer it for style over technically stronger models. |
+| **S+ Uncensored** | Dolphin Mistral 24B Venice | Apr 2025 | Dark plots, roleplay | Best uncensored model for creativity. No moralizing. Perfect for dark plots and political intrigue. |
+| **A+ Context** | Llama 4 Maverick (Venice) | May 2025 | 256k context | 256k context with Venice jailbreak. 3x fewer refusals. Technically smarter than Dolphin. |
+| **A** | GPT-5.2 | Dec 2025 | Fast logic | Improved routing (decides when to think deep vs fast). Less moralistic than 5.0. |
+
+### Provider Overview
+
+| Provider | Top Models | Best For |
+|----------|------------|----------|
+| **OpenAI** | GPT-5.2, GPT-5, O3, O3-mini, GPT-4o | Reasoning, general purpose |
+| **Google Gemini** | Gemini 3 Pro, Gemini 3 Flash, Gemini 2.0 Flash | Long context (2M tokens), complex logic |
+| **Anthropic Claude** | Claude Opus 4.5, Claude Sonnet 4, Claude 3.5 Sonnet | Creative writing, prose quality |
+| **Venice AI** | Dolphin Mistral 24B, Llama 4 Maverick, Qwen 3 235B | Uncensored content, dark themes |
+| **DeepSeek** | DeepSeek V3, DeepSeek R1 | Cost-effective reasoning |
+| **OpenRouter** | Access to all above via single API | Cost optimization, model variety |
 
 ### Per-Agent Model Configuration
 
-Each agent can use a different provider and model:
+Each agent can use a different provider and model. Recommended configurations:
 
 ```env
-# High-capability models for complex reasoning
-ARCHITECT_PROVIDER=openai
-ARCHITECT_MODEL=gpt-4o
+# S+ Logic for complex narrative structure
+ARCHITECT_PROVIDER=gemini
+ARCHITECT_MODEL=gemini-3-pro
 
-# Cost-effective model for high-volume drafting
-WRITER_PROVIDER=openai
-WRITER_MODEL=gpt-4o-mini
+# S+ Prose for character depth
+PROFILER_PROVIDER=claude
+PROFILER_MODEL=claude-opus-4.5-20251201
 
-# Mix providers as needed
-CRITIC_PROVIDER=claude
-CRITIC_MODEL=claude-3-5-sonnet-20241022
+# S+ Logic for plot strategy
+STRATEGIST_PROVIDER=gemini
+STRATEGIST_MODEL=gemini-3-pro
+
+# S+ Uncensored for creative writing without restrictions
+WRITER_PROVIDER=venice
+WRITER_MODEL=dolphin-mistral-24b-venice
+
+# A tier for balanced critique
+CRITIC_PROVIDER=openai
+CRITIC_MODEL=gpt-4o
 ```
+
+### Venice AI (Uncensored Models)
+
+Venice AI provides access to uncensored models that don't refuse creative writing requests. This is particularly useful for narratives involving dark themes, political intrigue, or morally ambiguous characters. Venice models use an OpenAI-compatible API and support the same integration pattern as other providers.
 
 ## Project Structure
 
