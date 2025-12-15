@@ -3,7 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { useSettings } from '../hooks/useSettings';
 import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
-import { MoralCompass } from '../types';
+import { 
+  MoralCompass, 
+  NarrativePOV, 
+  NarratorReliability, 
+  NarratorStance,
+  NARRATIVE_POV_OPTIONS,
+  NARRATOR_RELIABILITY_OPTIONS,
+  NARRATOR_STANCE_OPTIONS,
+} from '../types';
 
 // Helper to format date as dd/mm/yyyy
 function formatDateDDMMYYYY(isoDate: string): string {
@@ -132,6 +140,9 @@ interface ProjectFormData {
   themes: string;
   generationMode: GenerationMode;
   maxRevisions: number;
+  narrativePov: NarrativePOV;
+  narratorReliability: NarratorReliability;
+  narratorStance: NarratorStance;
 }
 
 export function DashboardPage() {
@@ -155,6 +166,9 @@ export function DashboardPage() {
       themes: '',
       generationMode: 'demo',
       maxRevisions: 2,
+      narrativePov: 'third_person_limited',
+      narratorReliability: 'reliable',
+      narratorStance: 'objective',
     });
 
     const openNewProjectModal = () => {
@@ -167,6 +181,9 @@ export function DashboardPage() {
         themes: '',
         generationMode: 'demo',
         maxRevisions: 2,
+        narrativePov: 'third_person_limited',
+        narratorReliability: 'reliable',
+        narratorStance: 'objective',
       });
       setError(null);
       setShowProjectModal(true);
@@ -182,6 +199,9 @@ export function DashboardPage() {
         themes: project.themes,
         generationMode: 'demo',
         maxRevisions: 2,
+        narrativePov: 'third_person_limited',
+        narratorReliability: 'reliable',
+        narratorStance: 'objective',
       });
       setError(null);
       setShowProjectModal(true);
@@ -240,6 +260,11 @@ export function DashboardPage() {
                   themes: formData.themes || undefined,
                   generation_mode: formData.generationMode,
                   max_revisions: formData.maxRevisions,
+                  narrator_config: {
+                    pov: formData.narrativePov,
+                    reliability: formData.narratorReliability,
+                    stance: formData.narratorStance,
+                  },
                 }),
       });
       
@@ -445,6 +470,78 @@ export function DashboardPage() {
                                 placeholder="Identity, redemption, the nature of evil"
                                 className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-primary-500 transition-colors"
                               />
+                            </div>
+
+                            {/* Narrator Design Section */}
+                            <div className="border-t border-slate-700 pt-4 mt-2">
+                              <h3 className="text-sm font-semibold text-slate-300 mb-3">Narrator Design</h3>
+                              
+                              <div className="space-y-4">
+                                <div>
+                                  <label className="block text-sm font-medium mb-2">Point of View (POV)</label>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {NARRATIVE_POV_OPTIONS.map((option) => (
+                                      <button
+                                        key={option.value}
+                                        type="button"
+                                        onClick={() => setFormData({ ...formData, narrativePov: option.value })}
+                                        className={`p-3 rounded-lg border text-left transition-all ${
+                                          formData.narrativePov === option.value
+                                            ? 'border-blue-500 bg-blue-500/10'
+                                            : 'border-slate-600 hover:border-slate-500'
+                                        }`}
+                                      >
+                                        <div className="font-medium text-sm">{option.label}</div>
+                                        <div className="text-xs text-slate-500">{option.desc}</div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-sm font-medium mb-2">Narrator Reliability</label>
+                                    <div className="space-y-2">
+                                      {NARRATOR_RELIABILITY_OPTIONS.map((option) => (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          onClick={() => setFormData({ ...formData, narratorReliability: option.value })}
+                                          className={`w-full p-3 rounded-lg border text-left transition-all ${
+                                            formData.narratorReliability === option.value
+                                              ? 'border-blue-500 bg-blue-500/10'
+                                              : 'border-slate-600 hover:border-slate-500'
+                                          }`}
+                                        >
+                                          <div className="font-medium text-sm">{option.label}</div>
+                                          <div className="text-xs text-slate-500">{option.desc}</div>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-sm font-medium mb-2">Narrator Stance</label>
+                                    <div className="space-y-2">
+                                      {NARRATOR_STANCE_OPTIONS.map((option) => (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          onClick={() => setFormData({ ...formData, narratorStance: option.value })}
+                                          className={`w-full p-3 rounded-lg border text-left transition-all ${
+                                            formData.narratorStance === option.value
+                                              ? 'border-blue-500 bg-blue-500/10'
+                                              : 'border-slate-600 hover:border-slate-500'
+                                          }`}
+                                        >
+                                          <div className="font-medium text-sm">{option.label}</div>
+                                          <div className="text-xs text-slate-500">{option.desc}</div>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
 
                             <div>
