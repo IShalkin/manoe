@@ -424,7 +424,7 @@ Always output polished scenes as valid JSON wrapped in ```json``` blocks.
         self._emit_event("agent_message", {
             "agent": agent_name,
             "message_type": message_type,
-            "content": content[:10000] if content else "",  # Increased limit to preserve JSON structure
+            "content": content[:100000] if content else "",  # Large limit to preserve JSON structure for outlines
             "to_agent": to_agent,
         })
 
