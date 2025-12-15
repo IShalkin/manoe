@@ -30,6 +30,8 @@ class MultiAgentWorker:
         self.config = create_default_config_from_env()
         self.redis_streams: Optional[RedisStreamsService] = None
         self._running = False
+        self._active_runs: Dict[str, asyncio.Task] = {}
+        self._cancelled_runs: set = set()
 
     async def initialize(self) -> None:
         """Initialize Redis Streams connection."""
@@ -317,7 +319,7 @@ async def generate(request: GenerateRequest):
         }
 
     # Start generation in background with user's API key
-    asyncio.create_task(worker.run_generation(
+    task = asyncio.create_task(worker.run_generation(
         run_id=run_id,
         project_data=project_data,
         api_key=request.api_key,
@@ -330,6 +332,9 @@ async def generate(request: GenerateRequest):
         preferred_structure=request.preferred_structure,
         max_revisions=request.max_revisions,
     ))
+    
+    # Track active run for cancellation support
+    worker._active_runs[run_id] = task
 
     return GenerateResponse(
         success=True,
@@ -391,6 +396,36 @@ async def get_messages(run_id: str):
             agent_messages.append(event)
     
     return {"run_id": run_id, "messages": agent_messages}
+
+
+@app.post("/runs/{run_id}/cancel")
+async def cancel_generation(run_id: str):
+    """Cancel an active generation run."""
+    if not worker or not worker.redis_streams:
+        raise HTTPException(status_code=503, detail="Worker not initialized")
+    
+    # Mark the run as cancelled
+    worker._cancelled_runs.add(run_id)
+    
+    # Cancel the task if it exists
+    if run_id in worker._active_runs:
+        task = worker._active_runs[run_id]
+        if not task.done():
+            task.cancel()
+        del worker._active_runs[run_id]
+    
+    # Publish cancellation event
+    await worker.redis_streams.publish_event(
+        run_id,
+        "generation_cancelled",
+        {
+            "run_id": run_id,
+            "status": "cancelled",
+            "message": "Generation was cancelled by user",
+        }
+    )
+    
+    return {"success": True, "run_id": run_id, "message": "Generation cancelled"}
 
 
 if __name__ == "__main__":
