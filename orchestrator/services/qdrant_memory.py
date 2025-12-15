@@ -1,6 +1,7 @@
 """
 Qdrant Vector Memory Service for MANOE
 Handles storage and retrieval of character and worldbuilding embeddings.
+Supports multiple embedding providers: OpenAI, Gemini, and local (fastembed).
 """
 
 from typing import Any, Dict, List, Optional
@@ -10,17 +11,28 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
 from qdrant_client.http.models import Distance, VectorParams
 
+from services.embedding_providers import (
+    EmbeddingProvider,
+    get_best_available_provider,
+)
+
 
 class QdrantMemoryService:
-    """Service for managing vector memory in Qdrant."""
+    """Service for managing vector memory in Qdrant.
 
-    # Collection names
-    COLLECTION_CHARACTERS = "manoe_characters"
-    COLLECTION_WORLDBUILDING = "manoe_worldbuilding"
-    COLLECTION_SCENES = "manoe_scenes"
+    Supports multiple embedding providers with automatic fallback:
+    1. OpenAI (if API key provided) - best quality, 1536 dimensions
+    2. Gemini (if API key provided) - good quality, 768 dimensions
+    3. Local fastembed (no key required) - 384 dimensions
 
-    # Vector dimensions (OpenAI text-embedding-3-small)
-    VECTOR_SIZE = 1536
+    Collections are named with embedding provider suffix to handle
+    different vector dimensions properly.
+    """
+
+    # Base collection names (will be suffixed with embedding provider info)
+    COLLECTION_CHARACTERS_BASE = "manoe_characters"
+    COLLECTION_WORLDBUILDING_BASE = "manoe_worldbuilding"
+    COLLECTION_SCENES_BASE = "manoe_scenes"
 
     def __init__(
         self,
@@ -30,16 +42,71 @@ class QdrantMemoryService:
         self.url = url
         self.api_key = api_key
         self._client: Optional[QdrantClient] = None
-        self._embedding_client = None
+        self._embedding_provider: Optional[EmbeddingProvider] = None
+        self._collection_suffix: str = ""
 
-    async def connect(self, openai_api_key: Optional[str] = None) -> None:
-        """Initialize Qdrant client and create collections if needed."""
+    @property
+    def embedding_provider(self) -> Optional[EmbeddingProvider]:
+        """Get the current embedding provider."""
+        return self._embedding_provider
+
+    @property
+    def vector_size(self) -> int:
+        """Get the vector size for the current embedding provider."""
+        if self._embedding_provider:
+            return self._embedding_provider.dimension
+        return 1536  # Default fallback
+
+    def _get_collection_name(self, base_name: str) -> str:
+        """Get the full collection name with embedding provider suffix."""
+        if self._collection_suffix:
+            return f"{base_name}__{self._collection_suffix}"
+        return base_name
+
+    @property
+    def COLLECTION_CHARACTERS(self) -> str:
+        return self._get_collection_name(self.COLLECTION_CHARACTERS_BASE)
+
+    @property
+    def COLLECTION_WORLDBUILDING(self) -> str:
+        return self._get_collection_name(self.COLLECTION_WORLDBUILDING_BASE)
+
+    @property
+    def COLLECTION_SCENES(self) -> str:
+        return self._get_collection_name(self.COLLECTION_SCENES_BASE)
+
+    async def connect(
+        self,
+        openai_api_key: Optional[str] = None,
+        gemini_api_key: Optional[str] = None,
+        embedding_provider: Optional[EmbeddingProvider] = None,
+        prefer_local: bool = False,
+    ) -> None:
+        """Initialize Qdrant client and embedding provider.
+
+        Args:
+            openai_api_key: OpenAI API key for embeddings (highest priority)
+            gemini_api_key: Gemini API key for embeddings (second priority)
+            embedding_provider: Pre-configured embedding provider (overrides keys)
+            prefer_local: If True, use local embeddings even if API keys available
+        """
         self._client = QdrantClient(url=self.url, api_key=self.api_key)
 
-        # Initialize OpenAI for embeddings if key provided
-        if openai_api_key:
-            from openai import AsyncOpenAI
-            self._embedding_client = AsyncOpenAI(api_key=openai_api_key)
+        # Use provided embedding provider or create one based on available keys
+        if embedding_provider:
+            self._embedding_provider = embedding_provider
+        else:
+            self._embedding_provider = get_best_available_provider(
+                openai_api_key=openai_api_key,
+                gemini_api_key=gemini_api_key,
+                prefer_local=prefer_local,
+            )
+
+        # Set collection suffix based on embedding provider
+        if self._embedding_provider:
+            info = self._embedding_provider.info
+            # Use a shorter suffix for cleaner collection names
+            self._collection_suffix = f"{info.provider_type.value}_{info.dimension}"
 
         # Create collections if they don't exist
         await self._ensure_collections()
@@ -51,7 +118,11 @@ class QdrantMemoryService:
         return self._client
 
     async def _ensure_collections(self) -> None:
-        """Create collections if they don't exist."""
+        """Create collections if they don't exist.
+
+        Collections are named with embedding provider suffix to handle
+        different vector dimensions properly.
+        """
         collections = [
             self.COLLECTION_CHARACTERS,
             self.COLLECTION_WORLDBUILDING,
@@ -65,21 +136,23 @@ class QdrantMemoryService:
                 self.client.create_collection(
                     collection_name=collection,
                     vectors_config=VectorParams(
-                        size=self.VECTOR_SIZE,
+                        size=self.vector_size,
                         distance=Distance.COSINE,
                     ),
                 )
 
     async def _get_embedding(self, text: str) -> List[float]:
-        """Generate embedding for text using OpenAI."""
-        if self._embedding_client is None:
-            raise RuntimeError("Embedding client not initialized. Provide OpenAI API key.")
+        """Generate embedding for text using the configured embedding provider.
 
-        response = await self._embedding_client.embeddings.create(
-            model="text-embedding-3-small",
-            input=text,
-        )
-        return response.data[0].embedding
+        Supports multiple providers: OpenAI, Gemini, and local (fastembed).
+        """
+        if self._embedding_provider is None:
+            raise RuntimeError(
+                "Embedding provider not initialized. "
+                "Call connect() with API keys or enable local embeddings."
+            )
+
+        return await self._embedding_provider.embed_single(text)
 
     # ========================================================================
     # Character Memory Operations
