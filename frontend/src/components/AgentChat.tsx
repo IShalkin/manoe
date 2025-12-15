@@ -246,15 +246,9 @@ function formatAgentContent(content: string): string {
   
   const trimmed = content.trim();
   
-  // First, try tolerant JSON parse (handles common LLM issues)
-  const parsed = tolerantJsonParse(trimmed);
-  if (parsed !== null) {
-    return formatAnyAsMarkdown(parsed);
-  }
-  
-  // Check for ```json code blocks
-  if (content.includes('```json')) {
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+  // Check for ```json code blocks first
+  if (content.includes('```json') || content.includes('```')) {
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
       const blockParsed = tolerantJsonParse(jsonMatch[1]);
       if (blockParsed !== null) {
@@ -263,12 +257,18 @@ function formatAgentContent(content: string): string {
     }
   }
   
+  // Try tolerant JSON parse (handles common LLM issues)
+  const parsed = tolerantJsonParse(trimmed);
+  if (parsed !== null && typeof parsed === 'object') {
+    return formatAnyAsMarkdown(parsed);
+  }
+  
   // Try to extract JSON from string (handles prefix/suffix text)
   if (trimmed.includes('{') || trimmed.includes('[')) {
     const extracted = extractJsonFromString(trimmed);
     if (extracted) {
       const extractedParsed = tolerantJsonParse(extracted);
-      if (extractedParsed !== null) {
+      if (extractedParsed !== null && typeof extractedParsed === 'object') {
         return formatAnyAsMarkdown(extractedParsed);
       }
     }
@@ -299,9 +299,16 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
         lines.push('');  // Add blank line before list for proper markdown
         filteredItems.forEach((item, i) => {
           if (typeof item === 'object' && item !== null) {
-            const inlineText = formatObjectInline(item as Record<string, unknown>);
-            if (inlineText.trim()) {
-              lines.push(`${indent}${i + 1}. ${inlineText}`);
+            // Format each field on its own line for better readability
+            const itemLines: string[] = [];
+            for (const [itemKey, itemValue] of Object.entries(item as Record<string, unknown>)) {
+              const formattedItemKey = itemKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              if (itemValue !== null && itemValue !== undefined && itemValue !== '') {
+                itemLines.push(`**${formattedItemKey}**: ${itemValue}`);
+              }
+            }
+            if (itemLines.length > 0) {
+              lines.push(`${indent}${i + 1}. ${itemLines.join(', ')}`);
             }
           } else {
             const itemText = String(item).trim();
@@ -328,7 +335,8 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
     }
   }
   
-  return lines.join('\n');
+  // Use double newlines for proper markdown paragraph breaks
+  return lines.join('\n\n');
 }
 
 function formatObjectInline(obj: Record<string, unknown>): string {
@@ -342,7 +350,8 @@ function formatObjectInline(obj: Record<string, unknown>): string {
       parts.push(`**${formattedKey}**: ${value}`);
     }
   }
-  return parts.slice(0, 4).join(', ');
+  // Join with line breaks for better readability
+  return parts.join(', ');
 }
 
 function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
@@ -363,6 +372,9 @@ function MarkdownContent({ content, className = '' }: { content: string; classNa
           ),
           code: ({ children }) => (
             <code className="bg-slate-800 px-1.5 py-0.5 rounded text-xs text-cyan-400">{children}</code>
+          ),
+          pre: ({ children }) => (
+            <pre className="bg-slate-800/50 p-3 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap break-words">{children}</pre>
           ),
           h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
           h2: ({ children }) => <h2 className="text-base font-semibold text-white mb-2">{children}</h2>,
