@@ -30,6 +30,35 @@ export interface UserSettings {
 
 export type MoralCompass = 'ethical' | 'unethical' | 'amoral' | 'ambiguous';
 
+// Narrator Design Types (based on Storyteller Framework Section 3.2)
+export type NarrativePOV = 'first_person' | 'third_person_limited' | 'third_person_omniscient' | 'second_person';
+export type NarratorReliability = 'reliable' | 'unreliable';
+export type NarratorStance = 'objective' | 'judgmental' | 'sympathetic';
+
+export interface NarratorConfig {
+  pov: NarrativePOV;
+  reliability: NarratorReliability;
+  stance: NarratorStance;
+}
+
+export const NARRATIVE_POV_OPTIONS: { value: NarrativePOV; label: string; desc: string }[] = [
+  { value: 'first_person', label: 'First Person', desc: 'I/We - intimate, limited perspective' },
+  { value: 'third_person_limited', label: 'Third Person Limited', desc: 'He/She - follows one character' },
+  { value: 'third_person_omniscient', label: 'Third Person Omniscient', desc: 'All-knowing narrator' },
+  { value: 'second_person', label: 'Second Person', desc: 'You - immersive, experimental' },
+];
+
+export const NARRATOR_RELIABILITY_OPTIONS: { value: NarratorReliability; label: string; desc: string }[] = [
+  { value: 'reliable', label: 'Reliable', desc: 'Trustworthy narrator' },
+  { value: 'unreliable', label: 'Unreliable', desc: 'Biased or deceptive narrator' },
+];
+
+export const NARRATOR_STANCE_OPTIONS: { value: NarratorStance; label: string; desc: string }[] = [
+  { value: 'objective', label: 'Objective', desc: 'Reports without judgment' },
+  { value: 'judgmental', label: 'Judgmental', desc: 'Comments on characters/events' },
+  { value: 'sympathetic', label: 'Sympathetic', desc: 'Empathizes with characters' },
+];
+
 export interface Project {
   id: string;
   name: string;

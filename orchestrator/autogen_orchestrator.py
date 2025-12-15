@@ -996,6 +996,7 @@ Now create the plot outline as valid JSON.
         worldbuilding: Optional[Dict] = None,
         previous_scene_summary: str = "N/A",
         memory_context: Optional[Dict[str, Any]] = None,
+        narrator_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the Drafting phase with Writer↔Critic loop.
@@ -1010,6 +1011,10 @@ Now create the plot outline as valid JSON.
             memory_context: Optional context from Qdrant memory with:
                 - relevant_characters: Characters retrieved by semantic search
                 - relevant_scenes: Previous scenes retrieved for continuity
+            narrator_config: Optional narrator design settings with:
+                - pov: Point of view (first_person, third_person_limited, etc.)
+                - reliability: Narrator reliability (reliable, unreliable)
+                - stance: Narrator stance (objective, judgmental, sympathetic)
         """
         self.state.phase = GenerationPhase.DRAFTING
         scene_number = scene.get("scene_number", 1)
@@ -1052,6 +1057,34 @@ Now create the plot outline as valid JSON.
                 for scene_mem in relevant_scenes:
                     memory_context_str += f"- {scene_mem.get('title', 'Scene')}: {scene_mem.get('narrative_content', '')[:200]}...\n"
 
+        # Format narrator config for the prompt
+        narrator_str = ""
+        if narrator_config:
+            pov_map = {
+                "first_person": "First Person (I/We) - intimate, limited to narrator's knowledge",
+                "third_person_limited": "Third Person Limited (He/She) - follows one character's perspective",
+                "third_person_omniscient": "Third Person Omniscient - all-knowing narrator with access to all characters' thoughts",
+                "second_person": "Second Person (You) - immersive, experimental, reader as protagonist",
+            }
+            reliability_map = {
+                "reliable": "Reliable - trustworthy narrator who presents events accurately",
+                "unreliable": "Unreliable - biased or deceptive narrator, reader must question the narrative",
+            }
+            stance_map = {
+                "objective": "Objective - reports events without judgment or commentary",
+                "judgmental": "Judgmental - comments on and evaluates characters and events",
+                "sympathetic": "Sympathetic - empathizes with characters, emotionally engaged",
+            }
+            narrator_str = f"""
+## Narrator Design
+
+**Point of View:** {pov_map.get(narrator_config.get('pov', 'third_person_limited'), 'Third Person Limited')}
+**Narrator Reliability:** {reliability_map.get(narrator_config.get('reliability', 'reliable'), 'Reliable')}
+**Narrator Stance:** {stance_map.get(narrator_config.get('stance', 'objective'), 'Objective')}
+
+IMPORTANT: Write the entire scene strictly adhering to these narrator settings. The POV determines whose thoughts we can access and how pronouns are used. The reliability affects how events are presented. The stance affects the narrative voice and tone.
+"""
+
         user_prompt = f"""
 ## Scene Context
 
@@ -1090,6 +1123,7 @@ Now create the plot outline as valid JSON.
 
 {previous_scene_summary}
 {memory_context_str}
+{narrator_str}
 ## Style Guidelines
 
 **Moral Compass:** {moral_compass}
@@ -1217,6 +1251,7 @@ Output the revised scene as valid JSON.
         self,
         project: StoryProject,
         constraints: Optional[Dict[str, Any]] = None,
+        narrator_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run a demo generation that involves all 5 agents in a simplified flow.
@@ -1238,6 +1273,10 @@ Output the revised scene as valid JSON.
                 - edit_comment: User's description of what they changed
                 - locked_agents: Dict of agent name -> locked content
                 - agents_to_regenerate: List of agents to regenerate
+            narrator_config: Optional narrator design settings with:
+                - pov: Point of view (first_person, third_person_limited, etc.)
+                - reliability: Narrator reliability (reliable, unreliable)
+                - stance: Narrator stance (objective, judgmental, sympathetic)
         """
         self.state = GenerationState(
             phase=GenerationPhase.GENESIS,
@@ -1381,6 +1420,32 @@ Output as JSON with fields: opening_hook, turning_points (array), climax, resolu
             self._emit_event("agent_complete", {"agent": "Writer", "skipped": True})
             writer_msg = AgentMessage(type="artifact", from_agent="Writer", content=self._extract_json(writer_content) if writer_content else writer_content)
         else:
+            # Format narrator config for demo mode
+            narrator_demo_str = ""
+            if narrator_config:
+                pov_map = {
+                    "first_person": "First Person (I/We)",
+                    "third_person_limited": "Third Person Limited (He/She)",
+                    "third_person_omniscient": "Third Person Omniscient",
+                    "second_person": "Second Person (You)",
+                }
+                reliability_map = {
+                    "reliable": "Reliable narrator",
+                    "unreliable": "Unreliable narrator",
+                }
+                stance_map = {
+                    "objective": "Objective stance",
+                    "judgmental": "Judgmental stance",
+                    "sympathetic": "Sympathetic stance",
+                }
+                narrator_demo_str = f"""
+## Narrator Design
+- POV: {pov_map.get(narrator_config.get('pov', 'third_person_limited'), 'Third Person Limited')}
+- Reliability: {reliability_map.get(narrator_config.get('reliability', 'reliable'), 'Reliable')}
+- Stance: {stance_map.get(narrator_config.get('stance', 'objective'), 'Objective')}
+
+IMPORTANT: Write strictly adhering to these narrator settings.
+"""
             writer_prompt = f"""
 Using the narrative foundation:
 
@@ -1389,7 +1454,7 @@ Concept: {json.dumps(architect_msg.content, indent=2) if isinstance(architect_ms
 Characters: {json.dumps(profiler_msg.content, indent=2) if isinstance(profiler_msg.content, dict) else profiler_msg.content}
 
 Structure: {json.dumps(strategist_msg.content, indent=2) if isinstance(strategist_msg.content, dict) else strategist_msg.content}
-{constraint_context}
+{narrator_demo_str}{constraint_context}
 Write a compelling opening scene (200-300 words) that:
 - Hooks the reader immediately
 - Introduces the protagonist
@@ -1460,6 +1525,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         preferred_structure: str = "ThreeAct",
         openai_api_key: Optional[str] = None,
         max_revisions: int = 2,
+        narrator_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration.
@@ -1579,6 +1645,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     "relevant_characters": relevant_characters,
                     "relevant_scenes": relevant_scenes,
                 } if (relevant_characters or relevant_scenes) else None,
+                narrator_config=narrator_config,
             )
             drafts.append(draft_result)
 
