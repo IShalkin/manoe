@@ -202,11 +202,12 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
     
     if (Array.isArray(value)) {
       lines.push(`${indent}**${formattedKey}:**`);
+      lines.push('');  // Add blank line before list for proper markdown
       value.forEach((item, i) => {
         if (typeof item === 'object' && item !== null) {
-          lines.push(`${indent}- ${i + 1}. ${formatObjectInline(item as Record<string, unknown>)}`);
+          lines.push(`${indent}${i + 1}. ${formatObjectInline(item as Record<string, unknown>)}`);
         } else {
-          lines.push(`${indent}- ${item}`);
+          lines.push(`${indent}${i + 1}. ${item}`);
         }
       });
     } else if (typeof value === 'object' && value !== null) {
@@ -232,13 +233,15 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
 function formatObjectInline(obj: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(obj)) {
+    // Format key: replace underscores with spaces and capitalize
+    const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     if (typeof value === 'string' && value.length < 80) {
-      parts.push(`*${key}*: ${value}`);
+      parts.push(`**${formattedKey}**: ${value}`);
     } else if (typeof value === 'number' || typeof value === 'boolean') {
-      parts.push(`*${key}*: ${value}`);
+      parts.push(`**${formattedKey}**: ${value}`);
     }
   }
-  return parts.slice(0, 4).join(' | ');
+  return parts.slice(0, 4).join(', ');
 }
 
 function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
@@ -622,6 +625,15 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         }
         
         setMessages((prev) => [...prev, data]);
+        
+        // Handle cancellation event
+        if (data.type === 'generation_cancelled') {
+          setCurrentPhase('Cancelled');
+          setIsCancelled(true);
+          eventSource.close();
+          setIsConnected(false);
+          return;
+        }
         
         // Close connection when generation is complete or errored
         if (data.type === 'generation_complete' || data.type === 'generation_error') {
@@ -1150,7 +1162,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                     ) : !displayMessage && !getAgentContent(agent) ? (
                       <div className="flex items-center justify-center h-full">
                         <p className="text-sm text-slate-500 italic">
-                          {state.status === 'thinking' ? 'Processing...' : 'Awaiting turn...'}
+                          {isCancelled ? 'Cancelled' : state.status === 'thinking' ? 'Processing...' : 'Awaiting turn...'}
                         </p>
                       </div>
                     ) : (
