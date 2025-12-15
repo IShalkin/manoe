@@ -751,6 +751,7 @@ Output the revised narrative as valid JSON.
         narrative: Dict[str, Any],
         moral_compass: str,
         target_audience: str,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Characters phase with Profiler agent.
@@ -758,6 +759,23 @@ Output the revised narrative as valid JSON.
         """
         self.state.phase = GenerationPhase.CHARACTERS
         self._emit_event("phase_start", {"phase": "characters"})
+
+        # Build change request section if provided
+        change_request_section = ""
+        if change_request:
+            change_request_section = f"""
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
+
+---
+"""
 
         user_prompt = f"""
 ## Narrative Context
@@ -775,7 +793,7 @@ Output the revised narrative as valid JSON.
 **Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
 
 **Required Character Types:** {", ".join(narrative.get("potential_characters", []))}
-
+{change_request_section}
 ---
 
 Create detailed psychological profiles for each required character.
@@ -842,6 +860,7 @@ Now create the character profiles as a JSON array.
         characters: List[Dict[str, Any]],
         moral_compass: str,
         target_audience: str,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Worldbuilding phase with Worldbuilder agent.
@@ -870,6 +889,21 @@ Now create the character profiles as a JSON array.
             thematic_elements=", ".join(narrative.get("thematic_elements", [])),
             characters_summary=characters_summary,
         )
+
+        # Add change request section if provided
+        if change_request:
+            user_prompt += f"""
+
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
+"""
 
         worldbuilder_response = await self._call_agent(self.worldbuilder, user_prompt)
         worldbuilder_msg = self._parse_agent_message("Worldbuilder", worldbuilder_response)
@@ -945,6 +979,7 @@ Now create the worldbuilding as valid JSON following the specified schema.
         estimated_scenes: int = 20,
         preferred_structure: str = "ThreeAct",
         worldbuilding: Optional[Dict[str, Any]] = None,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Outlining phase with Strategist agent.
@@ -1019,6 +1054,21 @@ If character profiles don't support the plot, raise: "OBJECTION to Profiler: [is
 Otherwise, output the outline as valid JSON.
 """
 
+        # Add change request section if provided
+        if change_request:
+            user_prompt += f"""
+
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
+"""
+
         strategist_response = await self._call_agent(self.strategist, user_prompt)
         strategist_msg = self._parse_agent_message("Strategist", strategist_response)
         self.state.messages.append(strategist_msg)
@@ -1088,6 +1138,7 @@ Now create the plot outline as valid JSON.
         previous_scene_summary: str = "N/A",
         memory_context: Optional[Dict[str, Any]] = None,
         narrator_config: Optional[Dict[str, Any]] = None,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Drafting phase with Writer↔Critic loop.
@@ -1224,6 +1275,21 @@ IMPORTANT: Write the entire scene strictly adhering to these narrator settings. 
 Write this scene following the outline. Output as valid JSON with narrative_content, sensory_details, dialogue_entries, etc.
 """
 
+        # Add change request section if provided
+        if change_request:
+            user_prompt += f"""
+
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
+"""
+
         # Writer creates initial draft
         writer_response = await self._call_agent(self.writer, user_prompt)
         writer_msg = self._parse_agent_message("Writer", writer_response)
@@ -1345,6 +1411,7 @@ Output the revised scene as valid JSON.
         characters: List[Dict[str, Any]],
         moral_compass: str,
         critique: Optional[Dict[str, Any]] = None,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Final Polish phase on an approved scene draft.
@@ -1438,6 +1505,21 @@ Perform a final polish pass on this approved scene. Focus on:
 
 Make surgical improvements that elevate the prose without changing the meaning or voice.
 Output as valid JSON with the polished content and a summary of changes made.
+"""
+
+        # Add change request section if provided
+        if change_request:
+            polish_prompt += f"""
+
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
 """
 
         polish_response = await self._call_agent(self.polish, polish_prompt)
@@ -2820,6 +2902,25 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Scene-level regeneration mode
         scene_regen_mode = scenes_to_regenerate is not None and len(scenes_to_regenerate) > 0
+
+        # Extract change_request from edited_content (the "What did you change?" field)
+        # This will be passed to all regenerated phases as additional AI context
+        change_request: Optional[str] = None
+        if edited_content:
+            # Check each phase for a comment field
+            for phase_name in ["genesis", "characters", "worldbuilding", "outlining", "drafting", "polish"]:
+                if phase_name in edited_content:
+                    phase_data = edited_content[phase_name]
+                    if isinstance(phase_data, dict) and phase_data.get("comment"):
+                        change_request = phase_data["comment"]
+                        # Limit change_request length to prevent prompt bloat
+                        if len(change_request) > 2000:
+                            change_request = change_request[:2000] + "..."
+                        self._emit_event("change_request_detected", {
+                            "phase": phase_name,
+                            "preview": change_request[:100] + "..." if len(change_request) > 100 else change_request,
+                        })
+                        break
         if scene_regen_mode:
             if not previous_artifacts:
                 self._emit_event("scene_regeneration_error", {
@@ -2960,6 +3061,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 narrative=genesis_result["narrative_possibility"],
                 moral_compass=project.moral_compass.value,
                 target_audience=project.target_audience,
+                change_request=change_request,
             )
             await store_artifact("characters", "characters", {"characters": characters_result.get("characters", [])})
 
@@ -3002,6 +3104,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 characters=characters_result["characters"],
                 moral_compass=project.moral_compass.value,
                 target_audience=project.target_audience,
+                change_request=change_request,
             )
             await store_artifact("worldbuilding", "worldbuilding", worldbuilding_result.get("worldbuilding", {}))
 
@@ -3042,6 +3145,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 estimated_scenes=estimated_scenes,
                 preferred_structure=preferred_structure,
                 worldbuilding=worldbuilding,
+                change_request=change_request,
             )
             await store_artifact("outlining", "outline", outlining_result.get("outline", {}))
 
@@ -3183,6 +3287,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     previous_scene_summary=continuity["previous_scene_summary"] if scene_regen_mode else previous_summary,
                     memory_context=memory_ctx if memory_ctx else None,
                     narrator_config=narrator_config,
+                    change_request=change_request,
                 )
 
                 # Quality Gate with retry logic (per scene)
@@ -3273,6 +3378,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                         characters=characters_result["characters"],
                         moral_compass=project.moral_compass.value,
                         critique=draft_result.get("critique"),
+                        change_request=change_request,
                     )
                     
                     # Update or append polish result
