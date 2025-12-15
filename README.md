@@ -2,6 +2,11 @@
 
 A scalable, event-driven platform designed to automate the creation of exceptional narratives by strictly adhering to proven storytelling principles from the "Storyteller" framework. MANOE uses a multi-agent architecture where specialized AI agents collaborate in real-time to generate compelling stories.
 
+## Live Demo
+
+- **Frontend**: https://manoe.iliashalkin.com
+- **Orchestrator API**: https://manoe-orchestrator.iliashalkin.com
+
 ## System Architecture
 
 ```mermaid
@@ -16,11 +21,12 @@ flowchart TB
         Worker[Multi-Agent Worker]
         
         subgraph Agents["AI Agents"]
-            Architect[Architect Agent]
+            Genesis[Genesis Agent]
             Profiler[Profiler Agent]
-            Strategist[Strategist Agent]
+            Worldbuilder[Worldbuilder Agent]
+            Architect[Architect Agent]
             Writer[Writer Agent]
-            Critic[Critic Agent]
+            Editor[Editor Agent]
         end
         
         ModelClient[Unified Model Client]
@@ -51,96 +57,70 @@ flowchart TB
     Redis -->|Stream Events| SSE
     SSE -->|Real-time Updates| UI
     
-    Worker -->|Store Results| Supabase
+    Worker -->|Store Artifacts| Supabase
     Agents -->|Vector Memory| Qdrant
 ```
 
-## Agent Workflow
+## Generation Workflow
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant F as Frontend
-    participant O as Orchestrator
-    participant A as Architect
-    participant P as Profiler
-    participant S as Strategist
-    participant W as Writer
-    participant C as Critic
-
-    U->>F: Submit Seed Idea
-    F->>O: POST /generate
-    O->>O: Create Run ID
-    O-->>F: Return Run ID
-    F->>O: Connect SSE /runs/{id}/events
-
-    rect rgb(59, 130, 246, 0.1)
-        Note over A: Phase 1: Genesis
-        O->>A: Generate Narrative Possibility
-        A->>C: Submit for Audit
-        C-->>A: Feedback/Approval
-        A-->>O: Narrative JSON
-    end
-
-    rect rgb(6, 182, 212, 0.1)
-        Note over P: Phase 2: Characters
-        O->>P: Create Character Profiles
-        P->>A: Questions (if needed)
-        A-->>P: Clarifications
-        P-->>O: Character Profiles JSON
-    end
-
-    rect rgb(34, 197, 94, 0.1)
-        Note over S: Phase 3: Outlining
-        O->>S: Generate Plot Outline
-        S->>P: Questions about Characters
-        P-->>S: Character Details
-        S-->>O: Plot Outline JSON
-    end
-
-    rect rgb(245, 158, 11, 0.1)
-        Note over W,C: Phase 4: Drafting & Critique Loop
-        loop Max 2 Revisions
-            O->>W: Draft Scene
-            W->>C: Submit Draft
-            C-->>W: REVISION_REQUEST or APPROVED
-        end
-        W-->>O: Final Scene Draft
-    end
-
-    O-->>F: generation_complete Event
-    F-->>U: Display Results
-```
-
-## Agent Communication Protocol
+MANOE implements a **7-phase narrative generation workflow**:
 
 ```mermaid
 flowchart LR
-    subgraph Messages["Message Types"]
-        ARTIFACT[ARTIFACT<br/>Final Output]
-        QUESTION[QUESTION<br/>Ask Clarification]
-        OBJECTION[OBJECTION<br/>Challenge Issues]
-        REVISION[REVISION_REQUEST<br/>Request Changes]
-        RESPONSE[RESPONSE<br/>Answer Questions]
-        APPROVED[APPROVED<br/>Quality Passed]
-    end
-
-    subgraph Flow["Communication Flow"]
-        A[Architect] -->|ARTIFACT| P[Profiler]
-        P -->|QUESTION| A
-        A -->|RESPONSE| P
-        P -->|ARTIFACT| S[Strategist]
-        S -->|OBJECTION| P
-        S -->|ARTIFACT| W[Writer]
-        W -->|ARTIFACT| C[Critic]
-        C -->|REVISION_REQUEST| W
-        C -->|APPROVED| W
-    end
+    G[Genesis] --> C[Characters]
+    C --> W[Worldbuilding]
+    W --> O[Outlining]
+    O --> AP[Advanced Planning]
+    AP --> D[Drafting]
+    D --> P[Polish]
 ```
 
-## Features
+### Phase 1: Genesis
+The Genesis agent accepts a "Seed Idea" from the user (What If? questions, image prompts) and configures the "Moral Compass" (Ethical, Unethical, Amoral, Ambiguous). It generates a structured "Narrative Possibility" JSON that defines the story's foundation, including plot summary, setting, main conflict, and thematic elements.
 
-MANOE provides a comprehensive set of features for narrative generation. The multi-agent architecture employs specialized AI agents including Architect, Profiler, Strategist, Writer, and Critic that collaborate to create narratives. The system supports BYOK (Bring Your Own Key) integration with OpenAI, OpenRouter, Google Gemini, Anthropic Claude, and DeepSeek. Users can select different models for each agent based on their needs and budget. The platform is self-hosting ready with a complete Docker Compose setup for easy deployment. Vector memory through Qdrant integration ensures character and worldbuilding consistency. The Moral Compass Framework allows narratives to be generated through Ethical, Unethical, Amoral, or Ambiguous lenses. Real-time progress updates are delivered via Server-Sent Events (SSE) through Redis Streams. The agent editing feature allows users to edit agent outputs and regenerate dependent agents while locking approved content.
+### Phase 2: Characters (Profiler Agent)
+The Profiler assigns archetypes (Hero, Shadow, Trickster) to characters and generates "Core Psychological Wound" and "Inner Trap" for protagonists. Character attributes are stored as vectors in Qdrant for consistency across the narrative.
+
+### Phase 3: Worldbuilding
+The Worldbuilder creates detailed world elements including locations, cultures, rules, and atmosphere. These elements are stored in Qdrant vector memory for retrieval during scene writing.
+
+### Phase 4: Outlining (Architect Agent)
+The Architect maps the plot onto "Mythic Structure" (Hero's Journey, Three-Act Structure) and creates a scene-by-scene outline with conflict, emotional beats, and subtext.
+
+### Phase 5: Advanced Planning
+Generates detailed planning artifacts including contradiction maps, emotional beat sheets, sensory blueprints, subtext design, and complexity checklists to ensure narrative coherence.
+
+### Phase 6: Drafting (Writer Agent)
+The Writer drafts scenes using "Show, Don't Tell" principles. Each scene is written with full context from Qdrant memory including relevant characters, worldbuilding elements, and previous scenes for continuity.
+
+### Phase 7: Polish (Editor Agent)
+The Editor refines the draft with iterative quality checks, validating pacing, originality, dialogue, and subtext. This phase involves up to 2 revision rounds per scene until quality standards are met.
+
+## Key Features
+
+### Selective Regeneration
+
+MANOE supports two types of selective regeneration for iterative refinement:
+
+**Phase-Based Regeneration**: Edit any agent's output and regenerate from that phase onwards. Previous phases are preserved using stored artifacts from Supabase. Use the "What did you change?" field to pass instructions to the AI about your modifications.
+
+**Scene-Level Regeneration**: Select specific scenes to regenerate via the Writer agent's modal UI. The system maintains continuity between old and new scenes using Qdrant memory context.
+
+### Memory Context System
+
+The system uses Qdrant vector database to maintain narrative consistency:
+
+- **Character Memory**: Character profiles are embedded and retrieved based on scene relevance
+- **Worldbuilding Memory**: World elements are stored and retrieved for consistent world details
+- **Scene Memory**: Previous scenes are embedded for continuity in subsequent scenes
+
+### Artifact Persistence
+
+All generation artifacts are stored in Supabase for resuming interrupted generations, phase-based selective regeneration, scene-level selective regeneration, and project history/versioning.
+
+### Multi-Provider LLM Support (BYOK)
+
+MANOE supports multiple LLM providers with BYOK (Bring Your Own Key). Configure at least one provider to get started.
 
 ## Quick Start with Docker
 
@@ -190,102 +170,71 @@ VITE_SUPABASE_URL=your-supabase-url
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 ```
 
-## Supported LLM Providers (BYOK)
-
-MANOE supports multiple LLM providers with BYOK (Bring Your Own Key). Configure at least one provider to get started.
-
-### Model Tiers (December 2025)
-
-| Tier | Model | Release | Best For | Verdict |
-|------|-------|---------|----------|---------|
-| **S+ Logic** | Gemini 3 Pro | Nov 2025 | Complex plot logic | New king of AI. Deep Think integrated into core. Builds dynamic world model of your plot. Solves tasks GPT-5 fails at. |
-| **S+ Prose** | Claude Opus 4.5 | Nov 2025 | Living prose, RP | Most human-like AI. Talented writer. Best for RP and literature. Many prefer it for style over technically stronger models. |
-| **S+ Uncensored** | Dolphin Mistral 24B Venice | Apr 2025 | Dark plots, roleplay | Best uncensored model for creativity. No moralizing. Perfect for dark plots and political intrigue. |
-| **A+ Context** | Llama 4 Maverick (Venice) | May 2025 | 256k context | 256k context with Venice jailbreak. 3x fewer refusals. Technically smarter than Dolphin. |
-| **A** | GPT-5.2 | Dec 2025 | Fast logic | Improved routing (decides when to think deep vs fast). Less moralistic than 5.0. |
-
-### Provider Overview
+### Supported LLM Providers
 
 | Provider | Top Models | Best For |
 |----------|------------|----------|
-| **OpenAI** | GPT-5.2, GPT-5, O3, O3-mini, GPT-4o | Reasoning, general purpose |
-| **Google Gemini** | Gemini 3 Pro, Gemini 3 Flash, Gemini 2.0 Flash | Long context (2M tokens), complex logic |
-| **Anthropic Claude** | Claude Opus 4.5, Claude Sonnet 4, Claude 3.5 Sonnet | Creative writing, prose quality |
-| **Venice AI** | Dolphin Mistral 24B, Llama 4 Maverick, Qwen 3 235B | Uncensored content, dark themes |
+| **OpenAI** | GPT-4o, GPT-4-turbo, O1 | Reasoning, general purpose |
+| **Google Gemini** | Gemini 2.0 Flash, Gemini 1.5 Pro | Long context (2M tokens), complex logic |
+| **Anthropic Claude** | Claude 3.5 Sonnet, Claude 3 Opus | Creative writing, prose quality |
+| **Venice AI** | Dolphin Mistral, Llama 3.1 | Uncensored content, dark themes |
 | **DeepSeek** | DeepSeek V3, DeepSeek R1 | Cost-effective reasoning |
 | **OpenRouter** | Access to all above via single API | Cost optimization, model variety |
 
-### Per-Agent Model Configuration
+### Moral Compass Framework
 
-Each agent can use a different provider and model. Recommended configurations:
-
-```env
-# S+ Logic for complex narrative structure
-ARCHITECT_PROVIDER=gemini
-ARCHITECT_MODEL=gemini-3-pro
-
-# S+ Prose for character depth
-PROFILER_PROVIDER=claude
-PROFILER_MODEL=claude-opus-4.5-20251201
-
-# S+ Logic for plot strategy
-STRATEGIST_PROVIDER=gemini
-STRATEGIST_MODEL=gemini-3-pro
-
-# S+ Uncensored for creative writing without restrictions
-WRITER_PROVIDER=venice
-WRITER_MODEL=dolphin-mistral-24b-venice
-
-# A tier for balanced critique
-CRITIC_PROVIDER=openai
-CRITIC_MODEL=gpt-4o
-```
-
-### Venice AI (Uncensored Models)
-
-Venice AI provides access to uncensored models that don't refuse creative writing requests. This is particularly useful for narratives involving dark themes, political intrigue, or morally ambiguous characters. Venice models use an OpenAI-compatible API and support the same integration pattern as other providers.
+Generate narratives through different ethical lenses:
+- **Ethical**: Traditional hero's journey with clear moral lessons
+- **Unethical**: Villain protagonists, morally dark narratives
+- **Amoral**: Neutral perspective without moral judgment
+- **Ambiguous**: Complex moral situations without clear answers
 
 ## Project Structure
 
 ```
 manoe/
-├── frontend/              # React + TypeScript + Vite Frontend
+├── frontend/                    # React + TypeScript + Vite Frontend
 │   ├── src/
-│   │   ├── components/    # UI components (AgentChat, Layout, etc.)
-│   │   ├── contexts/      # React contexts (Auth, Settings)
-│   │   ├── hooks/         # Custom hooks (useProjects, useSettings)
-│   │   ├── pages/         # Page components
-│   │   └── lib/           # Utilities and Supabase client
+│   │   ├── components/          # UI components
+│   │   │   ├── AgentChat.tsx    # Agent cards and regeneration modals
+│   │   │   ├── Layout.tsx       # App layout
+│   │   │   └── SettingsModal.tsx
+│   │   ├── contexts/            # React contexts (Auth, Settings)
+│   │   ├── hooks/               # Custom hooks (useProjects, useSettings)
+│   │   ├── pages/
+│   │   │   ├── GenerationPage.tsx  # Main generation UI
+│   │   │   ├── DashboardPage.tsx
+│   │   │   └── ...
+│   │   └── lib/                 # Utilities and Supabase client
 │   └── package.json
-├── orchestrator/          # Python/FastAPI AI Orchestrator
-│   ├── agents/            # Agent definitions
-│   ├── prompts/           # System prompts derived from Storyteller
-│   ├── services/          # Redis Streams, Model Client
-│   ├── models/            # Pydantic data models
-│   ├── config/            # Configuration management
-│   ├── autogen_orchestrator.py  # StorytellerGroupChat implementation
-│   ├── multi_agent_worker.py    # FastAPI app with SSE endpoints
+├── orchestrator/                # Python/FastAPI AI Orchestrator
+│   ├── services/
+│   │   ├── supabase_persistence.py  # Artifact storage
+│   │   ├── qdrant_memory.py         # Vector memory
+│   │   ├── redis_streams.py         # SSE event streaming
+│   │   └── model_client.py          # Multi-provider LLM client
+│   ├── autogen_orchestrator.py      # Main orchestrator with phase functions
+│   ├── multi_agent_worker.py        # API endpoints and SSE streaming
 │   └── pyproject.toml
-├── supabase/              # Supabase configuration and migrations
-├── docs/                  # Documentation
-└── docker-compose.yml     # Docker Compose configuration
+├── supabase/                    # Supabase configuration and migrations
+├── docs/                        # Documentation
+├── docker-compose.yml           # Docker Compose for local development
+└── docker-compose.vps.yml       # Docker Compose for VPS deployment
 ```
 
-## Agentic Workflow
+## Supabase Schema
 
-The system implements a four-phase narrative generation workflow:
+The following tables are used for persistence:
 
-### Phase 1: Genesis (Architect Agent)
-The Architect accepts a "Seed Idea" from the user (What If? questions, image prompts) and configures the "Moral Compass" (Ethical, Unethical, Amoral, Ambiguous). It generates a structured "Narrative Possibility" JSON that defines the story's foundation, including plot summary, setting, main conflict, and thematic elements.
-
-### Phase 2: Character & World Design (Profiler Agent)
-The Profiler assigns archetypes (Hero, Shadow, Trickster) to characters and generates "Core Psychological Wound" and "Inner Trap" for protagonists. Character attributes can be stored as vectors in Qdrant for consistency across the narrative.
-
-### Phase 3: Plotting & Outlining (Strategist Agent)
-The Strategist maps the plot onto "Mythic Structure" (Hero's Journey, Three-Act Structure) and creates a scene-by-scene outline with conflict, emotional beats, and subtext.
-
-### Phase 4: Drafting & Critique Loop (Writer + Critic Agents)
-The Writer drafts scenes using "Show, Don't Tell" principles while the Critic validates pacing, originality, dialogue, and subtext. This phase involves iterative refinement with a maximum of 2 revision rounds per scene until quality standards are met.
+| Table | Description |
+|-------|-------------|
+| **projects** | User projects with seed_idea, settings, moral_compass |
+| **run_artifacts** | Phase artifacts (project_id UUID FK, run_id, phase, artifact_type, content JSONB) |
+| **characters** | Generated character profiles |
+| **worldbuilding** | World elements and settings |
+| **outlines** | Plot outlines with scene breakdowns |
+| **drafts** | Scene drafts with narrative content |
+| **critiques** | Editor feedback and quality scores |
 
 ## API Endpoints
 
@@ -297,6 +246,9 @@ The Writer drafts scenes using "Show, Don't Tell" principles while the Critic va
 | `/generate` | POST | Start multi-agent generation |
 | `/runs/{run_id}/events` | GET | SSE stream for real-time events |
 | `/runs/{run_id}/messages` | GET | Get all agent messages for a run |
+| `/runs/{run_id}/cancel` | POST | Cancel a running generation |
+| `/runs/{run_id}/pause` | POST | Pause a running generation |
+| `/runs/{run_id}/resume` | POST | Resume a paused generation |
 
 ### Generate Request Body
 
@@ -309,7 +261,13 @@ The Writer drafts scenes using "Show, Don't Tell" principles while the Critic va
   "provider": "openai",
   "model": "gpt-4o",
   "api_key": "your-api-key",
-  "constraints": null
+  "supabase_project_id": "uuid-of-project",
+  "start_from_phase": "characters",
+  "previous_run_id": "uuid-of-previous-run",
+  "scenes_to_regenerate": [2, 5],
+  "constraints": {
+    "edit_comment": "Make the protagonist more conflicted about their abilities"
+  }
 }
 ```
 
@@ -323,8 +281,8 @@ The Writer drafts scenes using "Show, Don't Tell" principles while the Critic va
 ### Orchestrator
 - `REDIS_URL` - Redis connection URL
 - `SUPABASE_URL` - Supabase project URL
-- `SUPABASE_KEY` - Supabase service key
-- `QDRANT_URL` - Qdrant server URL (optional)
+- `SUPABASE_KEY` - Supabase service key (required for artifact persistence)
+- `QDRANT_URL` - Qdrant server URL (required for memory context features)
 
 ## Development Setup
 
@@ -354,7 +312,7 @@ For VPS deployment, use the provided `docker-compose.vps.yml`:
 
 ```bash
 # On your VPS
-docker-compose -f docker-compose.vps.yml up -d
+docker compose -f docker-compose.vps.yml up -d
 ```
 
 The VPS configuration includes nginx-proxy integration for automatic SSL certificates via Let's Encrypt.
