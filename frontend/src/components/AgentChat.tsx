@@ -93,6 +93,90 @@ function formatAnyAsMarkdown(parsed: unknown): string {
   return String(parsed);
 }
 
+// Extract clean story text from agent content (Polish or Writer)
+function extractStoryText(content: string, agentType: 'Polish' | 'Writer' | 'other'): string {
+  if (!content || typeof content !== 'string') {
+    return '';
+  }
+
+  const trimmed = content.trim();
+  
+  // Try to parse as JSON first
+  let parsed: unknown = null;
+  
+  // Check for ```json code blocks
+  if (trimmed.includes('```json')) {
+    const jsonMatch = trimmed.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      parsed = tolerantJsonParse(jsonMatch[1]);
+    }
+  }
+  
+  // Try direct JSON parse
+  if (parsed === null) {
+    parsed = tolerantJsonParse(trimmed);
+  }
+  
+  // Try to extract JSON from string
+  if (parsed === null && (trimmed.includes('{') || trimmed.includes('['))) {
+    const extracted = extractJsonFromString(trimmed);
+    if (extracted) {
+      parsed = tolerantJsonParse(extracted);
+    }
+  }
+  
+  // If we have a parsed object, extract the story text
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    
+    // For Polish agent, prefer polished_content
+    if (agentType === 'Polish') {
+      if (typeof obj.polished_content === 'string' && obj.polished_content.trim()) {
+        return obj.polished_content;
+      }
+      // Fallback fields for Polish
+      if (typeof obj.content === 'string' && obj.content.trim()) {
+        return obj.content;
+      }
+    }
+    
+    // For Writer agent, prefer narrative_content
+    if (agentType === 'Writer') {
+      if (typeof obj.narrative_content === 'string' && obj.narrative_content.trim()) {
+        return obj.narrative_content;
+      }
+      if (typeof obj.scene_content === 'string' && obj.scene_content.trim()) {
+        return obj.scene_content;
+      }
+      if (typeof obj.content === 'string' && obj.content.trim()) {
+        return obj.content;
+      }
+    }
+    
+    // Generic fallbacks for any agent
+    if (typeof obj.polished_content === 'string' && obj.polished_content.trim()) {
+      return obj.polished_content;
+    }
+    if (typeof obj.narrative_content === 'string' && obj.narrative_content.trim()) {
+      return obj.narrative_content;
+    }
+    if (typeof obj.scene_content === 'string' && obj.scene_content.trim()) {
+      return obj.scene_content;
+    }
+    if (typeof obj.content === 'string' && obj.content.trim()) {
+      return obj.content;
+    }
+  }
+  
+  // If content doesn't look like JSON, return as-is (might be plain text)
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[') && !trimmed.includes('```json')) {
+    return trimmed;
+  }
+  
+  // Last resort: return the formatted content (will show JSON as markdown)
+  return '';
+}
+
 function extractJsonFromString(content: string): string | null {
   // Try to find balanced JSON object or array
   const trimmed = content.trim();
@@ -843,56 +927,64 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     return null;
   }, [agentStates]);
 
-  // Extract final result from messages
+  // Extract final result from messages - prefer clean story text over JSON
   const finalResult = useMemo(() => {
-    // Try generation_complete result_summary first (most authoritative)
-    const completeEvent = messages.find(m => m.type === 'generation_complete');
-    if (completeEvent?.data.result_summary) {
-      return completeEvent.data.result_summary;
-    }
-    
-    // Prefer Polish agent's last message (final polished story content)
+    // Collect all Polish agent messages and extract clean story text from each
     const polishMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.agent === 'Polish' && m.data.content?.trim()
     );
     if (polishMessages.length > 0) {
-      return polishMessages[polishMessages.length - 1].data.content || '';
+      // Extract story text from all Polish messages and concatenate
+      const storyTexts = polishMessages
+        .map(m => extractStoryText(m.data.content || '', 'Polish'))
+        .filter(text => text.trim());
+      
+      if (storyTexts.length > 0) {
+        // Join multiple scenes with separator
+        return storyTexts.join('\n\n---\n\n');
+      }
     }
     
-    // Fall back to Writer's last message (draft story content)
+    // Fall back to Writer's messages (draft story content)
     const writerMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
     );
     if (writerMessages.length > 0) {
-      return writerMessages[writerMessages.length - 1].data.content || '';
+      // Extract story text from all Writer messages and concatenate
+      const storyTexts = writerMessages
+        .map(m => extractStoryText(m.data.content || '', 'Writer'))
+        .filter(text => text.trim());
+      
+      if (storyTexts.length > 0) {
+        return storyTexts.join('\n\n---\n\n');
+      }
     }
     
-    // Fall back to Critic's last message (critique of the story)
-    const criticMessages = messages.filter(
-      m => m.type === 'agent_message' && m.data.agent === 'Critic' && m.data.content?.trim()
-    );
-    if (criticMessages.length > 0) {
-      return criticMessages[criticMessages.length - 1].data.content || '';
+    // Try generation_complete result_summary as fallback
+    const completeEvent = messages.find(m => m.type === 'generation_complete');
+    if (completeEvent?.data.result_summary) {
+      // Try to extract story text from result_summary too
+      const extracted = extractStoryText(
+        typeof completeEvent.data.result_summary === 'string' 
+          ? completeEvent.data.result_summary 
+          : JSON.stringify(completeEvent.data.result_summary),
+        'other'
+      );
+      if (extracted) return extracted;
+      return typeof completeEvent.data.result_summary === 'string'
+        ? completeEvent.data.result_summary
+        : JSON.stringify(completeEvent.data.result_summary, null, 2);
     }
     
-    // Fall back to last substantial agent message
+    // Fall back to last substantial agent message (extract story text if possible)
     const agentMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.content?.trim()
     );
     if (agentMessages.length > 0) {
-      return agentMessages[agentMessages.length - 1].data.content || '';
-    }
-    
-    // Last resort: try phase_complete events (but prefer later phases)
-    const phaseCompleteEvents = messages.filter(m => m.type === 'phase_complete' && m.data.result);
-    if (phaseCompleteEvents.length > 0) {
-      // Take the last phase_complete event (most recent phase)
-      const phaseComplete = phaseCompleteEvents[phaseCompleteEvents.length - 1];
-      const result = phaseComplete.data.result;
-      if (typeof result === 'object' && result !== null) {
-        return JSON.stringify(result, null, 2);
-      }
-      return String(result);
+      const lastMsg = agentMessages[agentMessages.length - 1];
+      const extracted = extractStoryText(lastMsg.data.content || '', 'other');
+      if (extracted) return extracted;
+      return lastMsg.data.content || '';
     }
     
     return '';
