@@ -22,7 +22,7 @@ class SupabasePersistenceService:
             supabase_key: Supabase service role key (for server-side operations)
         """
         self.supabase_url = supabase_url or os.getenv("SUPABASE_URL")
-        self.supabase_key = supabase_key or os.getenv("SUPABASE_SERVICE_KEY")
+        self.supabase_key = supabase_key or os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
         self.client = None
         self._connected = False
 
