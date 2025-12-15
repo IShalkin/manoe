@@ -143,24 +143,60 @@ class StorytellerGroupChat:
         # Initialize agents
         self._initialize_agents()
 
-    async def initialize_memory(self, openai_api_key: Optional[str] = None) -> bool:
+    async def initialize_memory(
+        self,
+        openai_api_key: Optional[str] = None,
+        gemini_api_key: Optional[str] = None,
+        prefer_local: bool = False,
+    ) -> bool:
         """Initialize Qdrant memory service for character/worldbuilding storage.
 
+        Supports multiple embedding providers with automatic fallback:
+        1. OpenAI (if API key provided) - best quality, 1536 dimensions
+        2. Gemini (if API key provided) - good quality, 768 dimensions
+        3. Local fastembed (no key required) - 384 dimensions
+
         Args:
-            openai_api_key: OpenAI API key for generating embeddings
+            openai_api_key: OpenAI API key for embeddings (highest priority)
+            gemini_api_key: Gemini API key for embeddings (second priority)
+            prefer_local: If True, use local embeddings even if API keys available
 
         Returns:
             True if memory was initialized successfully, False otherwise
         """
-        api_key = openai_api_key or self._openai_api_key
-        if not api_key:
-            self._emit_event("memory_init", {"status": "skipped", "reason": "no_api_key"})
-            return False
+        openai_key = openai_api_key or self._openai_api_key
+
+        # Try to get Gemini key from config if not provided
+        gemini_key = gemini_api_key
+        if not gemini_key and self.config.gemini:
+            try:
+                gemini_key = self.config.gemini.api_key.get_secret_value()
+            except Exception:
+                pass
 
         try:
             self.qdrant_memory = QdrantMemoryService(url=self._qdrant_url)
-            await self.qdrant_memory.connect(openai_api_key=api_key)
-            self._emit_event("memory_init", {"status": "connected", "url": self._qdrant_url})
+            await self.qdrant_memory.connect(
+                openai_api_key=openai_key,
+                gemini_api_key=gemini_key,
+                prefer_local=prefer_local,
+            )
+
+            # Get embedding provider info for the event
+            provider_info = {}
+            if self.qdrant_memory.embedding_provider:
+                info = self.qdrant_memory.embedding_provider.info
+                provider_info = {
+                    "provider_type": info.provider_type.value,
+                    "model_name": info.model_name,
+                    "dimension": info.dimension,
+                }
+
+            self._emit_event("memory_init", {
+                "status": "connected",
+                "url": self._qdrant_url,
+                **provider_info,
+            })
             return True
         except Exception as e:
             self._emit_event("memory_init", {"status": "failed", "error": str(e)})
@@ -484,23 +520,23 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         """
         if not self.pause_check_callback:
             return True
-        
+
         # Check if paused - wait until resumed
         is_paused = self.pause_check_callback()
         if is_paused:
             self._emit_event("pause_wait_start", {
                 "message": "Generation paused, waiting for resume...",
             })
-        
+
         while self.pause_check_callback():
             # Wait a bit before checking again
             await asyncio.sleep(1)
-        
+
         if is_paused:
             self._emit_event("pause_wait_end", {
                 "message": "Generation resumed, continuing...",
             })
-        
+
         return True
 
     def _emit_event(self, event_type: str, data: Dict[str, Any]) -> None:
@@ -530,7 +566,7 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         """Call an agent and get its response."""
         # Check pause before every agent call for responsive pause behavior
         await self._check_pause()
-        
+
         messages = [{"role": "system", "content": agent["system_prompt"]}]
 
         if conversation_history:
@@ -1290,34 +1326,34 @@ IMPORTANT: Use these pre-planned sensory details to enrich your scene. These hav
 """
             if sensory_blueprint.get("visual_palette"):
                 visual = sensory_blueprint["visual_palette"]
-                sensory_str += f"**Visual Palette:**\n"
+                sensory_str += "**Visual Palette:**\n"
                 sensory_str += f"- Dominant Colors: {visual.get('dominant_colors', 'N/A')}\n"
                 sensory_str += f"- Lighting: {visual.get('lighting', 'N/A')}\n"
                 sensory_str += f"- Key Visual Elements: {visual.get('key_elements', 'N/A')}\n\n"
-            
+
             if sensory_blueprint.get("soundscape"):
                 sound = sensory_blueprint["soundscape"]
-                sensory_str += f"**Soundscape:**\n"
+                sensory_str += "**Soundscape:**\n"
                 sensory_str += f"- Ambient Sounds: {sound.get('ambient', 'N/A')}\n"
                 sensory_str += f"- Character Sounds: {sound.get('character_sounds', 'N/A')}\n"
                 sensory_str += f"- Silence Moments: {sound.get('silence_moments', 'N/A')}\n\n"
-            
+
             if sensory_blueprint.get("tactile_elements"):
                 tactile = sensory_blueprint["tactile_elements"]
-                sensory_str += f"**Tactile Elements:**\n"
+                sensory_str += "**Tactile Elements:**\n"
                 sensory_str += f"- Textures: {tactile.get('textures', 'N/A')}\n"
                 sensory_str += f"- Temperature: {tactile.get('temperature', 'N/A')}\n"
                 sensory_str += f"- Physical Sensations: {tactile.get('physical_sensations', 'N/A')}\n\n"
-            
+
             if sensory_blueprint.get("olfactory_gustatory"):
                 smell_taste = sensory_blueprint["olfactory_gustatory"]
-                sensory_str += f"**Smell & Taste:**\n"
+                sensory_str += "**Smell & Taste:**\n"
                 sensory_str += f"- Scents: {smell_taste.get('scents', 'N/A')}\n"
                 sensory_str += f"- Tastes: {smell_taste.get('tastes', 'N/A')}\n\n"
-            
+
             if sensory_blueprint.get("internal_sensations"):
                 internal = sensory_blueprint["internal_sensations"]
-                sensory_str += f"**Internal Sensations (Character POV):**\n"
+                sensory_str += "**Internal Sensations (Character POV):**\n"
                 sensory_str += f"- Physical: {internal.get('physical', 'N/A')}\n"
                 sensory_str += f"- Emotional: {internal.get('emotional', 'N/A')}\n\n"
 
@@ -1333,31 +1369,31 @@ IMPORTANT: Use these pre-designed subtext layers. Remember: show, don't tell. Mo
             if subtext_design.get("iceberg_ratio"):
                 ratio = subtext_design["iceberg_ratio"]
                 subtext_str += f"**Iceberg Ratio Target:** {ratio.get('explicit_percentage', 40)}% explicit / {ratio.get('implicit_percentage', 60)}% implicit\n\n"
-            
+
             if subtext_design.get("dialogue_subtext"):
                 dialogue_sub = subtext_design["dialogue_subtext"]
-                subtext_str += f"**Dialogue Subtext Mapping:**\n"
+                subtext_str += "**Dialogue Subtext Mapping:**\n"
                 for entry in dialogue_sub if isinstance(dialogue_sub, list) else [dialogue_sub]:
                     if isinstance(entry, dict):
                         subtext_str += f"- Surface: \"{entry.get('surface_meaning', 'N/A')}\" → Hidden: \"{entry.get('hidden_meaning', 'N/A')}\"\n"
                 subtext_str += "\n"
-            
+
             if subtext_design.get("behavioral_subtext"):
                 behavioral = subtext_design["behavioral_subtext"]
-                subtext_str += f"**Behavioral Subtext:**\n"
+                subtext_str += "**Behavioral Subtext:**\n"
                 for entry in behavioral if isinstance(behavioral, list) else [behavioral]:
                     if isinstance(entry, dict):
                         subtext_str += f"- Action: \"{entry.get('action', 'N/A')}\" reveals \"{entry.get('hidden_emotion', 'N/A')}\"\n"
                 subtext_str += "\n"
-            
+
             if subtext_design.get("environmental_subtext"):
                 env_sub = subtext_design["environmental_subtext"]
-                subtext_str += f"**Environmental Subtext:**\n"
+                subtext_str += "**Environmental Subtext:**\n"
                 subtext_str += f"- {env_sub if isinstance(env_sub, str) else json.dumps(env_sub)}\n\n"
-            
+
             if subtext_design.get("secret_motivations"):
                 secrets = subtext_design["secret_motivations"]
-                subtext_str += f"**Secret Motivations (Never State Directly):**\n"
+                subtext_str += "**Secret Motivations (Never State Directly):**\n"
                 for entry in secrets if isinstance(secrets, list) else [secrets]:
                     if isinstance(entry, dict):
                         subtext_str += f"- {entry.get('character', 'Character')}: {entry.get('motivation', 'N/A')}\n"
@@ -3055,12 +3091,12 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     if isinstance(phase_data, dict) and phase_data.get("comment"):
                         effective_change_request = phase_data["comment"]
                         break
-        
+
         # Limit change_request length to prevent prompt bloat
         if effective_change_request:
             if len(effective_change_request) > 2000:
                 effective_change_request = effective_change_request[:2000] + "..."
-        
+
         # Use effective_change_request for all downstream phases
         change_request = effective_change_request
         if scene_regen_mode:
@@ -3076,7 +3112,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Generate a unique project ID for memory storage (Qdrant)
         memory_project_id = project.seed_idea[:20].replace(" ", "_") + "_" + str(hash(project.seed_idea))[:8]
-        
+
         # Use Supabase project UUID for persistence if provided, otherwise fall back to memory_project_id
         # Note: Supabase persistence requires a valid UUID that exists in the projects table
         persistence_project_id = supabase_project_id if supabase_project_id else memory_project_id
@@ -3182,7 +3218,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 self._emit_event("phase_overridden", {"phase": "genesis", "reason": "user_edited_content"})
                 # Emit agent message with the edited content
                 self._emit_agent_message("Architect", "locked", json.dumps(edited) if isinstance(edited, dict) else str(edited))
-        
+
         if not genesis_result:
             await self._check_pause()  # Pause checkpoint
             genesis_result = await self.run_genesis_phase(project)
@@ -3350,7 +3386,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Phase 6: Drafting (all scenes or selective regeneration)
         drafts = []
         previous_drafts = None
-        
+
         # Get previous drafts for scene-level regeneration or phase skip
         if should_skip_phase("drafting") or scene_regen_mode:
             previous_drafts = get_previous_artifact("drafting", "drafts")
@@ -3362,21 +3398,21 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Helper to get continuity context from adjacent scenes
         def get_continuity_context(scene_index: int, all_drafts: List[Dict[str, Any]]) -> Dict[str, str]:
             context = {"previous_scene_summary": "N/A", "next_scene_summary": "N/A"}
-            
+
             # Get previous scene summary
             if scene_index > 0 and scene_index - 1 < len(all_drafts):
                 prev_draft = all_drafts[scene_index - 1]
                 if prev_draft and prev_draft.get("draft"):
                     prev_content = prev_draft["draft"].get("narrative_content", "")
                     context["previous_scene_summary"] = prev_content[:500] + "..." if prev_content else "N/A"
-            
+
             # Get next scene summary (for continuity with existing scenes)
             if scene_index + 1 < len(all_drafts):
                 next_draft = all_drafts[scene_index + 1]
                 if next_draft and next_draft.get("draft"):
                     next_content = next_draft["draft"].get("narrative_content", "")
                     context["next_scene_summary"] = next_content[:500] + "..." if next_content else "N/A"
-            
+
             return context
 
         if not (should_skip_phase("drafting") and not scene_regen_mode):
@@ -3386,11 +3422,11 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 # Ensure drafts list is long enough for all scenes
                 while len(drafts) < len(scenes):
                     drafts.append({})
-            
+
             previous_summary = "N/A"
             for i, scene in enumerate(scenes):
                 scene_number = i + 1
-                
+
                 # Check if this scene should be regenerated or kept
                 if scene_regen_mode and scenes_to_regenerate and scene_number not in scenes_to_regenerate:
                     # Keep existing scene, just update previous_summary for continuity
@@ -3404,12 +3440,12 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                         # Store individual scene artifact
                         await store_scene(scene_number, draft, drafts[i].get("polished"))
                     continue
-                
+
                 await self._check_pause()  # Pause checkpoint before each scene
-                
+
                 # Get continuity context from adjacent scenes
                 continuity = get_continuity_context(i, drafts)
-                
+
                 # Retrieve relevant characters from memory for this scene
                 scene_context = scene.get("title", "") + " " + scene.get("conflict", "")
                 relevant_characters = await self._retrieve_relevant_characters(memory_project_id, scene_context, limit=3)
@@ -3438,7 +3474,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     memory_ctx["relevant_characters"] = relevant_characters
                 if relevant_scenes:
                     memory_ctx["relevant_scenes"] = relevant_scenes
-                
+
                 # Add next scene context for continuity in selective regeneration
                 if scene_regen_mode and continuity["next_scene_summary"] != "N/A":
                     memory_ctx["next_scene_context"] = continuity["next_scene_summary"]
@@ -3534,7 +3570,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Phase 7: Polish (all scenes or selective regeneration)
         polished_drafts = []
         previous_polish = None
-        
+
         # Get previous polish for scene-level regeneration or phase skip
         if should_skip_phase("polish") or scene_regen_mode:
             previous_polish = get_previous_artifact("polish", "polished")
@@ -3550,10 +3586,10 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 # Ensure polished_drafts list is long enough for all scenes
                 while len(polished_drafts) < len(drafts):
                     polished_drafts.append({})
-            
+
             for i, draft_result in enumerate(drafts):
                 scene_number = i + 1
-                
+
                 # Check if this scene should be polished or kept
                 if scene_regen_mode and scenes_to_regenerate and scene_number not in scenes_to_regenerate:
                     # Keep existing polished scene
@@ -3563,7 +3599,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                             "reason": "not_in_regeneration_list"
                         })
                     continue
-                
+
                 await self._check_pause()  # Pause checkpoint before each polish
                 if draft_result.get("draft"):
                     polish_result = await self.run_polish_phase(
@@ -3574,13 +3610,13 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                         critique=draft_result.get("critique"),
                         change_request=change_request,
                     )
-                    
+
                     # Update or append polish result
                     if scene_regen_mode and i < len(polished_drafts):
                         polished_drafts[i] = polish_result
                     else:
                         polished_drafts.append(polish_result)
-                    
+
                     # Update scene artifact with polished content
                     if persistence_service and run_id and persistence_service.is_connected:
                         await persistence_service.update_scene_polished(
