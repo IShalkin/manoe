@@ -136,8 +136,10 @@ interface ProjectFormData {
   name: string;
   seedIdea: string;
   moralCompass: MoralCompass;
+  customMoralSystem: string;
   targetAudience: string;
   themes: string;
+  toneStyleReferences: string;
   generationMode: GenerationMode;
   maxRevisions: number;
   narrativePov: NarrativePOV;
@@ -162,8 +164,10 @@ export function DashboardPage() {
       name: '',
       seedIdea: '',
       moralCompass: 'ambiguous',
+      customMoralSystem: '',
       targetAudience: '',
       themes: '',
+      toneStyleReferences: '',
       generationMode: 'demo',
       maxRevisions: 2,
       narrativePov: 'third_person_limited',
@@ -177,8 +181,10 @@ export function DashboardPage() {
         name: '',
         seedIdea: '',
         moralCompass: 'ambiguous',
+        customMoralSystem: '',
         targetAudience: '',
         themes: '',
+        toneStyleReferences: '',
         generationMode: 'demo',
         maxRevisions: 2,
         narrativePov: 'third_person_limited',
@@ -195,8 +201,10 @@ export function DashboardPage() {
         name: project.name,
         seedIdea: project.seedIdea,
         moralCompass: (project.moralCompass as MoralCompass) || 'ambiguous',
+        customMoralSystem: '',
         targetAudience: project.targetAudience,
         themes: project.themes,
+        toneStyleReferences: '',
         generationMode: 'demo',
         maxRevisions: 2,
         narrativePov: 'third_person_limited',
@@ -256,8 +264,10 @@ export function DashboardPage() {
                   api_key: apiKey,
                   seed_idea: formData.seedIdea,
                   moral_compass: formData.moralCompass,
+                  custom_moral_system: formData.moralCompass === 'user_defined' ? formData.customMoralSystem : undefined,
                   target_audience: formData.targetAudience || undefined,
                   themes: formData.themes || undefined,
+                  tone_style_references: formData.toneStyleReferences || undefined,
                   generation_mode: formData.generationMode,
                   max_revisions: formData.maxRevisions,
                   narrator_config: {
@@ -432,6 +442,7 @@ export function DashboardPage() {
                     { value: 'unethical', label: 'Unethical', desc: 'Darkness, taboos, moral ambiguity' },
                     { value: 'amoral', label: 'Amoral', desc: 'Non-judgmental observation' },
                     { value: 'ambiguous', label: 'Ambiguous', desc: 'Complex moral dilemmas' },
+                    { value: 'user_defined', label: 'User Defined', desc: 'Custom moral framework' },
                   ].map((option) => (
                     <button
                       key={option.value}
@@ -449,6 +460,22 @@ export function DashboardPage() {
                   ))}
                 </div>
               </div>
+
+              {formData.moralCompass === 'user_defined' && (
+                <div>
+                  <label className="block text-sm font-medium mb-2">Custom Moral System</label>
+                  <textarea
+                    value={formData.customMoralSystem}
+                    onChange={(e) => setFormData({ ...formData, customMoralSystem: e.target.value })}
+                    placeholder="Describe your custom moral framework. E.g., 'A world where loyalty to family supersedes all other moral considerations, even at the cost of broader societal harm.'"
+                    rows={3}
+                    className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-primary-500 transition-colors resize-none"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Define the moral rules and ethical boundaries for your narrative
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium mb-2">Target Audience</label>
@@ -470,6 +497,20 @@ export function DashboardPage() {
                                 placeholder="Identity, redemption, the nature of evil"
                                 className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-primary-500 transition-colors"
                               />
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium mb-2">Tone & Style References</label>
+                              <input
+                                type="text"
+                                value={formData.toneStyleReferences}
+                                onChange={(e) => setFormData({ ...formData, toneStyleReferences: e.target.value })}
+                                placeholder="Palahniuk-esque cynicism, Cormac McCarthy's sparse prose, Kafka's absurdism"
+                                className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-primary-500 transition-colors"
+                              />
+                              <p className="text-xs text-slate-500 mt-1">
+                                Reference authors, styles, or tonal qualities to guide the narrative voice
+                              </p>
                             </div>
 
                             {/* Narrator Design Section */}
