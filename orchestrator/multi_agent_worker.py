@@ -229,6 +229,20 @@ class MultiAgentWorker:
                 if constraints and constraints.get("edit_comment"):
                     change_request = constraints["edit_comment"]
                 
+                # Debug event to verify constraints are being received
+                await self.redis_streams.publish_event(
+                    run_id,
+                    "debug_constraints_received",
+                    {
+                        "constraints_present": constraints is not None,
+                        "edit_comment_present": bool(constraints and constraints.get("edit_comment")),
+                        "edit_comment_preview": (constraints.get("edit_comment", "")[:100] + "...") if constraints and constraints.get("edit_comment") and len(constraints.get("edit_comment", "")) > 100 else (constraints.get("edit_comment") if constraints else None),
+                        "edited_content_present": edited_content is not None,
+                        "start_from_phase": start_from_phase,
+                        "change_request_extracted": change_request is not None,
+                    }
+                )
+                
                 result = await group_chat.run_full_generation(
                     project,
                     target_word_count=target_word_count,
