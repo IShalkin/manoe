@@ -401,6 +401,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const [isComplete, setIsComplete] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -479,6 +480,41 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       setIsCancelling(false);
     }
   }, [runId, orchestratorUrl, isCancelling, isComplete]);
+
+  // Handle resume generation
+  const handleResumeGeneration = useCallback(async () => {
+    if (!runId || !orchestratorUrl || isResuming || !isCancelled) return;
+    
+    setIsResuming(true);
+    
+    try {
+      // Call resume endpoint
+      const response = await fetch(`${orchestratorUrl}/runs/${runId}/resume`, {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        setIsCancelled(false);
+        setCurrentPhase('Resuming...');
+        
+        // Reconnect to SSE stream
+        const eventSource = new EventSource(`${orchestratorUrl}/runs/${runId}/events`);
+        eventSourceRef.current = eventSource;
+        
+        eventSource.onopen = () => {
+          setIsConnected(true);
+        };
+        
+        eventSource.onerror = () => {
+          setIsConnected(false);
+        };
+      }
+    } catch (err) {
+      console.error('Failed to resume generation:', err);
+    } finally {
+      setIsResuming(false);
+    }
+  }, [runId, orchestratorUrl, isResuming, isCancelled]);
 
   const getAgentContent = useCallback((agent: string): string => {
     if (projectResult?.edits?.[agent]) {
@@ -932,6 +968,35 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
                   </svg>
                   Stop
+                </>
+              )}
+            </button>
+          )}
+          {isCancelled && !isComplete && (
+            <button 
+              onClick={handleResumeGeneration}
+              disabled={isResuming}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                isResuming 
+                  ? 'bg-slate-700 text-slate-500 cursor-not-allowed' 
+                  : 'bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30'
+              }`}
+            >
+              {isResuming ? (
+                <>
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Resuming...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Resume
                 </>
               )}
             </button>
