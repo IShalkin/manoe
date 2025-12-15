@@ -173,7 +173,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setLoadingModels(prev => ({ ...prev, [provider]: true }));
 
     try {
-      const response = await fetch('/api/models', {
+      // Use orchestrator API for dynamic model loading
+      const orchestratorUrl = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
+      const response = await fetch(`${orchestratorUrl}/models`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider, api_key: apiKey }),
