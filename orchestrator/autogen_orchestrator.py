@@ -1245,8 +1245,6 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             openai_api_key: OpenAI API key for embeddings (enables Qdrant memory)
             max_revisions: Maximum Writer↔Critic revision cycles per scene (1-5)
         """
-        # Set max_revisions in state
-        self.state.max_revisions = max_revisions
         results = {
             "project": project.model_dump(),
             "phases": {},
@@ -1261,8 +1259,12 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             memory_initialized = await self.initialize_memory(openai_api_key)
             results["memory_enabled"] = memory_initialized
 
-        # Phase 1: Genesis
+        # Phase 1: Genesis (this initializes self.state)
         genesis_result = await self.run_genesis_phase(project)
+        
+        # Set max_revisions in state AFTER genesis phase creates it
+        if self.state:
+            self.state.max_revisions = max_revisions
         results["phases"]["genesis"] = genesis_result
 
         if not genesis_result.get("narrative_possibility"):
