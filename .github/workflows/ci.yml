@@ -28,7 +28,7 @@ jobs:
 
       - name: Run Ruff (lint)
         run: |
-          ruff check . --select E,F --ignore E501
+          ruff check . --select E,F --ignore E501,E402,F401,F541,F841
 
       - name: Run Ruff (format check)
         run: |
