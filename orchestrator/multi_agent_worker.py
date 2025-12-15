@@ -78,6 +78,7 @@ class MultiAgentWorker:
         target_word_count: int = 50000,
         estimated_scenes: int = 20,
         preferred_structure: str = "ThreeAct",
+        max_revisions: int = 2,
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -172,6 +173,7 @@ class MultiAgentWorker:
                     estimated_scenes=estimated_scenes,
                     preferred_structure=preferred_structure,
                     openai_api_key=openai_key,
+                    max_revisions=max_revisions,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow
@@ -257,6 +259,7 @@ class GenerateRequest(BaseModel):
     target_word_count: int = 50000  # For full mode
     estimated_scenes: int = 20  # For full mode
     preferred_structure: str = "ThreeAct"  # For full mode
+    max_revisions: int = 2  # Maximum Writer↔Critic revision cycles per scene (1-5)
 
 
 class GenerateResponse(BaseModel):
@@ -325,6 +328,7 @@ async def generate(request: GenerateRequest):
         target_word_count=request.target_word_count,
         estimated_scenes=request.estimated_scenes,
         preferred_structure=request.preferred_structure,
+        max_revisions=request.max_revisions,
     ))
 
     return GenerateResponse(
