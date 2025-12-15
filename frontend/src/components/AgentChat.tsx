@@ -93,6 +93,90 @@ function formatAnyAsMarkdown(parsed: unknown): string {
   return String(parsed);
 }
 
+// Extract clean story text from agent content (Polish or Writer)
+function extractStoryText(content: string, agentType: 'Polish' | 'Writer' | 'other'): string {
+  if (!content || typeof content !== 'string') {
+    return '';
+  }
+
+  const trimmed = content.trim();
+  
+  // Try to parse as JSON first
+  let parsed: unknown = null;
+  
+  // Check for ```json code blocks
+  if (trimmed.includes('```json')) {
+    const jsonMatch = trimmed.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      parsed = tolerantJsonParse(jsonMatch[1]);
+    }
+  }
+  
+  // Try direct JSON parse
+  if (parsed === null) {
+    parsed = tolerantJsonParse(trimmed);
+  }
+  
+  // Try to extract JSON from string
+  if (parsed === null && (trimmed.includes('{') || trimmed.includes('['))) {
+    const extracted = extractJsonFromString(trimmed);
+    if (extracted) {
+      parsed = tolerantJsonParse(extracted);
+    }
+  }
+  
+  // If we have a parsed object, extract the story text
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    
+    // For Polish agent, prefer polished_content
+    if (agentType === 'Polish') {
+      if (typeof obj.polished_content === 'string' && obj.polished_content.trim()) {
+        return obj.polished_content;
+      }
+      // Fallback fields for Polish
+      if (typeof obj.content === 'string' && obj.content.trim()) {
+        return obj.content;
+      }
+    }
+    
+    // For Writer agent, prefer narrative_content
+    if (agentType === 'Writer') {
+      if (typeof obj.narrative_content === 'string' && obj.narrative_content.trim()) {
+        return obj.narrative_content;
+      }
+      if (typeof obj.scene_content === 'string' && obj.scene_content.trim()) {
+        return obj.scene_content;
+      }
+      if (typeof obj.content === 'string' && obj.content.trim()) {
+        return obj.content;
+      }
+    }
+    
+    // Generic fallbacks for any agent
+    if (typeof obj.polished_content === 'string' && obj.polished_content.trim()) {
+      return obj.polished_content;
+    }
+    if (typeof obj.narrative_content === 'string' && obj.narrative_content.trim()) {
+      return obj.narrative_content;
+    }
+    if (typeof obj.scene_content === 'string' && obj.scene_content.trim()) {
+      return obj.scene_content;
+    }
+    if (typeof obj.content === 'string' && obj.content.trim()) {
+      return obj.content;
+    }
+  }
+  
+  // If content doesn't look like JSON, return as-is (might be plain text)
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[') && !trimmed.includes('```json')) {
+    return trimmed;
+  }
+  
+  // Last resort: return the formatted content (will show JSON as markdown)
+  return '';
+}
+
 function extractJsonFromString(content: string): string | null {
   // Try to find balanced JSON object or array
   const trimmed = content.trim();
@@ -201,15 +285,31 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
     const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     
     if (Array.isArray(value)) {
-      lines.push(`${indent}**${formattedKey}:**`);
-      lines.push('');  // Add blank line before list for proper markdown
-      value.forEach((item, i) => {
-        if (typeof item === 'object' && item !== null) {
-          lines.push(`${indent}${i + 1}. ${formatObjectInline(item as Record<string, unknown>)}`);
-        } else {
-          lines.push(`${indent}${i + 1}. ${item}`);
-        }
+      // Filter out empty/null items before rendering
+      const filteredItems = value.filter(item => {
+        if (item === null || item === undefined) return false;
+        if (typeof item === 'string' && item.trim() === '') return false;
+        if (typeof item === 'object' && Object.keys(item).length === 0) return false;
+        return true;
       });
+      
+      if (filteredItems.length > 0) {
+        lines.push(`${indent}**${formattedKey}:**`);
+        lines.push('');  // Add blank line before list for proper markdown
+        filteredItems.forEach((item, i) => {
+          if (typeof item === 'object' && item !== null) {
+            const inlineText = formatObjectInline(item as Record<string, unknown>);
+            if (inlineText.trim()) {
+              lines.push(`${indent}${i + 1}. ${inlineText}`);
+            }
+          } else {
+            const itemText = String(item).trim();
+            if (itemText) {
+              lines.push(`${indent}${i + 1}. ${itemText}`);
+            }
+          }
+        });
+      }
     } else if (typeof value === 'object' && value !== null) {
       lines.push(`${indent}**${formattedKey}:**`);
       lines.push(formatJsonAsMarkdown(value as Record<string, unknown>, depth + 1));
@@ -332,6 +432,25 @@ const AGENT_DEPENDENCIES: Record<AgentName, AgentName[]> = {
   Strategist: ['Writer', 'Critic'],
   Writer: ['Critic'],
   Critic: ['Writer', 'Critic'],
+};
+
+const AGENT_TO_PHASE: Record<string, string> = {
+  'Architect': 'Genesis',
+  'Profiler': 'Characters',
+  'Worldbuilder': 'Worldbuilding',
+  'Strategist': 'Outlining',
+  'Writer': 'Drafting',
+  'Critic': 'Polish',
+  'Polish': 'Polish',
+};
+
+const PHASE_ORDER = ['Genesis', 'Characters', 'Worldbuilding', 'Outlining', 'Advanced Planning', 'Drafting', 'Polish'];
+
+const getPhasesToRegenerate = (editedAgent: string): string[] => {
+  const startPhase = AGENT_TO_PHASE[editedAgent] || 'Genesis';
+  const startIndex = PHASE_ORDER.indexOf(startPhase);
+  if (startIndex === -1) return PHASE_ORDER;
+  return PHASE_ORDER.slice(startIndex);
 };
 
 const AGENT_COLORS: Record<string, string> = {
@@ -843,41 +962,64 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     return null;
   }, [agentStates]);
 
-  // Extract final result from messages
+  // Extract final result from messages - prefer clean story text over JSON
   const finalResult = useMemo(() => {
-    // Try to get from any phase_complete event with result
-    const phaseCompleteEvents = messages.filter(m => m.type === 'phase_complete' && m.data.result);
-    if (phaseCompleteEvents.length > 0) {
-      // Prefer genesis phase, but take any phase_complete with result
-      const genesisComplete = phaseCompleteEvents.find(m => m.data.phase === 'genesis');
-      const phaseComplete = genesisComplete || phaseCompleteEvents[phaseCompleteEvents.length - 1];
-      const result = phaseComplete.data.result;
-      if (typeof result === 'object' && result !== null) {
-        return JSON.stringify(result, null, 2);
+    // Collect all Polish agent messages and extract clean story text from each
+    const polishMessages = messages.filter(
+      m => m.type === 'agent_message' && m.data.agent === 'Polish' && m.data.content?.trim()
+    );
+    if (polishMessages.length > 0) {
+      // Extract story text from all Polish messages and concatenate
+      const storyTexts = polishMessages
+        .map(m => extractStoryText(m.data.content || '', 'Polish'))
+        .filter(text => text.trim());
+      
+      if (storyTexts.length > 0) {
+        // Join multiple scenes with separator
+        return storyTexts.join('\n\n---\n\n');
       }
-      return String(result);
     }
     
-    // Try generation_complete result_summary
-    const completeEvent = messages.find(m => m.type === 'generation_complete');
-    if (completeEvent?.data.result_summary) {
-      return completeEvent.data.result_summary;
-    }
-    
-    // Prefer Writer's last message as the "final result" (the actual story content)
+    // Fall back to Writer's messages (draft story content)
     const writerMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
     );
     if (writerMessages.length > 0) {
-      return writerMessages[writerMessages.length - 1].data.content || '';
+      // Extract story text from all Writer messages and concatenate
+      const storyTexts = writerMessages
+        .map(m => extractStoryText(m.data.content || '', 'Writer'))
+        .filter(text => text.trim());
+      
+      if (storyTexts.length > 0) {
+        return storyTexts.join('\n\n---\n\n');
+      }
     }
     
-    // Fall back to last substantial agent message
+    // Try generation_complete result_summary as fallback
+    const completeEvent = messages.find(m => m.type === 'generation_complete');
+    if (completeEvent?.data.result_summary) {
+      // Try to extract story text from result_summary too
+      const extracted = extractStoryText(
+        typeof completeEvent.data.result_summary === 'string' 
+          ? completeEvent.data.result_summary 
+          : JSON.stringify(completeEvent.data.result_summary),
+        'other'
+      );
+      if (extracted) return extracted;
+      return typeof completeEvent.data.result_summary === 'string'
+        ? completeEvent.data.result_summary
+        : JSON.stringify(completeEvent.data.result_summary, null, 2);
+    }
+    
+    // Fall back to last substantial agent message (extract story text if possible)
     const agentMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.content?.trim()
     );
     if (agentMessages.length > 0) {
-      return agentMessages[agentMessages.length - 1].data.content || '';
+      const lastMsg = agentMessages[agentMessages.length - 1];
+      const extracted = extractStoryText(lastMsg.data.content || '', 'other');
+      if (extracted) return extracted;
+      return lastMsg.data.content || '';
     }
     
     return '';
@@ -1344,11 +1486,19 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                 You edited <span className={AGENT_TEXT_COLORS[pendingEdit.agent]}>{pendingEdit.agent}</span>. 
                 This will affect downstream agents.
               </p>
-              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                <p className="text-xs text-amber-300">
-                  <strong>Note:</strong> Regeneration will start a new complete generation run. 
-                  Your edit will be used as context, but all scenes will be regenerated from scratch.
+              <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                <p className="text-xs text-blue-300">
+                  <strong>Phase-Based Regeneration:</strong> Only phases from <span className="font-semibold">{AGENT_TO_PHASE[pendingEdit.agent] || 'Genesis'}</span> onwards will be regenerated.
+                  Previous phases will be preserved from your last run.
                 </p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {getPhasesToRegenerate(pendingEdit.agent).map((phase, idx) => (
+                    <span key={phase} className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                      {idx > 0 && <span className="mr-1">→</span>}
+                      {phase}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
             

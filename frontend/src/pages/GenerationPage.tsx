@@ -48,6 +48,17 @@ export function GenerationPage() {
     }
   }, [project, runId, isStarting]);
 
+  // Map agent names to phases for phase-based regeneration
+  const AGENT_TO_PHASE: Record<string, string> = {
+    'Architect': 'genesis',
+    'Profiler': 'characters',
+    'Worldbuilder': 'worldbuilding',
+    'Strategist': 'outlining',
+    'Writer': 'drafting',
+    'Critic': 'polish',
+    'Polish': 'polish',
+  };
+
   // Handle regeneration with constraints from AgentChat
   const handleRegenerate = useCallback(async (constraints: RegenerationConstraints) => {
     if (!project || isRegenerating) return;
@@ -73,7 +84,19 @@ export function GenerationPage() {
         throw new Error(`No API key configured for ${agentConfig.provider}`);
       }
 
-      // Call orchestrator with constraints for partial regeneration
+      // Determine the phase to start from based on the edited agent
+      const startFromPhase = AGENT_TO_PHASE[constraints.editedAgent] || 'genesis';
+      
+      // Build edited content object with the agent's edited content
+      const editedContent: Record<string, unknown> = {};
+      if (constraints.editedAgent && constraints.editedContent) {
+        editedContent[startFromPhase] = {
+          content: constraints.editedContent,
+          comment: constraints.editComment,
+        };
+      }
+
+      // Call orchestrator with phase-based regeneration parameters
       const response = await fetch(`${ORCHESTRATOR_URL}/generate`, {
         method: 'POST',
         headers: {
@@ -95,6 +118,9 @@ export function GenerationPage() {
             locked_agents: constraints.lockedAgents,
             agents_to_regenerate: constraints.agentsToRegenerate,
           },
+          start_from_phase: startFromPhase,
+          previous_run_id: runId,
+          edited_content: editedContent,
         }),
       });
 
@@ -118,7 +144,7 @@ export function GenerationPage() {
     } finally {
       setIsRegenerating(false);
     }
-  }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration]);
+  }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration, runId]);
 
   // Handle updating project result (for persisting edits/locks)
   const handleUpdateResult = useCallback(async (result: ProjectResult) => {
