@@ -285,15 +285,31 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
     const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     
     if (Array.isArray(value)) {
-      lines.push(`${indent}**${formattedKey}:**`);
-      lines.push('');  // Add blank line before list for proper markdown
-      value.forEach((item, i) => {
-        if (typeof item === 'object' && item !== null) {
-          lines.push(`${indent}${i + 1}. ${formatObjectInline(item as Record<string, unknown>)}`);
-        } else {
-          lines.push(`${indent}${i + 1}. ${item}`);
-        }
+      // Filter out empty/null items before rendering
+      const filteredItems = value.filter(item => {
+        if (item === null || item === undefined) return false;
+        if (typeof item === 'string' && item.trim() === '') return false;
+        if (typeof item === 'object' && Object.keys(item).length === 0) return false;
+        return true;
       });
+      
+      if (filteredItems.length > 0) {
+        lines.push(`${indent}**${formattedKey}:**`);
+        lines.push('');  // Add blank line before list for proper markdown
+        filteredItems.forEach((item, i) => {
+          if (typeof item === 'object' && item !== null) {
+            const inlineText = formatObjectInline(item as Record<string, unknown>);
+            if (inlineText.trim()) {
+              lines.push(`${indent}${i + 1}. ${inlineText}`);
+            }
+          } else {
+            const itemText = String(item).trim();
+            if (itemText) {
+              lines.push(`${indent}${i + 1}. ${itemText}`);
+            }
+          }
+        });
+      }
     } else if (typeof value === 'object' && value !== null) {
       lines.push(`${indent}**${formattedKey}:**`);
       lines.push(formatJsonAsMarkdown(value as Record<string, unknown>, depth + 1));

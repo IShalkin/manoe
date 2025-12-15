@@ -463,9 +463,20 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
             return True
         
         # Check if paused - wait until resumed
+        is_paused = self.pause_check_callback()
+        if is_paused:
+            self._emit_event("pause_wait_start", {
+                "message": "Generation paused, waiting for resume...",
+            })
+        
         while self.pause_check_callback():
             # Wait a bit before checking again
             await asyncio.sleep(1)
+        
+        if is_paused:
+            self._emit_event("pause_wait_end", {
+                "message": "Generation resumed, continuing...",
+            })
         
         return True
 
