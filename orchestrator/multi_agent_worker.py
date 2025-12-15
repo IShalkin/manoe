@@ -164,9 +164,15 @@ class MultiAgentWorker:
 
             # Create group chat with event callback and user's config
             event_callback = self._create_event_callback(run_id)
+            
+            # Create pause check callback that checks if this run is paused
+            def pause_check_callback() -> bool:
+                return run_id in self._paused_runs
+            
             group_chat = StorytellerGroupChat(
                 config=request_config,
                 event_callback=event_callback,
+                pause_check_callback=pause_check_callback,
             )
 
             # Publish agent initialization event
