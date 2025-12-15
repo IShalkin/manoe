@@ -103,6 +103,8 @@ class MultiAgentWorker:
         start_from_phase: Optional[str] = None,
         previous_run_id: Optional[str] = None,
         edited_content: Optional[Dict[str, Any]] = None,
+        scenes_to_regenerate: Optional[List[int]] = None,
+        supabase_project_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -115,6 +117,7 @@ class MultiAgentWorker:
             start_from_phase: Phase to start from (for partial regeneration)
             previous_run_id: Run ID to load previous artifacts from
             edited_content: User-edited content to use instead of regenerating
+            scenes_to_regenerate: Optional list of scene numbers to regenerate (1-indexed)
 
         Returns:
             Generation results including all agent messages
@@ -220,6 +223,27 @@ class MultiAgentWorker:
                 # Full pipeline: Genesis → Characters → Worldbuilding → Outlining → Drafting with Writer↔Critic loop
                 # Pass OpenAI API key for Qdrant memory embeddings (only works with OpenAI provider)
                 openai_key = api_key if provider == "openai" else None
+                
+                # Extract change_request from constraints if available
+                # This is the "What did you change?" field from the frontend
+                change_request = None
+                if constraints and constraints.get("edit_comment"):
+                    change_request = constraints["edit_comment"]
+                
+                # Debug event to verify constraints are being received
+                await self.redis_streams.publish_event(
+                    run_id,
+                    "debug_constraints_received",
+                    {
+                        "constraints_present": constraints is not None,
+                        "edit_comment_present": bool(constraints and constraints.get("edit_comment")),
+                        "edit_comment_preview": (constraints.get("edit_comment", "")[:100] + "...") if constraints and constraints.get("edit_comment") and len(constraints.get("edit_comment", "")) > 100 else (constraints.get("edit_comment") if constraints else None),
+                        "edited_content_present": edited_content is not None,
+                        "start_from_phase": start_from_phase,
+                        "change_request_extracted": change_request is not None,
+                    }
+                )
+                
                 result = await group_chat.run_full_generation(
                     project,
                     target_word_count=target_word_count,
@@ -233,6 +257,10 @@ class MultiAgentWorker:
                     start_from_phase=start_from_phase,
                     previous_artifacts=previous_artifacts,
                     edited_content=edited_content,
+                    scenes_to_regenerate=scenes_to_regenerate,
+                    previous_run_id=previous_run_id,
+                    change_request=change_request,
+                    supabase_project_id=supabase_project_id,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow
@@ -333,6 +361,8 @@ class GenerateRequest(BaseModel):
     start_from_phase: Optional[str] = None  # Phase to start from (for phase-based regeneration)
     previous_run_id: Optional[str] = None  # Run ID to load previous artifacts from
     edited_content: Optional[Dict[str, Any]] = None  # User-edited content to use instead of regenerating
+    scenes_to_regenerate: Optional[List[int]] = None  # Scene numbers to regenerate (1-indexed)
+    supabase_project_id: Optional[str] = None  # Supabase project UUID for artifact persistence
 
 
 class GenerateResponse(BaseModel):
@@ -417,6 +447,8 @@ async def generate(request: GenerateRequest):
         start_from_phase=request.start_from_phase,
         previous_run_id=request.previous_run_id,
         edited_content=request.edited_content,
+        scenes_to_regenerate=request.scenes_to_regenerate,
+        supabase_project_id=request.supabase_project_id,
     ))
 
     # Track active run for cancellation support

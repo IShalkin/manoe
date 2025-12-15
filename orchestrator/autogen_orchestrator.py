@@ -3,6 +3,7 @@ AutoGen-based Storyteller Group Chat Orchestrator
 Implements multi-agent narrative generation with real agent communication.
 """
 
+import asyncio
 import json
 import os
 from dataclasses import dataclass, field
@@ -76,6 +77,27 @@ class GenerationState:
     revision_count: Dict[int, int] = field(default_factory=dict)
     messages: List[AgentMessage] = field(default_factory=list)
     max_revisions: int = 2
+
+
+def _safe_join(items: List[Any], separator: str = ", ") -> str:
+    """Safely join a list of items, converting dicts to strings if needed."""
+    if not items:
+        return ""
+    result = []
+    for item in items:
+        if isinstance(item, dict):
+            # Extract a meaningful string from the dict
+            if "name" in item:
+                result.append(str(item["name"]))
+            elif "title" in item:
+                result.append(str(item["title"]))
+            else:
+                result.append(json.dumps(item, ensure_ascii=False))
+        elif isinstance(item, str):
+            result.append(item)
+        else:
+            result.append(str(item))
+    return separator.join(result)
 
 
 class StorytellerGroupChat:
@@ -751,6 +773,7 @@ Output the revised narrative as valid JSON.
         narrative: Dict[str, Any],
         moral_compass: str,
         target_audience: str,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Characters phase with Profiler agent.
@@ -758,6 +781,23 @@ Output the revised narrative as valid JSON.
         """
         self.state.phase = GenerationPhase.CHARACTERS
         self._emit_event("phase_start", {"phase": "characters"})
+
+        # Build change request section if provided
+        change_request_section = ""
+        if change_request:
+            change_request_section = f"""
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
+
+---
+"""
 
         user_prompt = f"""
 ## Narrative Context
@@ -772,10 +812,10 @@ Output the revised narrative as valid JSON.
 
 **Target Audience:** {target_audience}
 
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
-**Required Character Types:** {", ".join(narrative.get("potential_characters", []))}
-
+**Required Character Types:** {_safe_join(narrative.get("potential_characters", []))}
+{change_request_section}
 ---
 
 Create detailed psychological profiles for each required character.
@@ -842,6 +882,7 @@ Now create the character profiles as a JSON array.
         characters: List[Dict[str, Any]],
         moral_compass: str,
         target_audience: str,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Worldbuilding phase with Worldbuilder agent.
@@ -867,9 +908,24 @@ Now create the character profiles as a JSON array.
             main_conflict=narrative.get("main_conflict", ""),
             moral_compass=moral_compass,
             target_audience=target_audience,
-            thematic_elements=", ".join(narrative.get("thematic_elements", [])),
+            thematic_elements=_safe_join(narrative.get("thematic_elements", [])),
             characters_summary=characters_summary,
         )
+
+        # Add change request section if provided
+        if change_request:
+            user_prompt += f"""
+
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
+"""
 
         worldbuilder_response = await self._call_agent(self.worldbuilder, user_prompt)
         worldbuilder_msg = self._parse_agent_message("Worldbuilder", worldbuilder_response)
@@ -945,6 +1001,7 @@ Now create the worldbuilding as valid JSON following the specified schema.
         estimated_scenes: int = 20,
         preferred_structure: str = "ThreeAct",
         worldbuilding: Optional[Dict[str, Any]] = None,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Outlining phase with Strategist agent.
@@ -996,7 +1053,7 @@ Now create the worldbuilding as valid JSON following the specified schema.
 
 **Moral Compass:** {moral_compass}
 
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
 ## Character Profiles
 
@@ -1017,6 +1074,21 @@ Create a detailed scene-by-scene outline that leverages the worldbuilding elemen
 Each scene should specify which locations and cultural elements are relevant.
 If character profiles don't support the plot, raise: "OBJECTION to Profiler: [issue] SUGGESTED_CHANGE: [suggestion]"
 Otherwise, output the outline as valid JSON.
+"""
+
+        # Add change request section if provided
+        if change_request:
+            user_prompt += f"""
+
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
 """
 
         strategist_response = await self._call_agent(self.strategist, user_prompt)
@@ -1088,6 +1160,7 @@ Now create the plot outline as valid JSON.
         previous_scene_summary: str = "N/A",
         memory_context: Optional[Dict[str, Any]] = None,
         narrator_config: Optional[Dict[str, Any]] = None,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Drafting phase with Writer↔Critic loop.
@@ -1224,6 +1297,21 @@ IMPORTANT: Write the entire scene strictly adhering to these narrator settings. 
 Write this scene following the outline. Output as valid JSON with narrative_content, sensory_details, dialogue_entries, etc.
 """
 
+        # Add change request section if provided
+        if change_request:
+            user_prompt += f"""
+
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
+"""
+
         # Writer creates initial draft
         writer_response = await self._call_agent(self.writer, user_prompt)
         writer_msg = self._parse_agent_message("Writer", writer_response)
@@ -1345,6 +1433,7 @@ Output the revised scene as valid JSON.
         characters: List[Dict[str, Any]],
         moral_compass: str,
         critique: Optional[Dict[str, Any]] = None,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the Final Polish phase on an approved scene draft.
@@ -1438,6 +1527,21 @@ Perform a final polish pass on this approved scene. Focus on:
 
 Make surgical improvements that elevate the prose without changing the meaning or voice.
 Output as valid JSON with the polished content and a summary of changes made.
+"""
+
+        # Add change request section if provided
+        if change_request:
+            polish_prompt += f"""
+
+---
+
+## IMPORTANT: User Change Request (MUST SATISFY)
+
+The user has requested the following changes that you MUST incorporate:
+
+> {change_request}
+
+Make sure your output reflects these requirements.
 """
 
         polish_response = await self._call_agent(self.polish, polish_prompt)
@@ -2126,7 +2230,7 @@ Output your revised scene as valid JSON with the same structure as the original 
 
 **Plot Summary:** {narrative.get("plot_summary", "")}
 **Main Conflict:** {narrative.get("main_conflict", "")}
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
 ---
 
@@ -2202,7 +2306,7 @@ Analyze each character and output the contradiction maps as valid JSON.
 ## Narrative Context
 
 **Plot Summary:** {narrative.get("plot_summary", "")}
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
 ---
 
@@ -2396,7 +2500,7 @@ Design the subtext layer for this scene as valid JSON.
 
 **Plot Summary:** {narrative.get("plot_summary", "")}
 **Main Conflict:** {narrative.get("main_conflict", "")}
-**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
 
 ## Characters
 
@@ -2769,10 +2873,14 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         start_from_phase: Optional[str] = None,
         previous_artifacts: Optional[Dict[str, Dict[str, Any]]] = None,
         edited_content: Optional[Dict[str, Any]] = None,
+        scenes_to_regenerate: Optional[List[int]] = None,
+        previous_run_id: Optional[str] = None,
+        change_request: Optional[str] = None,
+        supabase_project_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration
-        and support for phase-based regeneration.
+        and support for phase-based regeneration and scene-level selective regeneration.
 
         Args:
             project: Story project configuration
@@ -2789,6 +2897,9 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             previous_artifacts: Previously generated artifacts to use when resuming
             edited_content: User-edited content to use instead of regenerating
                 Format: {"phase": "characters", "content": {...}}
+            scenes_to_regenerate: Optional list of scene numbers to regenerate (1-indexed)
+                If provided, only these scenes will be regenerated while keeping others intact
+            previous_run_id: Run ID of the previous generation run (for loading existing scenes)
         """
         results = {
             "project": project.model_dump(),
@@ -2796,6 +2907,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             "memory_enabled": False,
             "run_id": run_id,
             "regeneration_mode": start_from_phase is not None,
+            "scene_regeneration_mode": scenes_to_regenerate is not None and len(scenes_to_regenerate) > 0,
         }
 
         # Phase order for determining what to skip/regenerate
@@ -2812,8 +2924,61 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 self._emit_event("regeneration_error", {"error": f"Unknown phase: {start_from_phase}"})
                 start_phase_index = 0
 
-        # Generate a unique project ID for memory storage
-        project_id = project.seed_idea[:20].replace(" ", "_") + "_" + str(hash(project.seed_idea))[:8]
+        # Scene-level regeneration mode
+        scene_regen_mode = scenes_to_regenerate is not None and len(scenes_to_regenerate) > 0
+
+        # Use change_request parameter if provided (from constraints.edit_comment)
+        # Otherwise, try to extract from edited_content (the "What did you change?" field)
+        # This will be passed to all regenerated phases as additional AI context
+        effective_change_request: Optional[str] = change_request
+        if not effective_change_request and edited_content:
+            # Check each phase for a comment field
+            for phase_name in ["genesis", "characters", "worldbuilding", "outlining", "drafting", "polish"]:
+                if phase_name in edited_content:
+                    phase_data = edited_content[phase_name]
+                    if isinstance(phase_data, dict) and phase_data.get("comment"):
+                        effective_change_request = phase_data["comment"]
+                        break
+        
+        # Limit change_request length to prevent prompt bloat and emit event
+        if effective_change_request:
+            if len(effective_change_request) > 2000:
+                effective_change_request = effective_change_request[:2000] + "..."
+            self._emit_event("change_request_detected", {
+                "source": "constraints" if change_request else "edited_content",
+                "preview": effective_change_request[:100] + "..." if len(effective_change_request) > 100 else effective_change_request,
+                "length": len(effective_change_request),
+            })
+        
+        # Use effective_change_request for all downstream phases
+        change_request = effective_change_request
+        if scene_regen_mode:
+            if not previous_artifacts:
+                self._emit_event("scene_regeneration_error", {
+                    "error": "Scene-level regeneration requires previous run artifacts. Please ensure the previous run completed successfully.",
+                    "scenes_to_regenerate": scenes_to_regenerate,
+                })
+                return {"error": "Scene-level regeneration requires previous run artifacts", **results}
+            self._emit_event("scene_regeneration_start", {
+                "scenes_to_regenerate": scenes_to_regenerate,
+            })
+
+        # Generate a unique project ID for memory storage (Qdrant)
+        memory_project_id = project.seed_idea[:20].replace(" ", "_") + "_" + str(hash(project.seed_idea))[:8]
+        
+        # Use Supabase project UUID for persistence if provided, otherwise fall back to memory_project_id
+        # Note: Supabase persistence requires a valid UUID that exists in the projects table
+        persistence_project_id = supabase_project_id if supabase_project_id else memory_project_id
+
+        # Initialize state early so it's available for all phases (including skipped ones)
+        # This is needed because _call_agent accesses self.state.phase
+        self.state = GenerationState(
+            phase=GenerationPhase.GENESIS,
+            project_id=memory_project_id,  # Use memory_project_id for state (used by Qdrant)
+            messages=[],
+            current_scene=0,
+            max_revisions=max_revisions,
+        )
 
         # Initialize Qdrant memory if API key provided
         if openai_api_key:
@@ -2822,27 +2987,54 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Helper function to store artifact in Supabase
         async def store_artifact(phase: str, artifact_type: str, content: Dict[str, Any]) -> None:
-            if persistence_service and run_id and persistence_service.is_connected:
+            if persistence_service and run_id and persistence_service.is_connected and supabase_project_id:
                 await persistence_service.store_run_artifact(
-                    project_id=project_id,
+                    project_id=persistence_project_id,
                     run_id=run_id,
                     phase=phase,
                     artifact_type=artifact_type,
                     content=content,
                 )
 
+        # Helper function to store individual scene artifact
+        async def store_scene(scene_number: int, draft: Dict[str, Any], polished: Optional[Dict[str, Any]] = None) -> None:
+            if persistence_service and run_id and persistence_service.is_connected and supabase_project_id:
+                await persistence_service.store_scene_artifact(
+                    project_id=persistence_project_id,
+                    run_id=run_id,
+                    scene_number=scene_number,
+                    draft=draft,
+                    polished=polished,
+                )
+
+        # Helper function to get existing scene from previous run
+        async def get_existing_scene(scene_number: int) -> Optional[Dict[str, Any]]:
+            if persistence_service and previous_run_id and persistence_service.is_connected:
+                return await persistence_service.get_scene_artifact(previous_run_id, scene_number)
+            return None
+
         # Helper function to check if we should skip a phase (use previous artifacts)
         def should_skip_phase(phase: str) -> bool:
-            if not start_from_phase or not previous_artifacts:
+            if not start_from_phase:
                 return False
             phase_index = phase_order.index(phase)
+            # Skip phases before start_from_phase, even if previous_artifacts is None
+            # This ensures scene-level regeneration doesn't regenerate earlier phases
             return phase_index < start_phase_index
 
         # Helper function to get previous artifact or edited content
         def get_previous_artifact(phase: str, artifact_type: str) -> Optional[Dict[str, Any]]:
             # Check if user provided edited content for this phase
-            if edited_content and edited_content.get("phase") == phase:
-                return edited_content.get("content")
+            # Frontend sends: {"genesis": {"content": "...", "comment": "..."}}
+            # or legacy format: {"phase": "genesis", "content": {...}}
+            if edited_content:
+                if phase in edited_content:
+                    phase_content = edited_content[phase]
+                    if isinstance(phase_content, dict) and "content" in phase_content:
+                        return phase_content.get("content")
+                    return phase_content
+                elif edited_content.get("phase") == phase:
+                    return edited_content.get("content")
             # Otherwise use previous artifacts
             if previous_artifacts and phase in previous_artifacts:
                 return previous_artifacts[phase].get(artifact_type)
@@ -2854,9 +3046,31 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             # Use previous genesis result
             narrative = get_previous_artifact("genesis", "narrative_possibility")
             if narrative:
+                # Parse the narrative if it's a string (JSON)
+                if isinstance(narrative, str):
+                    try:
+                        narrative = self._extract_json(narrative)
+                    except Exception:
+                        pass
                 genesis_result = {"narrative_possibility": narrative}
                 results["phases"]["genesis"] = genesis_result
                 self._emit_event("phase_skipped", {"phase": "genesis", "reason": "using_previous_artifact"})
+        elif edited_content and "genesis" in edited_content and not change_request:
+            # User provided edited content for this phase - use it directly
+            # BUT only if there's no change_request - if user wrote "What did you change?", regenerate instead
+            edited = get_previous_artifact("genesis", "narrative_possibility")
+            if edited:
+                # Parse the edited content if it's a string (JSON)
+                if isinstance(edited, str):
+                    try:
+                        edited = self._extract_json(edited)
+                    except Exception:
+                        pass
+                genesis_result = {"narrative_possibility": edited}
+                results["phases"]["genesis"] = genesis_result
+                self._emit_event("phase_overridden", {"phase": "genesis", "reason": "user_edited_content"})
+                # Emit agent message with the edited content
+                self._emit_agent_message("Architect", "locked", json.dumps(edited) if isinstance(edited, dict) else str(edited))
         
         if not genesis_result:
             await self._check_pause()  # Pause checkpoint
@@ -2879,13 +3093,34 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 characters_result = {"characters": characters}
                 results["phases"]["characters"] = characters_result
                 self._emit_event("phase_skipped", {"phase": "characters", "reason": "using_previous_artifact"})
+        elif edited_content and "characters" in edited_content and not change_request:
+            # User provided edited content for this phase - use it directly
+            # BUT only if there's no change_request - if user wrote "What did you change?", regenerate instead
+            edited = get_previous_artifact("characters", "characters")
+            if edited:
+                if isinstance(edited, str):
+                    try:
+                        edited = self._extract_json(edited)
+                    except Exception:
+                        pass
+                characters_result = {"characters": edited.get("characters", edited) if isinstance(edited, dict) else edited}
+                results["phases"]["characters"] = characters_result
+                self._emit_event("phase_overridden", {"phase": "characters", "reason": "user_edited_content"})
+                self._emit_agent_message("Profiler", "locked", json.dumps(edited) if isinstance(edited, dict) else str(edited))
 
         if not characters_result:
             await self._check_pause()  # Pause checkpoint
+            # Debug: Log that we're regenerating characters with change_request
+            self._emit_event("debug_characters_regeneration", {
+                "change_request_present": change_request is not None,
+                "change_request_preview": change_request[:100] if change_request else None,
+                "edited_content_has_characters": edited_content is not None and "characters" in edited_content if edited_content else False,
+            })
             characters_result = await self.run_characters_phase(
                 narrative=genesis_result["narrative_possibility"],
                 moral_compass=project.moral_compass.value,
                 target_audience=project.target_audience,
+                change_request=change_request,
             )
             await store_artifact("characters", "characters", {"characters": characters_result.get("characters", [])})
 
@@ -2897,7 +3132,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Store characters in Qdrant memory for later retrieval
         characters = characters_result.get("characters", [])
         if isinstance(characters, list):
-            await self._store_characters_in_memory(project_id, characters)
+            await self._store_characters_in_memory(memory_project_id, characters)
 
         # Phase 3: Worldbuilding
         worldbuilding_result = None
@@ -2907,6 +3142,19 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 worldbuilding_result = {"worldbuilding": worldbuilding}
                 results["phases"]["worldbuilding"] = worldbuilding_result
                 self._emit_event("phase_skipped", {"phase": "worldbuilding", "reason": "using_previous_artifact"})
+        elif edited_content and "worldbuilding" in edited_content:
+            # User provided edited content for this phase - use it directly
+            edited = get_previous_artifact("worldbuilding", "worldbuilding")
+            if edited:
+                if isinstance(edited, str):
+                    try:
+                        edited = self._extract_json(edited)
+                    except Exception:
+                        pass
+                worldbuilding_result = {"worldbuilding": edited.get("worldbuilding", edited) if isinstance(edited, dict) else edited}
+                results["phases"]["worldbuilding"] = worldbuilding_result
+                self._emit_event("phase_overridden", {"phase": "worldbuilding", "reason": "user_edited_content"})
+                self._emit_agent_message("Worldbuilder", "locked", json.dumps(edited) if isinstance(edited, dict) else str(edited))
 
         if not worldbuilding_result:
             await self._check_pause()  # Pause checkpoint
@@ -2915,6 +3163,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 characters=characters_result["characters"],
                 moral_compass=project.moral_compass.value,
                 target_audience=project.target_audience,
+                change_request=change_request,
             )
             await store_artifact("worldbuilding", "worldbuilding", worldbuilding_result.get("worldbuilding", {}))
 
@@ -2931,6 +3180,19 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 outlining_result = {"outline": outline}
                 results["phases"]["outlining"] = outlining_result
                 self._emit_event("phase_skipped", {"phase": "outlining", "reason": "using_previous_artifact"})
+        elif edited_content and "outlining" in edited_content:
+            # User provided edited content for this phase - use it directly
+            edited = get_previous_artifact("outlining", "outline")
+            if edited:
+                if isinstance(edited, str):
+                    try:
+                        edited = self._extract_json(edited)
+                    except Exception:
+                        pass
+                outlining_result = {"outline": edited.get("outline", edited) if isinstance(edited, dict) else edited}
+                results["phases"]["outlining"] = outlining_result
+                self._emit_event("phase_overridden", {"phase": "outlining", "reason": "user_edited_content"})
+                self._emit_agent_message("Strategist", "locked", json.dumps(edited) if isinstance(edited, dict) else str(edited))
 
         if not outlining_result:
             await self._check_pause()  # Pause checkpoint
@@ -2942,6 +3204,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 estimated_scenes=estimated_scenes,
                 preferred_structure=preferred_structure,
                 worldbuilding=worldbuilding,
+                change_request=change_request,
             )
             await store_artifact("outlining", "outline", outlining_result.get("outline", {}))
 
@@ -2979,29 +3242,78 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         emotional_beat_sheet = advanced_planning_result.get("emotional_beat_sheet", {})
         complexity_checklist = advanced_planning_result.get("complexity_checklist", {})
 
-        # Phase 6: Drafting (all scenes)
+        # Phase 6: Drafting (all scenes or selective regeneration)
         drafts = []
         previous_drafts = None
-        if should_skip_phase("drafting"):
+        
+        # Get previous drafts for scene-level regeneration or phase skip
+        if should_skip_phase("drafting") or scene_regen_mode:
             previous_drafts = get_previous_artifact("drafting", "drafts")
-            if previous_drafts:
+            if previous_drafts and should_skip_phase("drafting") and not scene_regen_mode:
                 drafts = previous_drafts.get("scenes", [])
                 results["phases"]["drafting"] = {"scenes": drafts}
                 self._emit_event("phase_skipped", {"phase": "drafting", "reason": "using_previous_artifact"})
 
-        if not previous_drafts:
+        # Helper to get continuity context from adjacent scenes
+        def get_continuity_context(scene_index: int, all_drafts: List[Dict[str, Any]]) -> Dict[str, str]:
+            context = {"previous_scene_summary": "N/A", "next_scene_summary": "N/A"}
+            
+            # Get previous scene summary
+            if scene_index > 0 and scene_index - 1 < len(all_drafts):
+                prev_draft = all_drafts[scene_index - 1]
+                if prev_draft and prev_draft.get("draft"):
+                    prev_content = prev_draft["draft"].get("narrative_content", "")
+                    context["previous_scene_summary"] = prev_content[:500] + "..." if prev_content else "N/A"
+            
+            # Get next scene summary (for continuity with existing scenes)
+            if scene_index + 1 < len(all_drafts):
+                next_draft = all_drafts[scene_index + 1]
+                if next_draft and next_draft.get("draft"):
+                    next_content = next_draft["draft"].get("narrative_content", "")
+                    context["next_scene_summary"] = next_content[:500] + "..." if next_content else "N/A"
+            
+            return context
+
+        if not (should_skip_phase("drafting") and not scene_regen_mode):
+            # Initialize drafts list with previous drafts if in scene regen mode
+            if scene_regen_mode and previous_drafts:
+                drafts = previous_drafts.get("scenes", [])
+                # Ensure drafts list is long enough for all scenes
+                while len(drafts) < len(scenes):
+                    drafts.append({})
+            
             previous_summary = "N/A"
             for i, scene in enumerate(scenes):
+                scene_number = i + 1
+                
+                # Check if this scene should be regenerated or kept
+                if scene_regen_mode and scenes_to_regenerate and scene_number not in scenes_to_regenerate:
+                    # Keep existing scene, just update previous_summary for continuity
+                    if i < len(drafts) and drafts[i].get("draft"):
+                        self._emit_event("scene_skipped", {
+                            "scene_number": scene_number,
+                            "reason": "not_in_regeneration_list"
+                        })
+                        draft = drafts[i]["draft"]
+                        previous_summary = draft.get("narrative_content", "")[:500] + "..."
+                        # Store individual scene artifact
+                        await store_scene(scene_number, draft, drafts[i].get("polished"))
+                    continue
+                
                 await self._check_pause()  # Pause checkpoint before each scene
+                
+                # Get continuity context from adjacent scenes
+                continuity = get_continuity_context(i, drafts)
+                
                 # Retrieve relevant characters from memory for this scene
                 scene_context = scene.get("title", "") + " " + scene.get("conflict", "")
-                relevant_characters = await self._retrieve_relevant_characters(project_id, scene_context, limit=3)
+                relevant_characters = await self._retrieve_relevant_characters(memory_project_id, scene_context, limit=3)
 
                 # Retrieve relevant previous scenes for continuity
-                relevant_scenes = await self._retrieve_relevant_scenes(project_id, scene_context, limit=2)
+                relevant_scenes = await self._retrieve_relevant_scenes(memory_project_id, scene_context, limit=2)
 
                 # Retrieve relevant worldbuilding elements for this scene
-                relevant_worldbuilding = await self._retrieve_worldbuilding(project_id, scene_context, limit=3)
+                relevant_worldbuilding = await self._retrieve_worldbuilding(memory_project_id, scene_context, limit=3)
 
                 # Merge static worldbuilding with retrieved elements
                 scene_worldbuilding = worldbuilding.copy() if worldbuilding else {}
@@ -3015,17 +3327,26 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                                 if elem not in existing
                             ]
 
+                # Build memory context with continuity information
+                memory_ctx = {}
+                if relevant_characters:
+                    memory_ctx["relevant_characters"] = relevant_characters
+                if relevant_scenes:
+                    memory_ctx["relevant_scenes"] = relevant_scenes
+                
+                # Add next scene context for continuity in selective regeneration
+                if scene_regen_mode and continuity["next_scene_summary"] != "N/A":
+                    memory_ctx["next_scene_context"] = continuity["next_scene_summary"]
+
                 draft_result = await self.run_drafting_phase(
                     scene=scene,
                     characters=characters_result["characters"],
                     moral_compass=project.moral_compass.value,
                     worldbuilding=scene_worldbuilding if scene_worldbuilding else None,
-                    previous_scene_summary=previous_summary,
-                    memory_context={
-                        "relevant_characters": relevant_characters,
-                        "relevant_scenes": relevant_scenes,
-                    } if (relevant_characters or relevant_scenes) else None,
+                    previous_scene_summary=continuity["previous_scene_summary"] if scene_regen_mode else previous_summary,
+                    memory_context=memory_ctx if memory_ctx else None,
                     narrator_config=narrator_config,
+                    change_request=change_request,
                 )
 
                 # Quality Gate with retry logic (per scene)
@@ -3033,7 +3354,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 if draft_result.get("draft"):
                     emotional_beat = scene.get("emotional_beat", {})
                     quality_enforcement_result = await self.enforce_quality_for_scene(
-                        scene_number=i + 1,
+                        scene_number=scene_number,
                         draft=draft_result["draft"],
                         characters=characters_result["characters"],
                         moral_compass=project.moral_compass.value,
@@ -3047,15 +3368,23 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     draft_result["draft"] = quality_enforcement_result["final_draft"]
                     draft_result["quality_enforcement"] = quality_enforcement_result
 
-                drafts.append(draft_result)
+                # Update or append draft result
+                if scene_regen_mode and i < len(drafts):
+                    drafts[i] = draft_result
+                else:
+                    drafts.append(draft_result)
+
+                # Store individual scene artifact
+                if draft_result.get("draft"):
+                    await store_scene(scene_number, draft_result["draft"])
 
                 # Store final draft (after quality revisions) in memory for continuity
                 if draft_result.get("draft"):
                     draft = draft_result["draft"]
-                    await self._store_scene_in_memory(project_id, i + 1, draft)
+                    await self._store_scene_in_memory(memory_project_id, scene_number, draft)
                     previous_summary = draft.get("narrative_content", "")[:500] + "..."
 
-            # Store all drafts as a single artifact
+            # Store all drafts as a single artifact (for backward compatibility)
             await store_artifact("drafting", "drafts", {"scenes": drafts})
 
         results["phases"]["drafting"] = {"scenes": drafts}
@@ -3067,30 +3396,63 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         ]
         results["phases"]["quality_gate"] = {"scenes": quality_results}
 
-        # Phase 7: Polish (all scenes - even if quality gate failed, we still polish)
+        # Phase 7: Polish (all scenes or selective regeneration)
         polished_drafts = []
         previous_polish = None
-        if should_skip_phase("polish"):
+        
+        # Get previous polish for scene-level regeneration or phase skip
+        if should_skip_phase("polish") or scene_regen_mode:
             previous_polish = get_previous_artifact("polish", "polished")
-            if previous_polish:
+            if previous_polish and should_skip_phase("polish") and not scene_regen_mode:
                 polished_drafts = previous_polish.get("scenes", [])
                 results["phases"]["polish"] = {"scenes": polished_drafts}
                 self._emit_event("phase_skipped", {"phase": "polish", "reason": "using_previous_artifact"})
 
-        if not previous_polish:
+        if not (should_skip_phase("polish") and not scene_regen_mode):
+            # Initialize polished_drafts with previous polish if in scene regen mode
+            if scene_regen_mode and previous_polish:
+                polished_drafts = previous_polish.get("scenes", [])
+                # Ensure polished_drafts list is long enough for all scenes
+                while len(polished_drafts) < len(drafts):
+                    polished_drafts.append({})
+            
             for i, draft_result in enumerate(drafts):
+                scene_number = i + 1
+                
+                # Check if this scene should be polished or kept
+                if scene_regen_mode and scenes_to_regenerate and scene_number not in scenes_to_regenerate:
+                    # Keep existing polished scene
+                    if i < len(polished_drafts) and polished_drafts[i]:
+                        self._emit_event("polish_skipped", {
+                            "scene_number": scene_number,
+                            "reason": "not_in_regeneration_list"
+                        })
+                    continue
+                
                 await self._check_pause()  # Pause checkpoint before each polish
                 if draft_result.get("draft"):
                     polish_result = await self.run_polish_phase(
-                        scene_number=i + 1,
+                        scene_number=scene_number,
                         draft=draft_result["draft"],
                         characters=characters_result["characters"],
                         moral_compass=project.moral_compass.value,
                         critique=draft_result.get("critique"),
+                        change_request=change_request,
                     )
-                    polished_drafts.append(polish_result)
+                    
+                    # Update or append polish result
+                    if scene_regen_mode and i < len(polished_drafts):
+                        polished_drafts[i] = polish_result
+                    else:
+                        polished_drafts.append(polish_result)
+                    
+                    # Update scene artifact with polished content
+                    if persistence_service and run_id and persistence_service.is_connected:
+                        await persistence_service.update_scene_polished(
+                            run_id, scene_number, polish_result
+                        )
 
-            # Store all polished drafts as a single artifact
+            # Store all polished drafts as a single artifact (for backward compatibility)
             await store_artifact("polish", "polished", {"scenes": polished_drafts})
 
         results["phases"]["polish"] = {"scenes": polished_drafts}
