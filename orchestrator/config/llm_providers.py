@@ -16,6 +16,7 @@ class LLMProvider(str, Enum):
     GEMINI = "gemini"
     CLAUDE = "claude"
     DEEPSEEK = "deepseek"
+    VENICE = "venice"
 
 
 # ============================================================================
@@ -23,6 +24,29 @@ class LLMProvider(str, Enum):
 # ============================================================================
 
 OPENAI_MODELS: Dict[str, Dict[str, Any]] = {
+    # GPT-5 Family (December 2025)
+    "gpt-5.2": {
+        "name": "GPT-5.2",
+        "description": "Latest GPT-5 with improved routing - decides when to think deep vs fast. Less moralistic than 5.0",
+        "context_window": 256000,
+        "max_output": 32768,
+        "input_price_per_1k": 0.005,
+        "output_price_per_1k": 0.02,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "recommended_for": ["architect", "strategist"]
+    },
+    "gpt-5": {
+        "name": "GPT-5",
+        "description": "GPT-5 base model with advanced reasoning",
+        "context_window": 256000,
+        "max_output": 32768,
+        "input_price_per_1k": 0.004,
+        "output_price_per_1k": 0.016,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "recommended_for": ["architect", "profiler", "strategist"]
+    },
     # GPT-4 Family
     "gpt-4o": {
         "name": "GPT-4o",
@@ -33,7 +57,7 @@ OPENAI_MODELS: Dict[str, Dict[str, Any]] = {
         "output_price_per_1k": 0.01,
         "supports_vision": True,
         "supports_function_calling": True,
-        "recommended_for": ["architect", "profiler", "strategist", "critic"]
+        "recommended_for": ["critic"]
     },
     "gpt-4o-mini": {
         "name": "GPT-4o Mini",
@@ -46,45 +70,33 @@ OPENAI_MODELS: Dict[str, Dict[str, Any]] = {
         "supports_function_calling": True,
         "recommended_for": ["writer"]
     },
-    "gpt-4-turbo": {
-        "name": "GPT-4 Turbo",
-        "description": "GPT-4 Turbo with vision capabilities",
-        "context_window": 128000,
-        "max_output": 4096,
+    # O-series Reasoning Models
+    "o3": {
+        "name": "O3",
+        "description": "Advanced reasoning model with chain-of-thought",
+        "context_window": 200000,
+        "max_output": 65536,
         "input_price_per_1k": 0.01,
-        "output_price_per_1k": 0.03,
-        "supports_vision": True,
-        "supports_function_calling": True,
-        "recommended_for": ["architect", "critic"]
-    },
-    "gpt-4": {
-        "name": "GPT-4",
-        "description": "Original GPT-4 model",
-        "context_window": 8192,
-        "max_output": 8192,
-        "input_price_per_1k": 0.03,
-        "output_price_per_1k": 0.06,
+        "output_price_per_1k": 0.04,
         "supports_vision": False,
-        "supports_function_calling": True,
-        "recommended_for": ["architect", "critic"]
+        "supports_function_calling": False,
+        "recommended_for": ["strategist"]
     },
-    # GPT-3.5 Family
-    "gpt-3.5-turbo": {
-        "name": "GPT-3.5 Turbo",
-        "description": "Fast and cost-effective",
-        "context_window": 16385,
-        "max_output": 4096,
-        "input_price_per_1k": 0.0005,
-        "output_price_per_1k": 0.0015,
+    "o3-mini": {
+        "name": "O3 Mini",
+        "description": "Smaller O3 reasoning model",
+        "context_window": 200000,
+        "max_output": 65536,
+        "input_price_per_1k": 0.0011,
+        "output_price_per_1k": 0.0044,
         "supports_vision": False,
-        "supports_function_calling": True,
-        "recommended_for": ["writer"]
+        "supports_function_calling": False,
+        "recommended_for": ["strategist"]
     },
-    # O1 Reasoning Models
-    "o1-preview": {
-        "name": "O1 Preview",
-        "description": "Advanced reasoning model",
-        "context_window": 128000,
+    "o1": {
+        "name": "O1",
+        "description": "Original O-series reasoning model",
+        "context_window": 200000,
         "max_output": 32768,
         "input_price_per_1k": 0.015,
         "output_price_per_1k": 0.06,
@@ -92,34 +104,55 @@ OPENAI_MODELS: Dict[str, Dict[str, Any]] = {
         "supports_function_calling": False,
         "recommended_for": ["architect", "strategist"]
     },
-    "o1-mini": {
-        "name": "O1 Mini",
-        "description": "Smaller reasoning model",
-        "context_window": 128000,
-        "max_output": 65536,
-        "input_price_per_1k": 0.003,
-        "output_price_per_1k": 0.012,
-        "supports_vision": False,
-        "supports_function_calling": False,
-        "recommended_for": ["strategist"]
-    },
 }
 
 OPENROUTER_MODELS: Dict[str, Dict[str, Any]] = {
+    # Top Tier - Claude Opus 4.5 (S+ Prose)
+    "anthropic/claude-opus-4.5": {
+        "name": "Claude Opus 4.5 (via OpenRouter)",
+        "description": "Most human-like AI. Best for RP and literature. S+ Prose tier.",
+        "context_window": 200000,
+        "max_output": 16384,
+        "recommended_for": ["architect", "writer", "critic"]
+    },
+    # Gemini 3 Pro (S+ Logic)
+    "google/gemini-3-pro": {
+        "name": "Gemini 3 Pro (via OpenRouter)",
+        "description": "New king of AI. Deep Think integrated. Builds dynamic world model.",
+        "context_window": 2000000,
+        "max_output": 16384,
+        "recommended_for": ["strategist"]
+    },
+    # Llama 4 Maverick (A+ Context - 256k)
+    "meta-llama/llama-4-maverick": {
+        "name": "Llama 4 Maverick (via OpenRouter)",
+        "description": "256k context. 3x fewer refusals with Venice jailbreak.",
+        "context_window": 256000,
+        "max_output": 8192,
+        "recommended_for": ["profiler", "strategist"]
+    },
+    # Qwen 3 (235B)
+    "qwen/qwen-3-235b": {
+        "name": "Qwen 3 235B (via OpenRouter)",
+        "description": "Good for Eastern intrigue plots. Venice Medium/Large alternative.",
+        "context_window": 131072,
+        "max_output": 8192,
+        "recommended_for": ["writer", "profiler"]
+    },
     # OpenAI via OpenRouter
+    "openai/gpt-5.2": {
+        "name": "GPT-5.2 (via OpenRouter)",
+        "description": "OpenAI GPT-5.2 with improved routing",
+        "context_window": 256000,
+        "max_output": 32768,
+        "recommended_for": ["architect", "strategist"]
+    },
     "openai/gpt-4o": {
         "name": "GPT-4o (via OpenRouter)",
         "description": "OpenAI GPT-4o through OpenRouter",
         "context_window": 128000,
         "max_output": 16384,
-        "recommended_for": ["architect", "profiler", "strategist", "critic"]
-    },
-    "openai/gpt-4o-mini": {
-        "name": "GPT-4o Mini (via OpenRouter)",
-        "description": "OpenAI GPT-4o Mini through OpenRouter",
-        "context_window": 128000,
-        "max_output": 16384,
-        "recommended_for": ["writer"]
+        "recommended_for": ["critic"]
     },
     # Anthropic via OpenRouter
     "anthropic/claude-3.5-sonnet": {
@@ -127,57 +160,28 @@ OPENROUTER_MODELS: Dict[str, Dict[str, Any]] = {
         "description": "Anthropic Claude 3.5 Sonnet through OpenRouter",
         "context_window": 200000,
         "max_output": 8192,
-        "recommended_for": ["architect", "profiler", "critic", "writer"]
-    },
-    "anthropic/claude-3-opus": {
-        "name": "Claude 3 Opus (via OpenRouter)",
-        "description": "Anthropic Claude 3 Opus through OpenRouter",
-        "context_window": 200000,
-        "max_output": 4096,
-        "recommended_for": ["architect", "critic"]
+        "recommended_for": ["profiler"]
     },
     # Google via OpenRouter
-    "google/gemini-pro-1.5": {
-        "name": "Gemini Pro 1.5 (via OpenRouter)",
-        "description": "Google Gemini Pro 1.5 through OpenRouter",
+    "google/gemini-2.0-flash-exp": {
+        "name": "Gemini 2.0 Flash (via OpenRouter)",
+        "description": "Google Gemini 2.0 Flash with grounding",
         "context_window": 1000000,
         "max_output": 8192,
-        "recommended_for": ["strategist", "writer"]
+        "recommended_for": ["writer"]
     },
     # Meta Llama via OpenRouter
-    "meta-llama/llama-3.1-405b-instruct": {
-        "name": "Llama 3.1 405B (via OpenRouter)",
-        "description": "Meta Llama 3.1 405B Instruct",
+    "meta-llama/llama-3.3-70b-instruct": {
+        "name": "Llama 3.3 70B (via OpenRouter)",
+        "description": "Meta Llama 3.3 70B Instruct",
         "context_window": 131072,
-        "max_output": 4096,
-        "recommended_for": ["writer"]
-    },
-    "meta-llama/llama-3.1-70b-instruct": {
-        "name": "Llama 3.1 70B (via OpenRouter)",
-        "description": "Meta Llama 3.1 70B Instruct",
-        "context_window": 131072,
-        "max_output": 4096,
-        "recommended_for": ["writer"]
-    },
-    # Mistral via OpenRouter
-    "mistralai/mistral-large": {
-        "name": "Mistral Large (via OpenRouter)",
-        "description": "Mistral AI Large model",
-        "context_window": 128000,
-        "max_output": 4096,
-        "recommended_for": ["writer", "profiler"]
-    },
-    "mistralai/mixtral-8x22b-instruct": {
-        "name": "Mixtral 8x22B (via OpenRouter)",
-        "description": "Mistral AI Mixtral 8x22B",
-        "context_window": 65536,
         "max_output": 4096,
         "recommended_for": ["writer"]
     },
     # DeepSeek via OpenRouter
     "deepseek/deepseek-chat": {
-        "name": "DeepSeek Chat (via OpenRouter)",
-        "description": "DeepSeek Chat model",
+        "name": "DeepSeek V3 (via OpenRouter)",
+        "description": "DeepSeek V3 Chat model",
         "context_window": 64000,
         "max_output": 4096,
         "recommended_for": ["writer"]
@@ -193,23 +197,57 @@ OPENROUTER_MODELS: Dict[str, Dict[str, Any]] = {
 }
 
 GEMINI_MODELS: Dict[str, Dict[str, Any]] = {
+    # Gemini 3 Family (November 2025) - New King of AI
+    "gemini-3-pro": {
+        "name": "Gemini 3 Pro",
+        "description": "New king of AI. Deep Think integrated into core. Builds dynamic world model of your plot. Solves tasks GPT-5 fails at.",
+        "context_window": 2000000,
+        "max_output": 16384,
+        "input_price_per_1k": 0.0025,
+        "output_price_per_1k": 0.01,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "recommended_for": ["architect", "strategist"]
+    },
+    "gemini-3-flash": {
+        "name": "Gemini 3 Flash",
+        "description": "Fast Gemini 3 variant for high-volume tasks",
+        "context_window": 1000000,
+        "max_output": 16384,
+        "input_price_per_1k": 0.0005,
+        "output_price_per_1k": 0.002,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "recommended_for": ["writer"]
+    },
+    # Gemini 2.0 Family
     "gemini-2.0-flash-exp": {
         "name": "Gemini 2.0 Flash (Experimental)",
-        "description": "Latest Gemini 2.0 Flash experimental model",
+        "description": "Gemini 2.0 Flash experimental model with grounding",
         "context_window": 1000000,
         "max_output": 8192,
         "supports_vision": True,
         "supports_function_calling": True,
-        "recommended_for": ["architect", "strategist", "writer"]
+        "recommended_for": ["writer"]
     },
+    "gemini-2.0-flash-thinking-exp": {
+        "name": "Gemini 2.0 Flash Thinking",
+        "description": "Gemini 2.0 with reasoning capabilities",
+        "context_window": 1000000,
+        "max_output": 8192,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "recommended_for": ["critic"]
+    },
+    # Gemini 1.5 Family
     "gemini-1.5-pro": {
         "name": "Gemini 1.5 Pro",
-        "description": "Most capable Gemini model with 1M context",
-        "context_window": 1000000,
+        "description": "Gemini 1.5 Pro with 2M context",
+        "context_window": 2000000,
         "max_output": 8192,
         "supports_vision": True,
         "supports_function_calling": True,
-        "recommended_for": ["architect", "profiler", "strategist", "critic"]
+        "recommended_for": ["profiler"]
     },
     "gemini-1.5-flash": {
         "name": "Gemini 1.5 Flash",
@@ -217,24 +255,6 @@ GEMINI_MODELS: Dict[str, Dict[str, Any]] = {
         "context_window": 1000000,
         "max_output": 8192,
         "supports_vision": True,
-        "supports_function_calling": True,
-        "recommended_for": ["writer"]
-    },
-    "gemini-1.5-flash-8b": {
-        "name": "Gemini 1.5 Flash 8B",
-        "description": "Smallest and fastest Gemini model",
-        "context_window": 1000000,
-        "max_output": 8192,
-        "supports_vision": True,
-        "supports_function_calling": True,
-        "recommended_for": ["writer"]
-    },
-    "gemini-1.0-pro": {
-        "name": "Gemini 1.0 Pro",
-        "description": "Original Gemini Pro model",
-        "context_window": 32760,
-        "max_output": 8192,
-        "supports_vision": False,
         "supports_function_calling": True,
         "recommended_for": ["writer"]
     },
@@ -266,16 +286,52 @@ DEEPSEEK_MODELS: Dict[str, Dict[str, Any]] = {
 }
 
 CLAUDE_MODELS: Dict[str, Dict[str, Any]] = {
-    "claude-3-5-sonnet-20241022": {
-        "name": "Claude 3.5 Sonnet (Latest)",
-        "description": "Most intelligent Claude model, best for complex tasks",
+    # Claude Opus 4.5 (November 2025) - S+ Prose, Most Human
+    "claude-opus-4.5-20251201": {
+        "name": "Claude Opus 4.5",
+        "description": "Most human-like AI. Talented writer. Best for RP and literature. Many prefer it for style over technically stronger models.",
+        "context_window": 200000,
+        "max_output": 16384,
+        "input_price_per_1k": 0.02,
+        "output_price_per_1k": 0.1,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "recommended_for": ["architect", "writer", "critic"]
+    },
+    # Claude 4 Family
+    "claude-sonnet-4-20250514": {
+        "name": "Claude Sonnet 4",
+        "description": "Claude 4 Sonnet with computer use capabilities",
         "context_window": 200000,
         "max_output": 8192,
         "input_price_per_1k": 0.003,
         "output_price_per_1k": 0.015,
         "supports_vision": True,
         "supports_function_calling": True,
-        "recommended_for": ["architect", "profiler", "strategist", "critic", "writer"]
+        "recommended_for": ["profiler"]
+    },
+    "claude-opus-4-20250514": {
+        "name": "Claude Opus 4",
+        "description": "Claude 4 Opus for complex reasoning",
+        "context_window": 200000,
+        "max_output": 8192,
+        "input_price_per_1k": 0.015,
+        "output_price_per_1k": 0.075,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "recommended_for": ["strategist"]
+    },
+    # Claude 3.5 Family
+    "claude-3-5-sonnet-20241022": {
+        "name": "Claude 3.5 Sonnet",
+        "description": "Claude 3.5 Sonnet with computer use",
+        "context_window": 200000,
+        "max_output": 8192,
+        "input_price_per_1k": 0.003,
+        "output_price_per_1k": 0.015,
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "recommended_for": ["profiler", "strategist"]
     },
     "claude-3-5-haiku-20241022": {
         "name": "Claude 3.5 Haiku",
@@ -288,36 +344,65 @@ CLAUDE_MODELS: Dict[str, Dict[str, Any]] = {
         "supports_function_calling": True,
         "recommended_for": ["writer"]
     },
-    "claude-3-opus-20240229": {
-        "name": "Claude 3 Opus",
-        "description": "Most powerful Claude 3 model for complex reasoning",
-        "context_window": 200000,
-        "max_output": 4096,
-        "input_price_per_1k": 0.015,
-        "output_price_per_1k": 0.075,
-        "supports_vision": True,
-        "supports_function_calling": True,
-        "recommended_for": ["architect", "critic"]
+}
+
+VENICE_MODELS: Dict[str, Dict[str, Any]] = {
+    # S+ Uncensored - Best for dialogues, roleplay, dark plots without censorship
+    "dolphin-mistral-24b-venice": {
+        "name": "Dolphin Mistral 24B Venice Edition",
+        "description": "S+ Uncensored. Best uncensored model for creativity. No moralizing. Perfect for dark plots and political intrigue.",
+        "context_window": 32000,
+        "max_output": 8192,
+        "input_price_per_1k": 0.0005,
+        "output_price_per_1k": 0.0015,
+        "supports_vision": False,
+        "supports_function_calling": False,
+        "recommended_for": ["writer", "profiler"]
     },
-    "claude-3-sonnet-20240229": {
-        "name": "Claude 3 Sonnet",
-        "description": "Balanced Claude 3 model",
-        "context_window": 200000,
-        "max_output": 4096,
-        "input_price_per_1k": 0.003,
-        "output_price_per_1k": 0.015,
-        "supports_vision": True,
+    # Venice Large (Llama 4 Maverick with jailbreak)
+    "llama-4-maverick-venice": {
+        "name": "Llama 4 Maverick (Venice Large)",
+        "description": "A+ Context. 256k context with Venice jailbreak. 3x fewer refusals. Technically smarter than Dolphin.",
+        "context_window": 256000,
+        "max_output": 8192,
+        "input_price_per_1k": 0.0008,
+        "output_price_per_1k": 0.0024,
+        "supports_vision": False,
         "supports_function_calling": True,
-        "recommended_for": ["profiler", "strategist"]
+        "recommended_for": ["architect", "strategist"]
     },
-    "claude-3-haiku-20240307": {
-        "name": "Claude 3 Haiku",
-        "description": "Fastest Claude 3 model",
-        "context_window": 200000,
+    # Qwen 3 (Venice Medium/Large alternative)
+    "qwen-3-235b-venice": {
+        "name": "Qwen 3 235B (Venice)",
+        "description": "Good for Eastern intrigue plots. Venice Medium/Large alternative.",
+        "context_window": 131072,
+        "max_output": 8192,
+        "input_price_per_1k": 0.0004,
+        "output_price_per_1k": 0.0012,
+        "supports_vision": False,
+        "supports_function_calling": True,
+        "recommended_for": ["writer", "profiler"]
+    },
+    # Other Venice models
+    "llama-3.3-70b-venice": {
+        "name": "Llama 3.3 70B Venice",
+        "description": "Llama 3.3 70B with Venice uncensored mode",
+        "context_window": 131072,
         "max_output": 4096,
-        "input_price_per_1k": 0.00025,
-        "output_price_per_1k": 0.00125,
-        "supports_vision": True,
+        "input_price_per_1k": 0.0003,
+        "output_price_per_1k": 0.0009,
+        "supports_vision": False,
+        "supports_function_calling": False,
+        "recommended_for": ["writer"]
+    },
+    "mistral-large-venice": {
+        "name": "Mistral Large Venice",
+        "description": "Mistral Large with Venice uncensored mode",
+        "context_window": 128000,
+        "max_output": 4096,
+        "input_price_per_1k": 0.0004,
+        "output_price_per_1k": 0.0012,
+        "supports_vision": False,
         "supports_function_calling": True,
         "recommended_for": ["writer"]
     },
@@ -396,6 +481,17 @@ class DeepSeekConfig(ProviderConfig):
         return DEEPSEEK_MODELS
 
 
+class VeniceConfig(ProviderConfig):
+    """Venice AI-specific configuration (OpenAI-compatible API with uncensored models)."""
+    provider: LLMProvider = LLMProvider.VENICE
+    base_url: str = "https://api.venice.ai/api/v1"
+    default_model: str = "dolphin-mistral-24b-venice"
+
+    @property
+    def available_models(self) -> Dict[str, Dict[str, Any]]:
+        return VENICE_MODELS
+
+
 # ============================================================================
 # Agent Model Assignment
 # ============================================================================
@@ -431,6 +527,7 @@ class LLMConfiguration(BaseModel):
     gemini: Optional[GeminiConfig] = None
     claude: Optional[ClaudeConfig] = None
     deepseek: Optional[DeepSeekConfig] = None
+    venice: Optional[VeniceConfig] = None
 
     # Agent-specific model assignments
     agent_models: AgentModelConfig = Field(default_factory=AgentModelConfig)
@@ -448,6 +545,7 @@ class LLMConfiguration(BaseModel):
             LLMProvider.GEMINI: self.gemini,
             LLMProvider.CLAUDE: self.claude,
             LLMProvider.DEEPSEEK: self.deepseek,
+            LLMProvider.VENICE: self.venice,
         }
         return provider_map.get(provider)
 
@@ -464,6 +562,8 @@ class LLMConfiguration(BaseModel):
             enabled.append(LLMProvider.CLAUDE)
         if self.deepseek and self.deepseek.enabled:
             enabled.append(LLMProvider.DEEPSEEK)
+        if self.venice and self.venice.enabled:
+            enabled.append(LLMProvider.VENICE)
         return enabled
 
     def validate_agent_models(self) -> List[str]:
@@ -501,6 +601,7 @@ def get_all_models() -> Dict[str, Dict[str, Dict[str, Any]]]:
         "gemini": GEMINI_MODELS,
         "claude": CLAUDE_MODELS,
         "deepseek": DEEPSEEK_MODELS,
+        "venice": VENICE_MODELS,
     }
 
 
@@ -556,6 +657,12 @@ def create_default_config_from_env() -> LLMConfiguration:
     if os.getenv("DEEPSEEK_API_KEY"):
         config.deepseek = DeepSeekConfig(
             api_key=SecretStr(os.getenv("DEEPSEEK_API_KEY")),
+        )
+
+    # Venice
+    if os.getenv("VENICE_API_KEY"):
+        config.venice = VeniceConfig(
+            api_key=SecretStr(os.getenv("VENICE_API_KEY")),
         )
 
     return config
