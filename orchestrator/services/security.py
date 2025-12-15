@@ -67,6 +67,7 @@ def decode_jwt(token: str) -> Dict[str, Any]:
             token,
             JWT_SECRET,
             algorithms=[JWT_ALGORITHM],
+            audience="authenticated",  # Supabase uses "authenticated" as the audience for logged-in users
             options={
                 "verify_exp": True,
                 "verify_iat": True,
