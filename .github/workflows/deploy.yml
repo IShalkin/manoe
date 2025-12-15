@@ -28,12 +28,8 @@ jobs:
             docker compose -f docker-compose.vps.yml build orchestrator
             docker compose -f docker-compose.vps.yml up -d orchestrator
             
-            # Rebuild and restart frontend
-            docker compose -f docker-compose.vps.yml build frontend
-            docker compose -f docker-compose.vps.yml up -d frontend
-            
-            # Wait for services to be healthy
-            sleep 10
+            # Wait for orchestrator to be healthy (container needs time to start)
+            sleep 30
             
             # Verify orchestrator is running
             curl -f http://localhost:8001/health || exit 1
