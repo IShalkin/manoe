@@ -28,7 +28,7 @@ export interface UserSettings {
   agents: AgentConfig[];
 }
 
-export type MoralCompass = 'ethical' | 'unethical' | 'amoral' | 'ambiguous';
+export type MoralCompass = 'ethical' | 'unethical' | 'amoral' | 'ambiguous' | 'user_defined';
 
 // Narrator Design Types (based on Storyteller Framework Section 3.2)
 export type NarrativePOV = 'first_person' | 'third_person_limited' | 'third_person_omniscient' | 'second_person';

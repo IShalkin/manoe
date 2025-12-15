@@ -26,6 +26,7 @@ from config import (
 )
 from models import StoryProject
 from services.redis_streams import RedisStreamsService
+from services.supabase_persistence import SupabasePersistenceService
 
 load_dotenv()
 
@@ -38,17 +39,24 @@ class MultiAgentWorker:
     def __init__(self):
         self.config = create_default_config_from_env()
         self.redis_streams: Optional[RedisStreamsService] = None
+        self.persistence_service: Optional[SupabasePersistenceService] = None
         self._running = False
         self._active_runs: Dict[str, asyncio.Task] = {}
         self._cancelled_runs: set = set()
         self._paused_runs: set = set()
 
     async def initialize(self) -> None:
-        """Initialize Redis Streams connection."""
+        """Initialize Redis Streams and Supabase persistence connections."""
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         self.redis_streams = RedisStreamsService(redis_url)
         await self.redis_streams.connect()
         print(f"Multi-Agent Worker connected to Redis at {redis_url}")
+        
+        self.persistence_service = SupabasePersistenceService()
+        if await self.persistence_service.connect():
+            print("Multi-Agent Worker connected to Supabase for artifact persistence")
+        else:
+            print("Supabase persistence not available - artifacts will not be persisted")
 
     async def shutdown(self) -> None:
         """Shutdown the worker."""
@@ -92,6 +100,9 @@ class MultiAgentWorker:
         preferred_structure: str = "ThreeAct",
         max_revisions: int = 2,
         narrator_config: Optional[Dict[str, Any]] = None,
+        start_from_phase: Optional[str] = None,
+        previous_run_id: Optional[str] = None,
+        edited_content: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -101,11 +112,15 @@ class MultiAgentWorker:
             project_data: Project configuration data
             api_key: User's API key for the LLM provider
             provider: LLM provider to use (default: openai)
+            start_from_phase: Phase to start from (for partial regeneration)
+            previous_run_id: Run ID to load previous artifacts from
+            edited_content: User-edited content to use instead of regenerating
 
         Returns:
             Generation results including all agent messages
         """
         # Publish start event
+        is_regeneration = start_from_phase is not None
         await self.redis_streams.publish_event(
             run_id,
             "generation_start",
@@ -113,6 +128,8 @@ class MultiAgentWorker:
                 "run_id": run_id,
                 "project": project_data,
                 "status": "starting",
+                "regeneration_mode": is_regeneration,
+                "start_from_phase": start_from_phase,
             }
         )
 
@@ -164,9 +181,15 @@ class MultiAgentWorker:
 
             # Create group chat with event callback and user's config
             event_callback = self._create_event_callback(run_id)
+            
+            # Create pause check callback that checks if this run is paused
+            def pause_check_callback() -> bool:
+                return run_id in self._paused_runs
+            
             group_chat = StorytellerGroupChat(
                 config=request_config,
                 event_callback=event_callback,
+                pause_check_callback=pause_check_callback,
             )
 
             # Publish agent initialization event
@@ -178,6 +201,19 @@ class MultiAgentWorker:
                     "status": "ready",
                 }
             )
+
+            # Load previous artifacts if regenerating
+            previous_artifacts = None
+            if is_regeneration and previous_run_id and self.persistence_service and self.persistence_service.is_connected:
+                previous_artifacts = await self.persistence_service.get_run_artifacts(previous_run_id)
+                await self.redis_streams.publish_event(
+                    run_id,
+                    "artifacts_loaded",
+                    {
+                        "previous_run_id": previous_run_id,
+                        "phases_loaded": list(previous_artifacts.keys()) if previous_artifacts else [],
+                    }
+                )
 
             # Run generation based on selected mode
             if generation_mode == "full":
@@ -192,6 +228,11 @@ class MultiAgentWorker:
                     openai_api_key=openai_key,
                     max_revisions=max_revisions,
                     narrator_config=narrator_config,
+                    run_id=run_id,
+                    persistence_service=self.persistence_service,
+                    start_from_phase=start_from_phase,
+                    previous_artifacts=previous_artifacts,
+                    edited_content=edited_content,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow
@@ -209,6 +250,7 @@ class MultiAgentWorker:
                     "run_id": run_id,
                     "status": "completed",
                     "result_summary": str(result.get("narrative_possibility", {}))[:500],
+                    "regeneration_mode": is_regeneration,
                 }
             )
 
@@ -274,8 +316,10 @@ class NarratorConfig(BaseModel):
 class GenerateRequest(BaseModel):
     seed_idea: str
     moral_compass: str = "ambiguous"
+    custom_moral_system: Optional[str] = None  # Required if moral_compass is user_defined
     target_audience: str = ""
     themes: Optional[str] = None
+    tone_style_references: Optional[str] = None  # Style references (e.g., "Palahniuk-esque cynicism")
     provider: str = "openai"
     model: str = "gpt-4o"
     api_key: str
@@ -286,6 +330,9 @@ class GenerateRequest(BaseModel):
     preferred_structure: str = "ThreeAct"  # For full mode
     max_revisions: int = 2  # Maximum Writer↔Critic revision cycles per scene (1-5)
     narrator_config: Optional[NarratorConfig] = None  # Narrator design settings
+    start_from_phase: Optional[str] = None  # Phase to start from (for phase-based regeneration)
+    previous_run_id: Optional[str] = None  # Run ID to load previous artifacts from
+    edited_content: Optional[Dict[str, Any]] = None  # User-edited content to use instead of regenerating
 
 
 class GenerateResponse(BaseModel):
@@ -327,8 +374,10 @@ async def generate(request: GenerateRequest):
     project_data = {
         "seed_idea": request.seed_idea,
         "moral_compass": moral_compass_capitalized,
+        "custom_moral_system": request.custom_moral_system if moral_compass_capitalized == "UserDefined" else None,
         "target_audience": request.target_audience,
         "theme_core": request.themes.split(",") if request.themes else [],
+        "tone_style_references": request.tone_style_references.split(",") if request.tone_style_references else None,
     }
 
     # Convert constraints to dict if provided
@@ -365,6 +414,9 @@ async def generate(request: GenerateRequest):
         preferred_structure=request.preferred_structure,
         max_revisions=request.max_revisions,
         narrator_config=narrator_config_dict,
+        start_from_phase=request.start_from_phase,
+        previous_run_id=request.previous_run_id,
+        edited_content=request.edited_content,
     ))
 
     # Track active run for cancellation support

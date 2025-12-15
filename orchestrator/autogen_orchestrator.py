@@ -18,15 +18,23 @@ from models import (
 )
 from prompts import (
     ARCHITECT_SYSTEM_PROMPT,
+    COMPLEXITY_CHECKLIST_PROMPT,
+    CONTRADICTION_MAPS_PROMPT,
     CRITIC_SYSTEM_PROMPT,
+    EMOTIONAL_BEAT_SHEET_PROMPT,
+    IMPACT_ASSESSMENT_SYSTEM_PROMPT,
+    ORIGINALITY_CHECK_SYSTEM_PROMPT,
     POLISH_SYSTEM_PROMPT,
     PROFILER_SYSTEM_PROMPT,
+    SENSORY_BLUEPRINT_PROMPT,
     STRATEGIST_SYSTEM_PROMPT,
+    SUBTEXT_DESIGN_PROMPT,
     WORLDBUILDER_SYSTEM_PROMPT,
     WRITER_SYSTEM_PROMPT,
 )
 from services.model_client import UnifiedModelClient
 from services.qdrant_memory import QdrantMemoryService
+from services.supabase_persistence import SupabasePersistenceService
 
 
 class GenerationPhase(str, Enum):
@@ -38,6 +46,8 @@ class GenerationPhase(str, Enum):
     DRAFTING = "drafting"
     CRITIQUE = "critique"
     REVISION = "revision"
+    ORIGINALITY_CHECK = "originality_check"
+    IMPACT_ASSESSMENT = "impact_assessment"
     POLISH = "polish"
 
 
@@ -85,10 +95,12 @@ class StorytellerGroupChat:
         event_callback: Optional[Callable[[str, Dict], None]] = None,
         qdrant_url: Optional[str] = None,
         openai_api_key: Optional[str] = None,
+        pause_check_callback: Optional[Callable[[], bool]] = None,
     ):
         self.config = config
         self.model_client = UnifiedModelClient(config)
         self.event_callback = event_callback
+        self.pause_check_callback = pause_check_callback  # Returns True if paused
         self.state: Optional[GenerationState] = None
 
         # Agent instances
@@ -98,6 +110,8 @@ class StorytellerGroupChat:
         self.strategist: Optional[AssistantAgent] = None
         self.writer: Optional[AssistantAgent] = None
         self.critic: Optional[AssistantAgent] = None
+        self.originality: Optional[AssistantAgent] = None
+        self.impact: Optional[AssistantAgent] = None
 
         # Qdrant memory service (optional)
         self.qdrant_memory: Optional[QdrantMemoryService] = None
@@ -285,6 +299,8 @@ class StorytellerGroupChat:
             "writer": (agent_configs.writer_provider, agent_configs.writer_model),
             "critic": (agent_configs.critic_provider, agent_configs.critic_model),
             "polish": (agent_configs.polish_provider, agent_configs.polish_model),
+            "originality": (agent_configs.critic_provider, agent_configs.critic_model),
+            "impact": (agent_configs.critic_provider, agent_configs.critic_model),
         }
 
         provider, model = provider_map[agent_name]
@@ -392,6 +408,32 @@ Focus on sentence-level refinement without changing meaning or voice.
 Always output polished scenes as valid JSON wrapped in ```json``` blocks.
 """
 
+        originality_prompt = ORIGINALITY_CHECK_SYSTEM_PROMPT + """
+
+## Communication Protocol
+
+You can communicate with other agents:
+- ARTIFACT: Output your originality analysis as final artifact
+- QUESTION to Writer: Ask about intentional trope usage
+- QUESTION to Critic: Ask about previous feedback on originality
+
+Identify cliches and overused tropes, but consider intentional usage.
+Always output originality analysis as valid JSON wrapped in ```json``` blocks.
+"""
+
+        impact_prompt = IMPACT_ASSESSMENT_SYSTEM_PROMPT + """
+
+## Communication Protocol
+
+You can communicate with other agents:
+- ARTIFACT: Output your impact assessment as final artifact
+- QUESTION to Writer: Ask about intended emotional effects
+- QUESTION to Critic: Ask about emotional feedback from critique
+
+Evaluate emotional impact against intended beats.
+Always output impact assessment as valid JSON wrapped in ```json``` blocks.
+"""
+
         # Create agent instances with enhanced prompts
         # Note: We'll use custom message handling instead of AutoGen's built-in
         self.architect = self._create_agent("Architect", architect_prompt)
@@ -401,6 +443,8 @@ Always output polished scenes as valid JSON wrapped in ```json``` blocks.
         self.writer = self._create_agent("Writer", writer_prompt)
         self.critic = self._create_agent("Critic", critic_prompt)
         self.polish = self._create_agent("Polish", polish_prompt)
+        self.originality = self._create_agent("Originality", originality_prompt)
+        self.impact = self._create_agent("Impact", impact_prompt)
 
     def _create_agent(self, name: str, system_prompt: str) -> Dict[str, Any]:
         """Create an agent configuration (not AutoGen agent directly due to async requirements)."""
@@ -409,6 +453,33 @@ Always output polished scenes as valid JSON wrapped in ```json``` blocks.
             "system_prompt": system_prompt,
             "llm_config": self._get_llm_config(name.lower()),
         }
+
+    async def _check_pause(self) -> bool:
+        """Check if generation is paused and wait if so.
+        
+        Returns:
+            True if generation should continue, False if cancelled/should stop
+        """
+        if not self.pause_check_callback:
+            return True
+        
+        # Check if paused - wait until resumed
+        is_paused = self.pause_check_callback()
+        if is_paused:
+            self._emit_event("pause_wait_start", {
+                "message": "Generation paused, waiting for resume...",
+            })
+        
+        while self.pause_check_callback():
+            # Wait a bit before checking again
+            await asyncio.sleep(1)
+        
+        if is_paused:
+            self._emit_event("pause_wait_end", {
+                "message": "Generation resumed, continuing...",
+            })
+        
+        return True
 
     def _emit_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """Emit an event to the callback if registered."""
@@ -435,6 +506,9 @@ Always output polished scenes as valid JSON wrapped in ```json``` blocks.
         conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """Call an agent and get its response."""
+        # Check pause before every agent call for responsive pause behavior
+        await self._check_pause()
+        
         messages = [{"role": "system", "content": agent["system_prompt"]}]
 
         if conversation_history:
@@ -1383,6 +1457,1034 @@ Output as valid JSON with the polished content and a summary of changes made.
             "changes_summary": polished_content.get("polish_summary", "") if isinstance(polished_content, dict) else "",
         }
 
+    async def run_originality_check(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        moral_compass: str,
+        target_audience: str,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+        genre_context: str = "General Fiction",
+    ) -> Dict[str, Any]:
+        """
+        Run the Originality Check phase on a scene draft.
+        Identifies cliches, overused tropes, and predictable elements.
+
+        Args:
+            scene_number: The scene number being checked
+            draft: The scene draft to analyze
+            moral_compass: Moral compass setting for the story
+            target_audience: Target audience for context
+            emotional_beat: Optional emotional beat information
+            genre_context: Genre context for trope evaluation
+        """
+        self.state.phase = GenerationPhase.ORIGINALITY_CHECK
+
+        self._emit_event("phase_start", {
+            "phase": "originality_check",
+            "scene_number": scene_number,
+        })
+
+        # Format sensory details
+        sensory_details = draft.get("sensory_details", {})
+        sensory_str = "\n".join([
+            f"- {sense.capitalize()}: {', '.join(detail) if isinstance(detail, list) else detail}"
+            for sense, detail in sensory_details.items()
+            if detail
+        ]) if sensory_details else "No sensory details provided"
+
+        # Format dialogue entries
+        dialogue_entries = draft.get("dialogue_entries", [])
+        dialogue_str = "\n".join([
+            f"**{d.get('speaker', 'Unknown')}**: \"{d.get('spoken_text', d.get('line', ''))}\""
+            for d in dialogue_entries
+        ]) if dialogue_entries else "No dialogue entries"
+
+        # Format emotional beat
+        emotional_initial = ""
+        emotional_climax = ""
+        emotional_final = ""
+        if emotional_beat:
+            emotional_initial = emotional_beat.get("initial_state", "")
+            emotional_climax = emotional_beat.get("climax", "")
+            emotional_final = emotional_beat.get("final_state", "")
+
+        originality_prompt = f"""
+## Scene for Originality Analysis
+
+**Scene Number:** {scene_number}
+**Scene Title:** {draft.get('title', draft.get('scene_title', 'Untitled'))}
+
+**Genre/Style Context:** {genre_context}
+
+**Moral Compass:** {moral_compass}
+
+**Target Audience:** {target_audience}
+
+## Scene Content
+
+{draft.get('narrative_content', json.dumps(draft, indent=2))}
+
+## Sensory Details
+
+{sensory_str}
+
+## Dialogue Entries
+
+{dialogue_str}
+
+## Intended Emotional Beat
+
+- Initial: {emotional_initial}
+- Climax: {emotional_climax}
+- Final: {emotional_final}
+
+## Previous Originality Issues (if revision)
+
+N/A
+
+---
+
+Analyze this scene for originality. Identify cliches, evaluate trope usage, assess predictability, and provide specific suggestions for making the narrative fresher and more original. Output as valid JSON following the specified schema.
+"""
+
+        originality_response = await self._call_agent(self.originality, originality_prompt)
+        originality_msg = self._parse_agent_message("Originality", originality_response)
+        self.state.messages.append(originality_msg)
+
+        originality_result = originality_msg.content if isinstance(originality_msg.content, dict) else {}
+
+        # Determine if revision is required based on score
+        originality_score = originality_result.get("originality_score", 10)
+        revision_required = originality_score < 6.0 or originality_result.get("revision_required", False)
+
+        self._emit_event("phase_complete", {
+            "phase": "originality_check",
+            "scene_number": scene_number,
+            "originality_score": originality_score,
+            "revision_required": revision_required,
+        })
+
+        return {
+            "originality_analysis": originality_result,
+            "originality_score": originality_score,
+            "revision_required": revision_required,
+            "cliche_count": len(originality_result.get("cliche_instances", [])),
+            "flagged_sections": originality_result.get("flagged_sections", []),
+        }
+
+    async def run_impact_assessment(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        target_audience: str,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+        genre_context: str = "General Fiction",
+    ) -> Dict[str, Any]:
+        """
+        Run the Impact Assessment phase on a scene draft.
+        Evaluates emotional impact and alignment with intended beats.
+
+        Args:
+            scene_number: The scene number being assessed
+            draft: The scene draft to analyze
+            characters: List of character profiles for context
+            moral_compass: Moral compass setting for the story
+            target_audience: Target audience for calibration
+            emotional_beat: Optional intended emotional beat information
+            genre_context: Genre context for impact expectations
+        """
+        self.state.phase = GenerationPhase.IMPACT_ASSESSMENT
+
+        self._emit_event("phase_start", {
+            "phase": "impact_assessment",
+            "scene_number": scene_number,
+        })
+
+        # Format character context
+        present_characters = draft.get("characters_present", [])
+        character_context_str = "\n\n".join([
+            f"**{c.get('name', 'Unknown')}**\n"
+            f"- Core Motivation: {c.get('core_motivation', 'Unknown')}\n"
+            f"- Inner Trap: {c.get('inner_trap', 'Unknown')}\n"
+            f"- Psychological Wound: {c.get('psychological_wound', 'Unknown')}\n"
+            f"- Deepest Fear: {c.get('deepest_fear', 'Unknown')}"
+            for c in characters
+            if c.get("name") in present_characters
+        ]) if present_characters else "\n\n".join([
+            f"**{c.get('name', 'Unknown')}**\n"
+            f"- Core Motivation: {c.get('core_motivation', 'Unknown')}\n"
+            f"- Inner Trap: {c.get('inner_trap', 'Unknown')}"
+            for c in characters[:3]  # Include first 3 characters if none specified
+        ])
+
+        # Format sensory details
+        sensory_details = draft.get("sensory_details", {})
+        sensory_str = "\n".join([
+            f"- {sense.capitalize()}: {', '.join(detail) if isinstance(detail, list) else detail}"
+            for sense, detail in sensory_details.items()
+            if detail
+        ]) if sensory_details else "No sensory details provided"
+
+        # Format dialogue entries
+        dialogue_entries = draft.get("dialogue_entries", [])
+        dialogue_str = "\n".join([
+            f"**{d.get('speaker', 'Unknown')}**: \"{d.get('spoken_text', d.get('line', ''))}\""
+            for d in dialogue_entries
+        ]) if dialogue_entries else "No dialogue entries"
+
+        # Format emotional beat
+        emotional_initial = ""
+        emotional_climax = ""
+        emotional_final = ""
+        if emotional_beat:
+            emotional_initial = emotional_beat.get("initial_state", "")
+            emotional_climax = emotional_beat.get("climax", "")
+            emotional_final = emotional_beat.get("final_state", "")
+
+        impact_prompt = f"""
+## Scene for Impact Assessment
+
+**Scene Number:** {scene_number}
+**Scene Title:** {draft.get('title', draft.get('scene_title', 'Untitled'))}
+
+**Genre/Style Context:** {genre_context}
+
+**Moral Compass:** {moral_compass}
+
+**Target Audience:** {target_audience}
+
+## Intended Emotional Beat
+
+- **Initial State:** {emotional_initial}
+- **Climax:** {emotional_climax}
+- **Final State:** {emotional_final}
+
+## Scene Content
+
+{draft.get('narrative_content', json.dumps(draft, indent=2))}
+
+## Sensory Details
+
+{sensory_str}
+
+## Dialogue Entries
+
+{dialogue_str}
+
+## Character Context
+
+{character_context_str}
+
+## Previous Impact Issues (if revision)
+
+N/A
+
+---
+
+Assess the emotional impact of this scene. Evaluate how well the intended emotional beats are achieved, analyze the depth and layers of emotional engagement, assess the effectiveness of craft techniques, and provide specific suggestions for enhancing impact. Output as valid JSON following the specified schema.
+"""
+
+        impact_response = await self._call_agent(self.impact, impact_prompt)
+        impact_msg = self._parse_agent_message("Impact", impact_response)
+        self.state.messages.append(impact_msg)
+
+        impact_result = impact_msg.content if isinstance(impact_msg.content, dict) else {}
+
+        # Determine if revision is required based on score
+        impact_score = impact_result.get("impact_score", 10)
+        revision_required = impact_score < 6.0 or impact_result.get("revision_required", False)
+
+        # Extract emotional effectiveness details
+        emotional_effectiveness = impact_result.get("emotional_effectiveness", {})
+        beat_alignment = {
+            "initial": emotional_effectiveness.get("initial_alignment", 0),
+            "climax": emotional_effectiveness.get("climax_alignment", 0),
+            "final": emotional_effectiveness.get("final_alignment", 0),
+        }
+
+        self._emit_event("phase_complete", {
+            "phase": "impact_assessment",
+            "scene_number": scene_number,
+            "impact_score": impact_score,
+            "revision_required": revision_required,
+        })
+
+        return {
+            "impact_analysis": impact_result,
+            "impact_score": impact_score,
+            "revision_required": revision_required,
+            "beat_alignment": beat_alignment,
+            "weak_sections": impact_result.get("weak_sections", []),
+            "enhancement_suggestions": impact_result.get("enhancement_suggestions", []),
+        }
+
+    async def run_quality_gate(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        target_audience: str,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+        critique: Optional[Dict[str, Any]] = None,
+        genre_context: str = "General Fiction",
+        quality_thresholds: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run the complete quality gate: Originality Check + Impact Assessment.
+        Returns combined quality metrics and determines if scene passes quality standards.
+
+        Args:
+            scene_number: The scene number being evaluated
+            draft: The scene draft to analyze
+            characters: List of character profiles
+            moral_compass: Moral compass setting
+            target_audience: Target audience
+            emotional_beat: Intended emotional beat
+            critique: Optional critique from Critic agent
+            genre_context: Genre context
+            quality_thresholds: Optional custom thresholds (defaults provided)
+        """
+        # Default quality thresholds
+        thresholds = quality_thresholds or {
+            "critic_overall": 7.0,
+            "critic_category_min": 5,
+            "originality_score": 6.0,
+            "impact_score": 6.0,
+        }
+
+        self._emit_event("quality_gate_start", {
+            "scene_number": scene_number,
+            "thresholds": thresholds,
+        })
+
+        # Run originality check
+        originality_result = await self.run_originality_check(
+            scene_number=scene_number,
+            draft=draft,
+            moral_compass=moral_compass,
+            target_audience=target_audience,
+            emotional_beat=emotional_beat,
+            genre_context=genre_context,
+        )
+
+        # Run impact assessment
+        impact_result = await self.run_impact_assessment(
+            scene_number=scene_number,
+            draft=draft,
+            characters=characters,
+            moral_compass=moral_compass,
+            target_audience=target_audience,
+            emotional_beat=emotional_beat,
+            genre_context=genre_context,
+        )
+
+        # Evaluate critic scores if available
+        critic_passed = True
+        critic_issues = []
+        if critique:
+            overall_score = critique.get("overall_score", 10)
+            if overall_score < thresholds["critic_overall"]:
+                critic_passed = False
+                critic_issues.append(f"Overall score {overall_score} below threshold {thresholds['critic_overall']}")
+
+            # Check individual category scores
+            feedback_items = critique.get("feedback_items", [])
+            for item in feedback_items:
+                score = item.get("score", 10)
+                if score < thresholds["critic_category_min"]:
+                    critic_passed = False
+                    critic_issues.append(
+                        f"Category '{item.get('category', 'Unknown')}' score {score} below minimum {thresholds['critic_category_min']}"
+                    )
+
+        # Determine overall quality gate pass/fail
+        originality_passed = originality_result["originality_score"] >= thresholds["originality_score"]
+        impact_passed = impact_result["impact_score"] >= thresholds["impact_score"]
+
+        quality_passed = critic_passed and originality_passed and impact_passed
+
+        # Compile issues for revision
+        revision_issues = []
+        if not critic_passed:
+            revision_issues.extend(critic_issues)
+        if not originality_passed:
+            revision_issues.append(f"Originality score {originality_result['originality_score']} below threshold {thresholds['originality_score']}")
+            revision_issues.extend([
+                f"Cliche: {c.get('text', 'Unknown')}" for c in originality_result.get("flagged_sections", [])[:3]
+            ])
+        if not impact_passed:
+            revision_issues.append(f"Impact score {impact_result['impact_score']} below threshold {thresholds['impact_score']}")
+            revision_issues.extend([
+                f"Weak section: {s.get('location', 'Unknown')}" for s in impact_result.get("weak_sections", [])[:3]
+            ])
+
+        self._emit_event("quality_gate_complete", {
+            "scene_number": scene_number,
+            "quality_passed": quality_passed,
+            "originality_score": originality_result["originality_score"],
+            "impact_score": impact_result["impact_score"],
+            "critic_passed": critic_passed,
+        })
+
+        return {
+            "quality_passed": quality_passed,
+            "originality_result": originality_result,
+            "impact_result": impact_result,
+            "critic_passed": critic_passed,
+            "critic_issues": critic_issues,
+            "revision_issues": revision_issues,
+            "scores": {
+                "originality": originality_result["originality_score"],
+                "impact": impact_result["impact_score"],
+                "critic_overall": critique.get("overall_score") if critique else None,
+            },
+            "thresholds": thresholds,
+        }
+
+    async def run_quality_revision(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        quality_result: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        scene_context: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Revise a scene draft based on quality gate feedback.
+        Sends the draft back to Writer with specific issues to address.
+
+        Args:
+            scene_number: The scene number being revised
+            draft: The current scene draft
+            quality_result: The quality gate result with issues
+            characters: List of character profiles
+            moral_compass: Moral compass setting
+            scene_context: Context about the scene for continuity
+        """
+        self._emit_event("quality_revision_start", {
+            "scene_number": scene_number,
+            "issues_count": len(quality_result.get("revision_issues", [])),
+            "scores": quality_result.get("scores", {}),
+        })
+
+        # Format the quality feedback for Writer
+        issues = quality_result.get("revision_issues", [])
+        scores = quality_result.get("scores", {})
+        originality_result = quality_result.get("originality_result", {})
+        impact_result = quality_result.get("impact_result", {})
+
+        # Build detailed feedback
+        feedback_sections = []
+
+        # Score summary
+        feedback_sections.append(f"""## Quality Gate Results
+
+Your scene did not pass the quality gate. Please revise to address the following issues:
+
+**Current Scores:**
+- Originality: {scores.get('originality', 'N/A')} (threshold: 6.0)
+- Impact: {scores.get('impact', 'N/A')} (threshold: 6.0)
+- Critic Overall: {scores.get('critic_overall', 'N/A')} (threshold: 7.0)
+""")
+
+        # Originality issues
+        if originality_result.get("originality_score", 10) < 6.0:
+            flagged = originality_result.get("flagged_sections", [])
+            suggestions = originality_result.get("suggestions", [])
+            feedback_sections.append("""## Originality Issues
+
+The scene contains clichés or overused tropes that reduce its freshness:
+""")
+            for section in flagged[:5]:
+                feedback_sections.append(f"- **{section.get('type', 'Issue')}**: {section.get('text', section.get('description', 'Unknown'))}")
+            if suggestions:
+                feedback_sections.append("\n**Suggestions:**")
+                for sug in suggestions[:3]:
+                    feedback_sections.append(f"- {sug}")
+
+        # Impact issues
+        if impact_result.get("impact_score", 10) < 6.0:
+            weak_sections = impact_result.get("weak_sections", [])
+            enhancements = impact_result.get("enhancement_suggestions", [])
+            feedback_sections.append("""## Impact Issues
+
+The scene's emotional impact needs strengthening:
+""")
+            for section in weak_sections[:5]:
+                feedback_sections.append(f"- **{section.get('location', 'Section')}**: {section.get('issue', section.get('description', 'Weak impact'))}")
+            if enhancements:
+                feedback_sections.append("\n**Enhancement Suggestions:**")
+                for enh in enhancements[:3]:
+                    feedback_sections.append(f"- {enh}")
+
+        # General issues
+        if issues:
+            feedback_sections.append("\n## All Issues to Address\n")
+            for issue in issues:
+                feedback_sections.append(f"- {issue}")
+
+        feedback_text = "\n".join(feedback_sections)
+
+        # Format character profiles for context
+        character_profiles_str = "\n\n".join([
+            f"**{c.get('name', 'Unknown')}**: {c.get('role', 'Unknown role')}"
+            for c in characters[:5]
+        ])
+
+        # Create revision prompt for Writer
+        revision_prompt = f"""
+## Quality Revision Required - Scene {scene_number}
+
+{feedback_text}
+
+## Current Draft
+
+**Scene Title:** {draft.get('scene_title', 'Untitled')}
+
+**Narrative Content:**
+{draft.get('narrative_content', json.dumps(draft, indent=2))}
+
+## Characters Present
+{character_profiles_str}
+
+## Moral Compass
+{moral_compass}
+
+---
+
+## Revision Instructions
+
+Please revise this scene to address the quality issues above. Focus on:
+
+1. **Originality**: Replace clichés with fresh, unexpected alternatives. Subvert tropes or find unique angles.
+2. **Impact**: Strengthen emotional resonance. Show don't tell. Use sensory details and character reactions.
+3. **Maintain Continuity**: Keep all plot points, character actions, and story facts intact.
+4. **Preserve Structure**: Output the revised scene in the same JSON format with all required fields.
+
+Output your revised scene as valid JSON with the same structure as the original draft.
+"""
+
+        # Call Writer for revision
+        revision_response = await self._call_agent(self.writer, revision_prompt)
+        revision_msg = self._parse_agent_message("Writer", revision_response)
+        self.state.messages.append(revision_msg)
+
+        revised_draft = revision_msg.content if isinstance(revision_msg.content, dict) else draft
+
+        self._emit_event("quality_revision_complete", {
+            "scene_number": scene_number,
+            "revised": True,
+        })
+
+        return {
+            "revised_draft": revised_draft,
+            "original_draft": draft,
+            "feedback_given": feedback_text,
+        }
+
+    async def enforce_quality_for_scene(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        target_audience: str,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+        critique: Optional[Dict[str, Any]] = None,
+        max_quality_retries: int = 2,
+        scene_context: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Enforce quality standards for a scene with retry logic.
+        Runs quality gate and revises the scene if it fails, up to max_quality_retries.
+
+        Args:
+            scene_number: The scene number
+            draft: The initial scene draft
+            characters: List of character profiles
+            moral_compass: Moral compass setting
+            target_audience: Target audience
+            emotional_beat: Intended emotional beat
+            critique: Optional critique from Critic
+            max_quality_retries: Maximum revision attempts (default: 2)
+            scene_context: Context for continuity
+
+        Returns:
+            Dict with final draft, quality results, and attempt history
+        """
+        current_draft = draft
+        current_critique = critique
+        attempts = []
+
+        for attempt in range(max_quality_retries + 1):
+            self._emit_event("quality_enforcement_attempt", {
+                "scene_number": scene_number,
+                "attempt": attempt + 1,
+                "max_attempts": max_quality_retries + 1,
+            })
+
+            # Run quality gate
+            quality_result = await self.run_quality_gate(
+                scene_number=scene_number,
+                draft=current_draft,
+                characters=characters,
+                moral_compass=moral_compass,
+                target_audience=target_audience,
+                emotional_beat=emotional_beat,
+                critique=current_critique,
+            )
+
+            attempts.append({
+                "attempt": attempt + 1,
+                "quality_passed": quality_result["quality_passed"],
+                "scores": quality_result["scores"],
+                "issues": quality_result["revision_issues"],
+            })
+
+            # If quality passed, we're done
+            if quality_result["quality_passed"]:
+                self._emit_event("quality_enforcement_passed", {
+                    "scene_number": scene_number,
+                    "attempt": attempt + 1,
+                    "scores": quality_result["scores"],
+                })
+                return {
+                    "final_draft": current_draft,
+                    "quality_passed": True,
+                    "quality_result": quality_result,
+                    "attempts": attempts,
+                    "retries_used": attempt,
+                }
+
+            # If this was the last attempt, exit loop
+            if attempt >= max_quality_retries:
+                break
+
+            # Revise the draft based on quality feedback
+            revision_result = await self.run_quality_revision(
+                scene_number=scene_number,
+                draft=current_draft,
+                quality_result=quality_result,
+                characters=characters,
+                moral_compass=moral_compass,
+                scene_context=scene_context,
+            )
+
+            current_draft = revision_result["revised_draft"]
+            # Note: We don't re-run Critic here to save time/cost
+            # The quality gate will still check originality and impact
+
+        # Max retries exhausted, quality still not passed
+        self._emit_event("quality_enforcement_exhausted", {
+            "scene_number": scene_number,
+            "max_attempts": max_quality_retries + 1,
+            "final_scores": quality_result["scores"],
+        })
+
+        return {
+            "final_draft": current_draft,
+            "quality_passed": False,
+            "quality_result": quality_result,
+            "attempts": attempts,
+            "retries_used": max_quality_retries,
+            "retries_exhausted": True,
+        }
+
+    # =========================================================================
+    # Priority 3: Advanced Features
+    # =========================================================================
+
+    async def run_contradiction_maps(
+        self,
+        characters: List[Dict[str, Any]],
+        narrative: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate Internal Contradiction Maps for characters.
+        Maps contradictory desires, beliefs, and behaviors within each character.
+
+        Args:
+            characters: List of character profiles from Profiler
+            narrative: Narrative context from Genesis phase
+        """
+        self._emit_event("phase_start", {"phase": "contradiction_maps"})
+
+        # Format character profiles for analysis
+        characters_str = json.dumps(characters, indent=2)
+
+        user_prompt = f"""
+## Characters to Analyze
+
+{characters_str}
+
+## Narrative Context
+
+**Plot Summary:** {narrative.get("plot_summary", "")}
+**Main Conflict:** {narrative.get("main_conflict", "")}
+**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+
+---
+
+{CONTRADICTION_MAPS_PROMPT}
+
+Analyze each character and output the contradiction maps as valid JSON.
+"""
+
+        response = await self._call_agent(self.profiler, user_prompt)
+        msg = self._parse_agent_message("Profiler", response)
+        self.state.messages.append(msg)
+
+        contradiction_maps = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("phase_complete", {
+            "phase": "contradiction_maps",
+            "character_count": len(characters),
+        })
+
+        return {
+            "contradiction_maps": contradiction_maps,
+            "characters_analyzed": len(characters),
+        }
+
+    async def run_emotional_beat_sheet(
+        self,
+        outline: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        narrative: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate a comprehensive Emotional Beat Sheet for the entire story.
+        Maps emotional trajectory across all scenes.
+
+        Args:
+            outline: Plot outline with scenes
+            characters: Character profiles
+            narrative: Narrative context
+        """
+        self._emit_event("phase_start", {"phase": "emotional_beat_sheet"})
+
+        scenes = outline.get("scenes", [])
+        scenes_summary = "\n".join([
+            f"Scene {s.get('scene_number', i+1)}: {s.get('title', 'Untitled')} - {s.get('conflict_description', '')}"
+            for i, s in enumerate(scenes)
+        ])
+
+        protagonist = characters[0] if characters else {}
+
+        user_prompt = f"""
+## Story Structure
+
+**Total Scenes:** {len(scenes)}
+**Structure Type:** {outline.get("structure_type", "ThreeAct")}
+
+**Key Structure Points:**
+- Inciting Incident: Scene {outline.get("inciting_incident_scene", 1)}
+- Midpoint: Scene {outline.get("midpoint_scene", len(scenes)//2)}
+- Climax: Scene {outline.get("climax_scene", len(scenes)-1)}
+- Resolution: Scene {outline.get("resolution_scene", len(scenes))}
+
+## Scene Overview
+
+{scenes_summary}
+
+## Protagonist
+
+**Name:** {protagonist.get("name", "Unknown")}
+**Core Motivation:** {protagonist.get("core_motivation", "")}
+**Psychological Wound:** {protagonist.get("psychological_wound", "")}
+**Deepest Fear:** {protagonist.get("deepest_fear", "")}
+
+## Narrative Context
+
+**Plot Summary:** {narrative.get("plot_summary", "")}
+**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+
+---
+
+{EMOTIONAL_BEAT_SHEET_PROMPT}
+
+Create the emotional beat sheet as valid JSON.
+"""
+
+        response = await self._call_agent(self.strategist, user_prompt)
+        msg = self._parse_agent_message("Strategist", response)
+        self.state.messages.append(msg)
+
+        beat_sheet = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("phase_complete", {
+            "phase": "emotional_beat_sheet",
+            "scene_count": len(scenes),
+        })
+
+        return {
+            "emotional_beat_sheet": beat_sheet,
+            "scene_count": len(scenes),
+        }
+
+    async def run_sensory_blueprint(
+        self,
+        scene: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        worldbuilding: Optional[Dict[str, Any]] = None,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a Sensory Imagery Blueprint for a specific scene.
+        Plans sensory details before drafting.
+
+        Args:
+            scene: Scene outline
+            characters: Characters present in the scene
+            worldbuilding: Worldbuilding context
+            emotional_beat: Emotional beat for this scene
+        """
+        scene_number = scene.get("scene_number", 1)
+        self._emit_event("sensory_blueprint_start", {"scene_number": scene_number})
+
+        # Get characters present in this scene
+        present_chars = [
+            c for c in characters
+            if c.get("name") in scene.get("characters_present", [])
+        ]
+
+        user_prompt = f"""
+## Scene Context
+
+**Scene Number:** {scene_number}
+**Scene Title:** {scene.get("title", "Untitled")}
+**Setting:** {scene.get("setting", "")}
+
+**Conflict:** {scene.get("conflict_description", "")}
+
+**Emotional Beat:**
+- Initial: {emotional_beat.get("initial_state", "") if emotional_beat else scene.get("emotional_beat", {}).get("initial_state", "")}
+- Climax: {emotional_beat.get("climax", "") if emotional_beat else scene.get("emotional_beat", {}).get("climax", "")}
+- Final: {emotional_beat.get("final_state", "") if emotional_beat else scene.get("emotional_beat", {}).get("final_state", "")}
+
+## Characters Present
+
+{json.dumps(present_chars, indent=2) if present_chars else "No specific characters"}
+
+## Worldbuilding Context
+
+{json.dumps(worldbuilding, indent=2) if worldbuilding else "N/A"}
+
+---
+
+{SENSORY_BLUEPRINT_PROMPT}
+
+Create the sensory blueprint for this scene as valid JSON.
+"""
+
+        response = await self._call_agent(self.writer, user_prompt)
+        msg = self._parse_agent_message("Writer", response)
+        self.state.messages.append(msg)
+
+        blueprint = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("sensory_blueprint_complete", {
+            "scene_number": scene_number,
+        })
+
+        return {
+            "sensory_blueprint": blueprint,
+            "scene_number": scene_number,
+        }
+
+    async def run_subtext_design(
+        self,
+        scene: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        contradiction_maps: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Design the Subtext Layer for a scene using the Iceberg Principle.
+        Ensures 60%+ of meanings remain implicit.
+
+        Args:
+            scene: Scene outline
+            characters: Characters in the scene
+            contradiction_maps: Character contradiction maps for deeper subtext
+        """
+        scene_number = scene.get("scene_number", 1)
+        self._emit_event("subtext_design_start", {"scene_number": scene_number})
+
+        # Get characters present
+        present_chars = [
+            c for c in characters
+            if c.get("name") in scene.get("characters_present", [])
+        ]
+
+        # Get relevant contradictions
+        relevant_contradictions = []
+        if contradiction_maps and "character_contradictions" in contradiction_maps:
+            for char_map in contradiction_maps["character_contradictions"]:
+                if char_map.get("character_name") in scene.get("characters_present", []):
+                    relevant_contradictions.append(char_map)
+
+        user_prompt = f"""
+## Scene Context
+
+**Scene Number:** {scene_number}
+**Scene Title:** {scene.get("title", "Untitled")}
+**Setting:** {scene.get("setting", "")}
+
+**Conflict:** {scene.get("conflict_description", "")}
+**Plot Advancement:** {scene.get("plot_advancement", "")}
+
+**Existing Subtext Layer:** {scene.get("subtext_layer", "")}
+
+## Characters Present
+
+{json.dumps(present_chars, indent=2) if present_chars else "No specific characters"}
+
+## Character Contradictions (for deeper subtext)
+
+{json.dumps(relevant_contradictions, indent=2) if relevant_contradictions else "N/A"}
+
+---
+
+{SUBTEXT_DESIGN_PROMPT}
+
+Design the subtext layer for this scene as valid JSON.
+"""
+
+        response = await self._call_agent(self.strategist, user_prompt)
+        msg = self._parse_agent_message("Strategist", response)
+        self.state.messages.append(msg)
+
+        subtext_design = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("subtext_design_complete", {
+            "scene_number": scene_number,
+            "iceberg_ratio": subtext_design.get("iceberg_ratio", {}),
+        })
+
+        return {
+            "subtext_design": subtext_design,
+            "scene_number": scene_number,
+        }
+
+    async def run_complexity_checklist(
+        self,
+        outline: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        narrative: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate a Complexity Layer Checklist for the story.
+        Tracks Main Plot, Subplot, Character Arc, Symbolic, and Thematic layers.
+
+        Args:
+            outline: Plot outline with scenes
+            characters: Character profiles
+            narrative: Narrative context
+        """
+        self._emit_event("phase_start", {"phase": "complexity_checklist"})
+
+        scenes = outline.get("scenes", [])
+        scenes_str = json.dumps(scenes, indent=2)
+
+        user_prompt = f"""
+## Story Overview
+
+**Plot Summary:** {narrative.get("plot_summary", "")}
+**Main Conflict:** {narrative.get("main_conflict", "")}
+**Thematic Elements:** {", ".join(narrative.get("thematic_elements", []))}
+
+## Characters
+
+{json.dumps([{"name": c.get("name"), "archetype": c.get("archetype"), "potential_arc": c.get("potential_arc")} for c in characters], indent=2)}
+
+## Scene Outline
+
+{scenes_str}
+
+---
+
+{COMPLEXITY_CHECKLIST_PROMPT}
+
+Generate the complexity layer checklist as valid JSON.
+"""
+
+        response = await self._call_agent(self.strategist, user_prompt)
+        msg = self._parse_agent_message("Strategist", response)
+        self.state.messages.append(msg)
+
+        checklist = msg.content if isinstance(msg.content, dict) else {}
+
+        self._emit_event("phase_complete", {
+            "phase": "complexity_checklist",
+            "layers_tracked": 5,
+        })
+
+        return {
+            "complexity_checklist": checklist,
+            "scene_count": len(scenes),
+        }
+
+    async def run_advanced_planning(
+        self,
+        outline: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        narrative: Dict[str, Any],
+        worldbuilding: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run all advanced planning phases before drafting.
+        This is a convenience method that runs:
+        1. Contradiction Maps
+        2. Emotional Beat Sheet
+        3. Complexity Checklist
+
+        Per-scene planning (Sensory Blueprint, Subtext Design) is done in drafting.
+
+        Args:
+            outline: Plot outline with scenes
+            characters: Character profiles
+            narrative: Narrative context
+            worldbuilding: Worldbuilding context
+        """
+        self._emit_event("phase_start", {"phase": "advanced_planning"})
+
+        results = {}
+
+        # 1. Generate Contradiction Maps for characters
+        contradiction_result = await self.run_contradiction_maps(
+            characters=characters,
+            narrative=narrative,
+        )
+        results["contradiction_maps"] = contradiction_result.get("contradiction_maps", {})
+
+        # 2. Generate Emotional Beat Sheet
+        beat_sheet_result = await self.run_emotional_beat_sheet(
+            outline=outline,
+            characters=characters,
+            narrative=narrative,
+        )
+        results["emotional_beat_sheet"] = beat_sheet_result.get("emotional_beat_sheet", {})
+
+        # 3. Generate Complexity Checklist
+        complexity_result = await self.run_complexity_checklist(
+            outline=outline,
+            characters=characters,
+            narrative=narrative,
+        )
+        results["complexity_checklist"] = complexity_result.get("complexity_checklist", {})
+
+        self._emit_event("phase_complete", {
+            "phase": "advanced_planning",
+            "features_completed": ["contradiction_maps", "emotional_beat_sheet", "complexity_checklist"],
+        })
+
+        return results
+
     async def run_demo_generation(
         self,
         project: StoryProject,
@@ -1662,9 +2764,15 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         openai_api_key: Optional[str] = None,
         max_revisions: int = 2,
         narrator_config: Optional[Dict[str, Any]] = None,
+        run_id: Optional[str] = None,
+        persistence_service: Optional[SupabasePersistenceService] = None,
+        start_from_phase: Optional[str] = None,
+        previous_artifacts: Optional[Dict[str, Dict[str, Any]]] = None,
+        edited_content: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Run the complete story generation pipeline with optional Qdrant memory integration.
+        Run the complete story generation pipeline with optional Qdrant memory integration
+        and support for phase-based regeneration.
 
         Args:
             project: Story project configuration
@@ -1673,12 +2781,36 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             preferred_structure: Story structure (ThreeAct, HeroJourney, etc.)
             openai_api_key: OpenAI API key for embeddings (enables Qdrant memory)
             max_revisions: Maximum Writer↔Critic revision cycles per scene (1-5)
+            narrator_config: Narrator design settings (POV, reliability, stance)
+            run_id: Unique identifier for this generation run (for artifact persistence)
+            persistence_service: Supabase persistence service for storing artifacts
+            start_from_phase: Phase to start from (for partial regeneration)
+                Options: genesis, characters, worldbuilding, outlining, advanced_planning, drafting, polish
+            previous_artifacts: Previously generated artifacts to use when resuming
+            edited_content: User-edited content to use instead of regenerating
+                Format: {"phase": "characters", "content": {...}}
         """
         results = {
             "project": project.model_dump(),
             "phases": {},
             "memory_enabled": False,
+            "run_id": run_id,
+            "regeneration_mode": start_from_phase is not None,
         }
+
+        # Phase order for determining what to skip/regenerate
+        phase_order = ["genesis", "characters", "worldbuilding", "outlining", "advanced_planning", "drafting", "polish"]
+        start_phase_index = 0
+        if start_from_phase:
+            try:
+                start_phase_index = phase_order.index(start_from_phase)
+                self._emit_event("regeneration_start", {
+                    "start_from_phase": start_from_phase,
+                    "phases_to_regenerate": phase_order[start_phase_index:],
+                })
+            except ValueError:
+                self._emit_event("regeneration_error", {"error": f"Unknown phase: {start_from_phase}"})
+                start_phase_index = 0
 
         # Generate a unique project ID for memory storage
         project_id = project.seed_idea[:20].replace(" ", "_") + "_" + str(hash(project.seed_idea))[:8]
@@ -1688,8 +2820,48 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             memory_initialized = await self.initialize_memory(openai_api_key)
             results["memory_enabled"] = memory_initialized
 
-        # Phase 1: Genesis (this initializes self.state)
-        genesis_result = await self.run_genesis_phase(project)
+        # Helper function to store artifact in Supabase
+        async def store_artifact(phase: str, artifact_type: str, content: Dict[str, Any]) -> None:
+            if persistence_service and run_id and persistence_service.is_connected:
+                await persistence_service.store_run_artifact(
+                    project_id=project_id,
+                    run_id=run_id,
+                    phase=phase,
+                    artifact_type=artifact_type,
+                    content=content,
+                )
+
+        # Helper function to check if we should skip a phase (use previous artifacts)
+        def should_skip_phase(phase: str) -> bool:
+            if not start_from_phase or not previous_artifacts:
+                return False
+            phase_index = phase_order.index(phase)
+            return phase_index < start_phase_index
+
+        # Helper function to get previous artifact or edited content
+        def get_previous_artifact(phase: str, artifact_type: str) -> Optional[Dict[str, Any]]:
+            # Check if user provided edited content for this phase
+            if edited_content and edited_content.get("phase") == phase:
+                return edited_content.get("content")
+            # Otherwise use previous artifacts
+            if previous_artifacts and phase in previous_artifacts:
+                return previous_artifacts[phase].get(artifact_type)
+            return None
+
+        # Phase 1: Genesis
+        genesis_result = None
+        if should_skip_phase("genesis"):
+            # Use previous genesis result
+            narrative = get_previous_artifact("genesis", "narrative_possibility")
+            if narrative:
+                genesis_result = {"narrative_possibility": narrative}
+                results["phases"]["genesis"] = genesis_result
+                self._emit_event("phase_skipped", {"phase": "genesis", "reason": "using_previous_artifact"})
+        
+        if not genesis_result:
+            await self._check_pause()  # Pause checkpoint
+            genesis_result = await self.run_genesis_phase(project)
+            await store_artifact("genesis", "narrative_possibility", genesis_result.get("narrative_possibility", {}))
 
         # Set max_revisions in state AFTER genesis phase creates it
         if self.state:
@@ -1700,11 +2872,23 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             return {"error": "Genesis phase failed", **results}
 
         # Phase 2: Characters
-        characters_result = await self.run_characters_phase(
-            narrative=genesis_result["narrative_possibility"],
-            moral_compass=project.moral_compass.value,
-            target_audience=project.target_audience,
-        )
+        characters_result = None
+        if should_skip_phase("characters"):
+            characters = get_previous_artifact("characters", "characters")
+            if characters:
+                characters_result = {"characters": characters}
+                results["phases"]["characters"] = characters_result
+                self._emit_event("phase_skipped", {"phase": "characters", "reason": "using_previous_artifact"})
+
+        if not characters_result:
+            await self._check_pause()  # Pause checkpoint
+            characters_result = await self.run_characters_phase(
+                narrative=genesis_result["narrative_possibility"],
+                moral_compass=project.moral_compass.value,
+                target_audience=project.target_audience,
+            )
+            await store_artifact("characters", "characters", {"characters": characters_result.get("characters", [])})
+
         results["phases"]["characters"] = characters_result
 
         if not characters_result.get("characters"):
@@ -1716,95 +2900,198 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             await self._store_characters_in_memory(project_id, characters)
 
         # Phase 3: Worldbuilding
-        worldbuilding_result = await self.run_worldbuilding_phase(
-            narrative=genesis_result["narrative_possibility"],
-            characters=characters_result["characters"],
-            moral_compass=project.moral_compass.value,
-            target_audience=project.target_audience,
-        )
+        worldbuilding_result = None
+        if should_skip_phase("worldbuilding"):
+            worldbuilding = get_previous_artifact("worldbuilding", "worldbuilding")
+            if worldbuilding:
+                worldbuilding_result = {"worldbuilding": worldbuilding}
+                results["phases"]["worldbuilding"] = worldbuilding_result
+                self._emit_event("phase_skipped", {"phase": "worldbuilding", "reason": "using_previous_artifact"})
+
+        if not worldbuilding_result:
+            await self._check_pause()  # Pause checkpoint
+            worldbuilding_result = await self.run_worldbuilding_phase(
+                narrative=genesis_result["narrative_possibility"],
+                characters=characters_result["characters"],
+                moral_compass=project.moral_compass.value,
+                target_audience=project.target_audience,
+            )
+            await store_artifact("worldbuilding", "worldbuilding", worldbuilding_result.get("worldbuilding", {}))
+
         results["phases"]["worldbuilding"] = worldbuilding_result
 
         # Worldbuilding is optional - continue even if it fails
         worldbuilding = worldbuilding_result.get("worldbuilding", {})
 
         # Phase 4: Outlining
-        outlining_result = await self.run_outlining_phase(
-            narrative=genesis_result["narrative_possibility"],
-            characters=characters_result["characters"],
-            moral_compass=project.moral_compass.value,
-            target_word_count=target_word_count,
-            estimated_scenes=estimated_scenes,
-            preferred_structure=preferred_structure,
-            worldbuilding=worldbuilding,
-        )
+        outlining_result = None
+        if should_skip_phase("outlining"):
+            outline = get_previous_artifact("outlining", "outline")
+            if outline:
+                outlining_result = {"outline": outline}
+                results["phases"]["outlining"] = outlining_result
+                self._emit_event("phase_skipped", {"phase": "outlining", "reason": "using_previous_artifact"})
+
+        if not outlining_result:
+            await self._check_pause()  # Pause checkpoint
+            outlining_result = await self.run_outlining_phase(
+                narrative=genesis_result["narrative_possibility"],
+                characters=characters_result["characters"],
+                moral_compass=project.moral_compass.value,
+                target_word_count=target_word_count,
+                estimated_scenes=estimated_scenes,
+                preferred_structure=preferred_structure,
+                worldbuilding=worldbuilding,
+            )
+            await store_artifact("outlining", "outline", outlining_result.get("outline", {}))
+
         results["phases"]["outlining"] = outlining_result
 
         if not outlining_result.get("outline"):
             return {"error": "Outlining phase failed", **results}
 
-        # Phase 5: Drafting (all scenes)
         outline = outlining_result["outline"]
         scenes = outline.get("scenes", [])
-        drafts = []
 
-        previous_summary = "N/A"
-        for i, scene in enumerate(scenes):
-            # Retrieve relevant characters from memory for this scene
-            scene_context = scene.get("title", "") + " " + scene.get("conflict", "")
-            relevant_characters = await self._retrieve_relevant_characters(project_id, scene_context, limit=3)
+        # Phase 5: Advanced Planning
+        advanced_planning_result = None
+        if should_skip_phase("advanced_planning"):
+            advanced = get_previous_artifact("advanced_planning", "advanced_planning")
+            if advanced:
+                advanced_planning_result = advanced
+                results["phases"]["advanced_planning"] = advanced_planning_result
+                self._emit_event("phase_skipped", {"phase": "advanced_planning", "reason": "using_previous_artifact"})
 
-            # Retrieve relevant previous scenes for continuity
-            relevant_scenes = await self._retrieve_relevant_scenes(project_id, scene_context, limit=2)
-
-            # Retrieve relevant worldbuilding elements for this scene
-            relevant_worldbuilding = await self._retrieve_worldbuilding(project_id, scene_context, limit=3)
-
-            # Merge static worldbuilding with retrieved elements
-            scene_worldbuilding = worldbuilding.copy() if worldbuilding else {}
-            if relevant_worldbuilding:
-                # Add retrieved elements to the worldbuilding context
-                for key in ["geography", "cultures", "rules", "history"]:
-                    if relevant_worldbuilding.get(key):
-                        existing = scene_worldbuilding.get(key, [])
-                        scene_worldbuilding[key] = existing + [
-                            elem for elem in relevant_worldbuilding[key]
-                            if elem not in existing
-                        ]
-
-            draft_result = await self.run_drafting_phase(
-                scene=scene,
+        if not advanced_planning_result:
+            await self._check_pause()  # Pause checkpoint
+            advanced_planning_result = await self.run_advanced_planning(
+                outline=outline,
                 characters=characters_result["characters"],
-                moral_compass=project.moral_compass.value,
-                worldbuilding=scene_worldbuilding if scene_worldbuilding else None,
-                previous_scene_summary=previous_summary,
-                memory_context={
-                    "relevant_characters": relevant_characters,
-                    "relevant_scenes": relevant_scenes,
-                } if (relevant_characters or relevant_scenes) else None,
-                narrator_config=narrator_config,
+                narrative=genesis_result["narrative_possibility"],
+                worldbuilding=worldbuilding,
             )
-            drafts.append(draft_result)
+            await store_artifact("advanced_planning", "advanced_planning", advanced_planning_result)
 
-            # Store drafted scene in memory for continuity
-            if draft_result.get("draft"):
-                draft = draft_result["draft"]
-                await self._store_scene_in_memory(project_id, i + 1, draft)
-                previous_summary = draft.get("narrative_content", "")[:500] + "..."
+        results["phases"]["advanced_planning"] = advanced_planning_result
+
+        # Extract advanced planning artifacts for use in drafting
+        contradiction_maps = advanced_planning_result.get("contradiction_maps", {})
+        emotional_beat_sheet = advanced_planning_result.get("emotional_beat_sheet", {})
+        complexity_checklist = advanced_planning_result.get("complexity_checklist", {})
+
+        # Phase 6: Drafting (all scenes)
+        drafts = []
+        previous_drafts = None
+        if should_skip_phase("drafting"):
+            previous_drafts = get_previous_artifact("drafting", "drafts")
+            if previous_drafts:
+                drafts = previous_drafts.get("scenes", [])
+                results["phases"]["drafting"] = {"scenes": drafts}
+                self._emit_event("phase_skipped", {"phase": "drafting", "reason": "using_previous_artifact"})
+
+        if not previous_drafts:
+            previous_summary = "N/A"
+            for i, scene in enumerate(scenes):
+                await self._check_pause()  # Pause checkpoint before each scene
+                # Retrieve relevant characters from memory for this scene
+                scene_context = scene.get("title", "") + " " + scene.get("conflict", "")
+                relevant_characters = await self._retrieve_relevant_characters(project_id, scene_context, limit=3)
+
+                # Retrieve relevant previous scenes for continuity
+                relevant_scenes = await self._retrieve_relevant_scenes(project_id, scene_context, limit=2)
+
+                # Retrieve relevant worldbuilding elements for this scene
+                relevant_worldbuilding = await self._retrieve_worldbuilding(project_id, scene_context, limit=3)
+
+                # Merge static worldbuilding with retrieved elements
+                scene_worldbuilding = worldbuilding.copy() if worldbuilding else {}
+                if relevant_worldbuilding:
+                    # Add retrieved elements to the worldbuilding context
+                    for key in ["geography", "cultures", "rules", "history"]:
+                        if relevant_worldbuilding.get(key):
+                            existing = scene_worldbuilding.get(key, [])
+                            scene_worldbuilding[key] = existing + [
+                                elem for elem in relevant_worldbuilding[key]
+                                if elem not in existing
+                            ]
+
+                draft_result = await self.run_drafting_phase(
+                    scene=scene,
+                    characters=characters_result["characters"],
+                    moral_compass=project.moral_compass.value,
+                    worldbuilding=scene_worldbuilding if scene_worldbuilding else None,
+                    previous_scene_summary=previous_summary,
+                    memory_context={
+                        "relevant_characters": relevant_characters,
+                        "relevant_scenes": relevant_scenes,
+                    } if (relevant_characters or relevant_scenes) else None,
+                    narrator_config=narrator_config,
+                )
+
+                # Quality Gate with retry logic (per scene)
+                quality_enforcement_result = None
+                if draft_result.get("draft"):
+                    emotional_beat = scene.get("emotional_beat", {})
+                    quality_enforcement_result = await self.enforce_quality_for_scene(
+                        scene_number=i + 1,
+                        draft=draft_result["draft"],
+                        characters=characters_result["characters"],
+                        moral_compass=project.moral_compass.value,
+                        target_audience=project.target_audience,
+                        emotional_beat=emotional_beat,
+                        critique=draft_result.get("critique"),
+                        max_quality_retries=2,
+                        scene_context=scene_context,
+                    )
+                    # Update draft_result with the final (possibly revised) draft
+                    draft_result["draft"] = quality_enforcement_result["final_draft"]
+                    draft_result["quality_enforcement"] = quality_enforcement_result
+
+                drafts.append(draft_result)
+
+                # Store final draft (after quality revisions) in memory for continuity
+                if draft_result.get("draft"):
+                    draft = draft_result["draft"]
+                    await self._store_scene_in_memory(project_id, i + 1, draft)
+                    previous_summary = draft.get("narrative_content", "")[:500] + "..."
+
+            # Store all drafts as a single artifact
+            await store_artifact("drafting", "drafts", {"scenes": drafts})
 
         results["phases"]["drafting"] = {"scenes": drafts}
 
-        # Phase 6: Polish (all approved scenes)
+        # Collect quality gate results from drafts
+        quality_results = [
+            d.get("quality_enforcement", {}).get("quality_result", {})
+            for d in drafts if d.get("quality_enforcement")
+        ]
+        results["phases"]["quality_gate"] = {"scenes": quality_results}
+
+        # Phase 7: Polish (all scenes - even if quality gate failed, we still polish)
         polished_drafts = []
-        for i, draft_result in enumerate(drafts):
-            if draft_result.get("draft"):
-                polish_result = await self.run_polish_phase(
-                    scene_number=i + 1,
-                    draft=draft_result["draft"],
-                    characters=characters_result["characters"],
-                    moral_compass=project.moral_compass.value,
-                    critique=draft_result.get("critique"),
-                )
-                polished_drafts.append(polish_result)
+        previous_polish = None
+        if should_skip_phase("polish"):
+            previous_polish = get_previous_artifact("polish", "polished")
+            if previous_polish:
+                polished_drafts = previous_polish.get("scenes", [])
+                results["phases"]["polish"] = {"scenes": polished_drafts}
+                self._emit_event("phase_skipped", {"phase": "polish", "reason": "using_previous_artifact"})
+
+        if not previous_polish:
+            for i, draft_result in enumerate(drafts):
+                await self._check_pause()  # Pause checkpoint before each polish
+                if draft_result.get("draft"):
+                    polish_result = await self.run_polish_phase(
+                        scene_number=i + 1,
+                        draft=draft_result["draft"],
+                        characters=characters_result["characters"],
+                        moral_compass=project.moral_compass.value,
+                        critique=draft_result.get("critique"),
+                    )
+                    polished_drafts.append(polish_result)
+
+            # Store all polished drafts as a single artifact
+            await store_artifact("polish", "polished", {"scenes": polished_drafts})
 
         results["phases"]["polish"] = {"scenes": polished_drafts}
 
