@@ -1232,6 +1232,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         estimated_scenes: int = 20,
         preferred_structure: str = "ThreeAct",
         openai_api_key: Optional[str] = None,
+        max_revisions: int = 2,
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration.
@@ -1242,7 +1243,10 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             estimated_scenes: Estimated number of scenes
             preferred_structure: Story structure (ThreeAct, HeroJourney, etc.)
             openai_api_key: OpenAI API key for embeddings (enables Qdrant memory)
+            max_revisions: Maximum Writer↔Critic revision cycles per scene (1-5)
         """
+        # Set max_revisions in state
+        self.state.max_revisions = max_revisions
         results = {
             "project": project.model_dump(),
             "phases": {},

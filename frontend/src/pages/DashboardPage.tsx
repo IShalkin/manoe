@@ -131,6 +131,7 @@ interface ProjectFormData {
   targetAudience: string;
   themes: string;
   generationMode: GenerationMode;
+  maxRevisions: number;
 }
 
 export function DashboardPage() {
@@ -153,6 +154,7 @@ export function DashboardPage() {
       targetAudience: '',
       themes: '',
       generationMode: 'demo',
+      maxRevisions: 2,
     });
 
     const openNewProjectModal = () => {
@@ -164,6 +166,7 @@ export function DashboardPage() {
         targetAudience: '',
         themes: '',
         generationMode: 'demo',
+        maxRevisions: 2,
       });
       setError(null);
       setShowProjectModal(true);
@@ -178,6 +181,7 @@ export function DashboardPage() {
         targetAudience: project.targetAudience,
         themes: project.themes,
         generationMode: 'demo',
+        maxRevisions: 2,
       });
       setError(null);
       setShowProjectModal(true);
@@ -235,6 +239,7 @@ export function DashboardPage() {
                   target_audience: formData.targetAudience || undefined,
                   themes: formData.themes || undefined,
                   generation_mode: formData.generationMode,
+                  max_revisions: formData.maxRevisions,
                 }),
       });
       
@@ -471,6 +476,29 @@ export function DashboardPage() {
                                 </button>
                               </div>
                             </div>
+
+                            {formData.generationMode === 'full' && (
+                              <div>
+                                <label className="block text-sm font-medium mb-2">
+                                  Max Revisions per Scene: {formData.maxRevisions}
+                                </label>
+                                <input
+                                  type="range"
+                                  min="1"
+                                  max="5"
+                                  value={formData.maxRevisions}
+                                  onChange={(e) => setFormData({ ...formData, maxRevisions: parseInt(e.target.value) })}
+                                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                />
+                                <div className="flex justify-between text-xs text-slate-500 mt-1">
+                                  <span>1 (faster)</span>
+                                  <span>5 (more refined)</span>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-2">
+                                  Controls how many times the Writer and Critic can revise each scene before moving on.
+                                </p>
+                              </div>
+                            )}
 
                             <div className="flex gap-3 pt-4">
                 <button
