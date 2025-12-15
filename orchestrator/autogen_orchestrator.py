@@ -2879,8 +2879,16 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Helper function to get previous artifact or edited content
         def get_previous_artifact(phase: str, artifact_type: str) -> Optional[Dict[str, Any]]:
             # Check if user provided edited content for this phase
-            if edited_content and edited_content.get("phase") == phase:
-                return edited_content.get("content")
+            # Frontend sends: {"genesis": {"content": "...", "comment": "..."}}
+            # or legacy format: {"phase": "genesis", "content": {...}}
+            if edited_content:
+                if phase in edited_content:
+                    phase_content = edited_content[phase]
+                    if isinstance(phase_content, dict) and "content" in phase_content:
+                        return phase_content.get("content")
+                    return phase_content
+                elif edited_content.get("phase") == phase:
+                    return edited_content.get("content")
             # Otherwise use previous artifacts
             if previous_artifacts and phase in previous_artifacts:
                 return previous_artifacts[phase].get(artifact_type)
@@ -2895,6 +2903,21 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 genesis_result = {"narrative_possibility": narrative}
                 results["phases"]["genesis"] = genesis_result
                 self._emit_event("phase_skipped", {"phase": "genesis", "reason": "using_previous_artifact"})
+        elif edited_content and "genesis" in edited_content:
+            # User provided edited content for this phase - use it directly
+            edited = get_previous_artifact("genesis", "narrative_possibility")
+            if edited:
+                # Parse the edited content if it's a string (JSON)
+                if isinstance(edited, str):
+                    try:
+                        edited = self._extract_json(edited)
+                    except Exception:
+                        pass
+                genesis_result = {"narrative_possibility": edited}
+                results["phases"]["genesis"] = genesis_result
+                self._emit_event("phase_overridden", {"phase": "genesis", "reason": "user_edited_content"})
+                # Emit agent message with the edited content
+                self._emit_agent_message("Architect", edited)
         
         if not genesis_result:
             await self._check_pause()  # Pause checkpoint
@@ -2917,6 +2940,19 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 characters_result = {"characters": characters}
                 results["phases"]["characters"] = characters_result
                 self._emit_event("phase_skipped", {"phase": "characters", "reason": "using_previous_artifact"})
+        elif edited_content and "characters" in edited_content:
+            # User provided edited content for this phase - use it directly
+            edited = get_previous_artifact("characters", "characters")
+            if edited:
+                if isinstance(edited, str):
+                    try:
+                        edited = self._extract_json(edited)
+                    except Exception:
+                        pass
+                characters_result = {"characters": edited.get("characters", edited) if isinstance(edited, dict) else edited}
+                results["phases"]["characters"] = characters_result
+                self._emit_event("phase_overridden", {"phase": "characters", "reason": "user_edited_content"})
+                self._emit_agent_message("Profiler", edited)
 
         if not characters_result:
             await self._check_pause()  # Pause checkpoint
@@ -2945,6 +2981,19 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 worldbuilding_result = {"worldbuilding": worldbuilding}
                 results["phases"]["worldbuilding"] = worldbuilding_result
                 self._emit_event("phase_skipped", {"phase": "worldbuilding", "reason": "using_previous_artifact"})
+        elif edited_content and "worldbuilding" in edited_content:
+            # User provided edited content for this phase - use it directly
+            edited = get_previous_artifact("worldbuilding", "worldbuilding")
+            if edited:
+                if isinstance(edited, str):
+                    try:
+                        edited = self._extract_json(edited)
+                    except Exception:
+                        pass
+                worldbuilding_result = {"worldbuilding": edited.get("worldbuilding", edited) if isinstance(edited, dict) else edited}
+                results["phases"]["worldbuilding"] = worldbuilding_result
+                self._emit_event("phase_overridden", {"phase": "worldbuilding", "reason": "user_edited_content"})
+                self._emit_agent_message("Worldbuilder", edited)
 
         if not worldbuilding_result:
             await self._check_pause()  # Pause checkpoint
@@ -2969,6 +3018,19 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 outlining_result = {"outline": outline}
                 results["phases"]["outlining"] = outlining_result
                 self._emit_event("phase_skipped", {"phase": "outlining", "reason": "using_previous_artifact"})
+        elif edited_content and "outlining" in edited_content:
+            # User provided edited content for this phase - use it directly
+            edited = get_previous_artifact("outlining", "outline")
+            if edited:
+                if isinstance(edited, str):
+                    try:
+                        edited = self._extract_json(edited)
+                    except Exception:
+                        pass
+                outlining_result = {"outline": edited.get("outline", edited) if isinstance(edited, dict) else edited}
+                results["phases"]["outlining"] = outlining_result
+                self._emit_event("phase_overridden", {"phase": "outlining", "reason": "user_edited_content"})
+                self._emit_agent_message("Strategist", edited)
 
         if not outlining_result:
             await self._check_pause()  # Pause checkpoint
