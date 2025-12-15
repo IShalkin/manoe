@@ -401,6 +401,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const [isComplete, setIsComplete] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+  const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -450,7 +452,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     }
   }, [runId]);
 
-  // Handle stop generation
+  // Handle stop generation (uses pause so it can be resumed)
   const handleStopGeneration = useCallback(async () => {
     if (!runId || !orchestratorUrl || isCancelling || isComplete) return;
     
@@ -463,22 +465,52 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         eventSourceRef.current = null;
       }
       
-      // Call cancel endpoint
-      const response = await fetch(`${orchestratorUrl}/runs/${runId}/cancel`, {
+      // Call pause endpoint (not cancel) so generation can be resumed
+      const response = await fetch(`${orchestratorUrl}/runs/${runId}/pause`, {
         method: 'POST',
       });
       
       if (response.ok) {
         setIsCancelled(true);
         setIsConnected(false);
-        setCurrentPhase('Cancelled');
+        setCurrentPhase('Paused');
       }
     } catch (err) {
-      console.error('Failed to cancel generation:', err);
+      console.error('Failed to pause generation:', err);
     } finally {
       setIsCancelling(false);
     }
   }, [runId, orchestratorUrl, isCancelling, isComplete]);
+
+  // Handle resume generation
+  const handleResumeGeneration = useCallback(async () => {
+    if (!runId || !orchestratorUrl || isResuming || !isCancelled) return;
+    
+    setIsResuming(true);
+    
+    try {
+      // Call resume endpoint
+      const response = await fetch(`${orchestratorUrl}/runs/${runId}/resume`, {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        setIsCancelled(false);
+        setCurrentPhase('Resuming...');
+        // Trigger SSE reconnection via useEffect
+        setReconnectTrigger(prev => prev + 1);
+      } else {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        console.error('Failed to resume:', errorData);
+        setError(`Failed to resume: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Failed to resume generation:', err);
+      setError('Failed to resume generation. Please try again.');
+    } finally {
+      setIsResuming(false);
+    }
+  }, [runId, orchestratorUrl, isResuming, isCancelled]);
 
   const getAgentContent = useCallback((agent: string): string => {
     if (projectResult?.edits?.[agent]) {
@@ -716,7 +748,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     return () => {
       eventSource.close();
     };
-  }, [runId, orchestratorUrl]);
+  }, [runId, orchestratorUrl, reconnectTrigger]);
 
   // Compute available rounds from messages
   const rounds = useMemo(() => {
@@ -936,6 +968,35 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
               )}
             </button>
           )}
+          {isCancelled && !isComplete && (
+            <button 
+              onClick={handleResumeGeneration}
+              disabled={isResuming}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                isResuming 
+                  ? 'bg-slate-700 text-slate-500 cursor-not-allowed' 
+                  : 'bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30'
+              }`}
+            >
+              {isResuming ? (
+                <>
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Resuming...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Resume
+                </>
+              )}
+            </button>
+          )}
           {onClose && (
             <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-700 transition-colors">
               <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -949,7 +1010,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       {/* Round Switcher */}
       {rounds.length > 1 && (
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 bg-slate-800/50 border-b border-slate-700">
-          <span className="text-xs text-slate-400 font-medium">Rounds:</span>
+          <span className="text-xs text-slate-400 font-medium">Steps:</span>
           
           <div className="flex items-center gap-1 flex-wrap">
             <button
@@ -1283,6 +1344,12 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                 You edited <span className={AGENT_TEXT_COLORS[pendingEdit.agent]}>{pendingEdit.agent}</span>. 
                 This will affect downstream agents.
               </p>
+              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                <p className="text-xs text-amber-300">
+                  <strong>Note:</strong> Regeneration will start a new complete generation run. 
+                  Your edit will be used as context, but all scenes will be regenerated from scratch.
+                </p>
+              </div>
             </div>
             
             <div className="p-6 space-y-6">
@@ -1397,8 +1464,11 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {isAffected && !isLocked && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400">Affected</span>
+                          {isAffected && !isLocked && !willRegenerate && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-slate-600/50 text-slate-400">Downstream</span>
+                          )}
+                          {willRegenerate && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400">Will Regenerate</span>
                           )}
                           <button
                             onClick={() => handleToggleLock(agent)}
