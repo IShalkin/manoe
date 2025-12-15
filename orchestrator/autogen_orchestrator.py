@@ -2943,6 +2943,15 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Generate a unique project ID for memory storage
         project_id = project.seed_idea[:20].replace(" ", "_") + "_" + str(hash(project.seed_idea))[:8]
 
+        # Initialize state early so it's available for all phases (including skipped ones)
+        # This is needed because _call_agent accesses self.state.phase
+        self.state = GenerationState(
+            phase=GenerationPhase.GENESIS,
+            messages=[],
+            current_scene=0,
+            max_revisions=max_revisions,
+        )
+
         # Initialize Qdrant memory if API key provided
         if openai_api_key:
             memory_initialized = await self.initialize_memory(openai_api_key)
