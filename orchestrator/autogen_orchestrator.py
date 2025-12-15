@@ -307,7 +307,7 @@ Always output critiques as valid JSON wrapped in ```json``` blocks.
         self._emit_event("agent_message", {
             "agent": agent_name,
             "message_type": message_type,
-            "content": content[:2000] if content else "",  # Truncate for display
+            "content": content[:10000] if content else "",  # Increased limit to preserve JSON structure
             "to_agent": to_agent,
         })
 
