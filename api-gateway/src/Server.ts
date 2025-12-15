@@ -3,10 +3,10 @@ import { PlatformApplication } from "@tsed/common";
 import "@tsed/platform-express";
 import "@tsed/socketio";
 import * as bodyParser from "body-parser";
-import * as compress from "compression";
-import * as cookieParser from "cookie-parser";
-import * as cors from "cors";
-import * as methodOverride from "method-override";
+import compress from "compression";
+import cookieParser from "cookie-parser";
+import cors from "cors";
+import methodOverride from "method-override";
 import * as dotenv from "dotenv";
 
 // Load environment variables

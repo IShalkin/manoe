@@ -1,0 +1,1324 @@
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import type { ProjectResult } from '../hooks/useProjects';
+
+function formatAnyAsMarkdown(parsed: unknown): string {
+  if (parsed === null || parsed === undefined) {
+    return '';
+  }
+  if (typeof parsed === 'string') {
+    // Check if the string itself is JSON (double-encoded)
+    const trimmed = parsed.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const innerParsed = JSON.parse(trimmed);
+        return formatAnyAsMarkdown(innerParsed);
+      } catch {
+        return parsed;
+      }
+    }
+    return parsed;
+  }
+  if (typeof parsed === 'number' || typeof parsed === 'boolean') {
+    return String(parsed);
+  }
+  if (Array.isArray(parsed)) {
+    return parsed.map((item, i) => {
+      if (typeof item === 'object' && item !== null) {
+        return `${i + 1}. ${formatObjectInline(item as Record<string, unknown>)}`;
+      }
+      return `${i + 1}. ${item}`;
+    }).join('\n');
+  }
+  if (typeof parsed === 'object') {
+    return formatJsonAsMarkdown(parsed as Record<string, unknown>);
+  }
+  return String(parsed);
+}
+
+function extractJsonFromString(content: string): string | null {
+  // Try to find balanced JSON object or array
+  const trimmed = content.trim();
+  let startChar = '';
+  let endChar = '';
+  let startIdx = -1;
+  
+  // Find the first { or [
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] === '{') {
+      startChar = '{';
+      endChar = '}';
+      startIdx = i;
+      break;
+    } else if (trimmed[i] === '[') {
+      startChar = '[';
+      endChar = ']';
+      startIdx = i;
+      break;
+    }
+  }
+  
+  if (startIdx === -1) return null;
+  
+  // Count brackets to find balanced end
+  let depth = 0;
+  let inString = false;
+  let escapeNext = false;
+  
+  for (let i = startIdx; i < trimmed.length; i++) {
+    const char = trimmed[i];
+    
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+    
+    if (char === '\\' && inString) {
+      escapeNext = true;
+      continue;
+    }
+    
+    if (char === '"' && !escapeNext) {
+      inString = !inString;
+      continue;
+    }
+    
+    if (!inString) {
+      if (char === startChar) depth++;
+      else if (char === endChar) {
+        depth--;
+        if (depth === 0) {
+          return trimmed.substring(startIdx, i + 1);
+        }
+      }
+    }
+  }
+  
+  return null; // Incomplete JSON
+}
+
+function formatAgentContent(content: string): string {
+  if (!content || typeof content !== 'string') {
+    return '';
+  }
+  
+  const trimmed = content.trim();
+  
+  // First, try direct JSON parse
+  try {
+    const parsed = JSON.parse(trimmed);
+    return formatAnyAsMarkdown(parsed);
+  } catch {
+    // Continue to other methods
+  }
+  
+  // Check for ```json code blocks
+  if (content.includes('```json')) {
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[1]);
+        return formatAnyAsMarkdown(parsed);
+      } catch {
+        // Continue
+      }
+    }
+  }
+  
+  // Try to extract JSON from string (handles prefix/suffix text)
+  if (trimmed.includes('{') || trimmed.includes('[')) {
+    const extracted = extractJsonFromString(trimmed);
+    if (extracted) {
+      try {
+        const parsed = JSON.parse(extracted);
+        return formatAnyAsMarkdown(parsed);
+      } catch {
+        // Continue
+      }
+    }
+  }
+  
+  // Return original content if nothing worked
+  return content;
+}
+
+function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
+  const lines: string[] = [];
+  const indent = '  '.repeat(depth);
+  
+  for (const [key, value] of Object.entries(obj)) {
+    const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    
+    if (Array.isArray(value)) {
+      lines.push(`${indent}**${formattedKey}:**`);
+      value.forEach((item, i) => {
+        if (typeof item === 'object' && item !== null) {
+          lines.push(`${indent}- ${i + 1}. ${formatObjectInline(item as Record<string, unknown>)}`);
+        } else {
+          lines.push(`${indent}- ${item}`);
+        }
+      });
+    } else if (typeof value === 'object' && value !== null) {
+      lines.push(`${indent}**${formattedKey}:**`);
+      lines.push(formatJsonAsMarkdown(value as Record<string, unknown>, depth + 1));
+    } else if (typeof value === 'boolean') {
+      lines.push(`${indent}**${formattedKey}:** ${value ? 'Yes' : 'No'}`);
+    } else if (typeof value === 'number') {
+      lines.push(`${indent}**${formattedKey}:** ${value}`);
+    } else if (value) {
+      const strValue = String(value);
+      if (strValue.length > 100) {
+        lines.push(`${indent}**${formattedKey}:**\n${indent}> ${strValue}`);
+      } else {
+        lines.push(`${indent}**${formattedKey}:** ${strValue}`);
+      }
+    }
+  }
+  
+  return lines.join('\n');
+}
+
+function formatObjectInline(obj: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'string' && value.length < 80) {
+      parts.push(`*${key}*: ${value}`);
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      parts.push(`*${key}*: ${value}`);
+    }
+  }
+  return parts.slice(0, 4).join(' | ');
+}
+
+function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
+  return (
+    <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p className="mb-2 last:mb-0 text-slate-300 leading-relaxed">{children}</p>,
+          strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
+          em: ({ children }) => <em className="text-slate-400">{children}</em>,
+          ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+          li: ({ children }) => <li className="text-slate-300">{children}</li>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-slate-600 pl-3 my-2 text-slate-400 italic">
+              {children}
+            </blockquote>
+          ),
+          code: ({ children }) => (
+            <code className="bg-slate-800 px-1.5 py-0.5 rounded text-xs text-cyan-400">{children}</code>
+          ),
+          h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-base font-semibold text-white mb-2">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-sm font-semibold text-slate-200 mb-1">{children}</h3>,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+interface AgentMessage {
+  id: string;
+  type: string;
+  timestamp: string;
+  data: {
+    agent?: string;
+    message_type?: string;
+    content?: string;
+    to_agent?: string;
+    phase?: string;
+    status?: string;
+    error?: string;
+    result?: Record<string, unknown>;
+    result_summary?: string;
+    round?: number;
+  };
+}
+
+interface GenerationResult {
+  narrative_possibility?: Record<string, unknown>;
+  story?: string;
+  agents?: Record<string, string>;
+  error?: string;
+}
+
+interface AgentChatProps {
+  runId: string | null;
+  orchestratorUrl: string;
+  onComplete?: (result: GenerationResult) => void;
+  onClose?: () => void;
+  projectResult?: ProjectResult | null;
+  onUpdateResult?: (result: ProjectResult) => void;
+  onRegenerate?: (constraints: RegenerationConstraints) => void;
+}
+
+export interface RegenerationConstraints {
+  editComment: string;
+  editedAgent: string;
+  editedContent: string;
+  lockedAgents: Record<string, string>;
+  agentsToRegenerate: string[];
+}
+
+interface EditState {
+  agent: string;
+  content: string;
+  originalContent: string;
+}
+
+const AGENTS = ['Architect', 'Profiler', 'Strategist', 'Writer', 'Critic'] as const;
+type AgentName = typeof AGENTS[number];
+
+const AGENT_DEPENDENCIES: Record<AgentName, AgentName[]> = {
+  Architect: ['Profiler', 'Strategist', 'Writer', 'Critic'],
+  Profiler: ['Strategist', 'Writer', 'Critic'],
+  Strategist: ['Writer', 'Critic'],
+  Writer: ['Critic'],
+  Critic: ['Writer', 'Critic'],
+};
+
+const AGENT_COLORS: Record<string, string> = {
+  Architect: 'bg-blue-500',
+  Profiler: 'bg-cyan-500',
+  Strategist: 'bg-green-500',
+  Writer: 'bg-amber-500',
+  Critic: 'bg-red-500',
+  System: 'bg-neutral-500',
+};
+
+const AGENT_BORDER_COLORS: Record<string, string> = {
+  Architect: 'border-blue-500/50',
+  Profiler: 'border-cyan-500/50',
+  Strategist: 'border-green-500/50',
+  Writer: 'border-amber-500/50',
+  Critic: 'border-red-500/50',
+  System: 'border-neutral-500/50',
+};
+
+const AGENT_GLOW_COLORS: Record<string, string> = {
+  Architect: 'shadow-blue-500/20',
+  Profiler: 'shadow-cyan-500/20',
+  Strategist: 'shadow-green-500/20',
+  Writer: 'shadow-amber-500/20',
+  Critic: 'shadow-red-500/20',
+  System: 'shadow-neutral-500/20',
+};
+
+const AGENT_DESCRIPTIONS: Record<string, string> = {
+  Architect: 'Narrative Designer',
+  Profiler: 'Character Psychologist',
+  Strategist: 'Plot Engineer',
+  Writer: 'Scene Composer',
+  Critic: 'Quality Analyst',
+};
+
+const AGENT_TEXT_COLORS: Record<string, string> = {
+  Architect: 'text-blue-400',
+  Profiler: 'text-cyan-400',
+  Strategist: 'text-green-400',
+  Writer: 'text-amber-400',
+  Critic: 'text-red-400',
+  System: 'text-neutral-400',
+};
+
+const AGENT_ICONS: Record<string, string> = {
+  Architect: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4',
+  Profiler: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
+  Strategist: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
+  Writer: 'M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z',
+  Critic: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+  System: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
+};
+
+interface AgentState {
+  status: 'idle' | 'thinking' | 'complete';
+  messages: Array<{ content: string; round: number; timestamp: string }>;
+  lastUpdate: string;
+}
+
+export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate }: AgentChatProps) {
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [currentPhase, setCurrentPhase] = useState<string>('Initializing');
+  const [isComplete, setIsComplete] = useState(false);
+  const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const currentRoundRef = useRef(1);
+  const hasMessageInCurrentRoundRef = useRef(false);
+  const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const [editState, setEditState] = useState<EditState | null>(null);
+  const [lockedAgents, setLockedAgents] = useState<Record<string, boolean>>(() => projectResult?.locks || {});
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [editComment, setEditComment] = useState('');
+  const [agentsToRegenerate, setAgentsToRegenerate] = useState<string[]>([]);
+  const [pendingEdit, setPendingEdit] = useState<{ agent: string; content: string } | null>(null);
+
+  useEffect(() => {
+    if (projectResult?.locks) {
+      setLockedAgents(projectResult.locks);
+    }
+  }, [projectResult?.locks]);
+
+  // Reset state when runId changes (new generation or regeneration)
+  useEffect(() => {
+    if (runId) {
+      // Close existing EventSource connection
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      // Reset all state for new run
+      setMessages([]);
+      setIsConnected(false);
+      setError(null);
+      setCurrentPhase('Initializing');
+      setIsComplete(false);
+      setSelectedRound(null);
+      setIsPlaying(false);
+      currentRoundRef.current = 1;
+      hasMessageInCurrentRoundRef.current = false;
+      // Reset edit state
+      setEditState(null);
+      setShowConfirmModal(false);
+      setEditComment('');
+      setAgentsToRegenerate([]);
+      setPendingEdit(null);
+    }
+  }, [runId]);
+
+  const getAgentContent = useCallback((agent: string): string => {
+    if (projectResult?.edits?.[agent]) {
+      return projectResult.edits[agent].content;
+    }
+    if (projectResult?.agentOutputs?.[agent]) {
+      return projectResult.agentOutputs[agent];
+    }
+    const agentMessages = messages.filter(
+      m => m.type === 'agent_message' && m.data.agent === agent && m.data.content?.trim()
+    );
+    if (agentMessages.length > 0) {
+      return agentMessages[agentMessages.length - 1].data.content || '';
+    }
+    return '';
+  }, [messages, projectResult]);
+
+  const handleStartEdit = useCallback((agent: string) => {
+    const content = getAgentContent(agent);
+    setEditState({
+      agent,
+      content,
+      originalContent: content,
+    });
+  }, [getAgentContent]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditState(null);
+  }, []);
+
+  const handleApplyEdit = useCallback(() => {
+    if (!editState) return;
+    
+    const affectedAgents = AGENT_DEPENDENCIES[editState.agent as AgentName] || [];
+    const unlockedAffected = affectedAgents.filter(a => !lockedAgents[a]);
+    
+    setPendingEdit({ agent: editState.agent, content: editState.content });
+    setAgentsToRegenerate(unlockedAffected);
+    setEditComment('');
+    setShowConfirmModal(true);
+  }, [editState, lockedAgents]);
+
+  const handleToggleLock = useCallback((agent: string) => {
+    const newLocks = { ...lockedAgents, [agent]: !lockedAgents[agent] };
+    setLockedAgents(newLocks);
+    
+    if (onUpdateResult && projectResult) {
+      onUpdateResult({
+        ...projectResult,
+        locks: newLocks,
+      });
+    }
+  }, [lockedAgents, onUpdateResult, projectResult]);
+
+  const handleToggleAgentRegenerate = useCallback((agent: string) => {
+    setAgentsToRegenerate(prev => 
+      prev.includes(agent) 
+        ? prev.filter(a => a !== agent)
+        : [...prev, agent]
+    );
+  }, []);
+
+  const handleConfirmRegenerate = useCallback(() => {
+    if (!pendingEdit || !editComment.trim()) return;
+    
+    const lockedAgentContents: Record<string, string> = {};
+    AGENTS.forEach(agent => {
+      if (lockedAgents[agent]) {
+        lockedAgentContents[agent] = getAgentContent(agent);
+      }
+    });
+    
+    if (onUpdateResult && projectResult) {
+      const newEdits = {
+        ...projectResult.edits,
+        [pendingEdit.agent]: {
+          content: pendingEdit.content,
+          comment: editComment,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+      onUpdateResult({
+        ...projectResult,
+        edits: newEdits,
+      });
+    }
+    
+    if (onRegenerate) {
+      onRegenerate({
+        editComment,
+        editedAgent: pendingEdit.agent,
+        editedContent: pendingEdit.content,
+        lockedAgents: lockedAgentContents,
+        agentsToRegenerate,
+      });
+    }
+    
+    setShowConfirmModal(false);
+    setEditState(null);
+    setPendingEdit(null);
+    setEditComment('');
+    setAgentsToRegenerate([]);
+  }, [pendingEdit, editComment, lockedAgents, agentsToRegenerate, onUpdateResult, onRegenerate, projectResult, getAgentContent]);
+
+  const handleCancelConfirm = useCallback(() => {
+    setShowConfirmModal(false);
+    setPendingEdit(null);
+    setEditComment('');
+    setAgentsToRegenerate([]);
+  }, []);
+
+  useEffect(() => {
+    if (!runId) return;
+
+    // Connect to SSE endpoint
+    const eventSource = new EventSource(`${orchestratorUrl}/runs/${runId}/events`);
+    eventSourceRef.current = eventSource;
+
+    eventSource.onopen = () => {
+      setIsConnected(true);
+      setError(null);
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as AgentMessage;
+        
+        if (data.type === 'phase_start' && data.data.phase) {
+          setCurrentPhase(data.data.phase.charAt(0).toUpperCase() + data.data.phase.slice(1));
+        }
+        
+        if (data.type === 'agent_message') {
+          data.data.round = currentRoundRef.current;
+          hasMessageInCurrentRoundRef.current = true;
+        }
+        
+        if (data.type === 'agent_complete') {
+          // Only increment round if we've seen at least one message in the current round
+          // This prevents starting from round 2 if agent_complete arrives before agent_message
+          if (hasMessageInCurrentRoundRef.current) {
+            currentRoundRef.current += 1;
+            hasMessageInCurrentRoundRef.current = false;
+          }
+        }
+        
+        setMessages((prev) => [...prev, data]);
+        
+        // Close connection when generation is complete or errored
+        if (data.type === 'generation_complete' || data.type === 'generation_error') {
+          setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : 'Error');
+          setIsComplete(true);
+          eventSource.close();
+          setIsConnected(false);
+          
+          // Call onComplete callback with result
+          if (onComplete) {
+            if (data.type === 'generation_error') {
+              onComplete({ error: data.data.error || 'Unknown error' });
+            } else {
+              // Extract the best available result content
+              const allMessages = [...messages, data];
+              
+              // Collect all agent outputs for persistence
+              const agentMessages = allMessages.filter(
+                m => m.type === 'agent_message' && m.data.content?.trim()
+              );
+              const agentOutputs: Record<string, string> = {};
+              agentMessages.forEach(m => {
+                const agent = m.data.agent || 'Unknown';
+                if (m.data.content) {
+                  agentOutputs[agent] = m.data.content;
+                }
+              });
+              
+              // Try phase_complete with result first
+              const phaseCompleteEvents = allMessages.filter(m => m.type === 'phase_complete' && m.data.result);
+              if (phaseCompleteEvents.length > 0) {
+                const genesisComplete = phaseCompleteEvents.find(m => m.data.phase === 'genesis');
+                const phaseComplete = genesisComplete || phaseCompleteEvents[phaseCompleteEvents.length - 1];
+                onComplete({
+                  narrative_possibility: phaseComplete.data.result,
+                  agents: agentOutputs,
+                });
+                return;
+              }
+              
+              // Try generation_complete result_summary
+              const completeEvent = allMessages.find(m => m.type === 'generation_complete');
+              if (completeEvent?.data.result_summary) {
+                onComplete({
+                  story: completeEvent.data.result_summary,
+                  agents: agentOutputs,
+                });
+                return;
+              }
+              
+              // Use Writer's last message as the story content
+              const writerMessages = allMessages.filter(
+                m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
+              );
+              if (writerMessages.length > 0) {
+                onComplete({
+                  story: writerMessages[writerMessages.length - 1].data.content,
+                  agents: agentOutputs,
+                });
+                return;
+              }
+              
+              // Fall back to all agent messages combined
+              onComplete({
+                agents: agentOutputs,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse SSE message:', e);
+      }
+    };
+
+    eventSource.onerror = () => {
+      setIsConnected(false);
+      setError('Connection lost. Reconnecting...');
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [runId, orchestratorUrl]);
+
+  // Compute available rounds from messages
+  const rounds = useMemo(() => {
+    const roundSet = new Set<number>();
+    messages.forEach(msg => {
+      if (msg.type === 'agent_message' && msg.data.content) {
+        // Use round from message, default to 1 if not set
+        const round = msg.data.round ?? 1;
+        roundSet.add(round);
+      }
+    });
+    return Array.from(roundSet).sort((a, b) => a - b);
+  }, [messages]);
+
+  // Playback functionality for cinematic viewing
+  const togglePlayback = useCallback(() => {
+    if (isPlaying) {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+        playbackIntervalRef.current = null;
+      }
+      setIsPlaying(false);
+    } else {
+      setIsPlaying(true);
+      setSelectedRound(1);
+      
+      playbackIntervalRef.current = setInterval(() => {
+        setSelectedRound(prev => {
+          const currentIdx = prev ? rounds.indexOf(prev) : -1;
+          const nextIdx = currentIdx + 1;
+          if (nextIdx >= rounds.length) {
+            if (playbackIntervalRef.current) {
+              clearInterval(playbackIntervalRef.current);
+              playbackIntervalRef.current = null;
+            }
+            setIsPlaying(false);
+            return null;
+          }
+          return rounds[nextIdx];
+        });
+      }, 3000);
+    }
+  }, [isPlaying, rounds]);
+
+  // Cleanup playback interval on unmount
+  useEffect(() => {
+    return () => {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Compute agent states from messages
+  const agentStates = useMemo(() => {
+    const states: Record<string, AgentState> = {};
+    
+    AGENTS.forEach(agent => {
+      states[agent] = { status: 'idle', messages: [], lastUpdate: '' };
+    });
+    
+    messages.forEach(msg => {
+      const agent = msg.data.agent;
+      if (!agent || !states[agent]) return;
+      
+      if (msg.type === 'agent_start') {
+        states[agent].status = 'thinking';
+        states[agent].lastUpdate = msg.timestamp;
+      } else if (msg.type === 'agent_complete') {
+        states[agent].status = 'complete';
+        states[agent].lastUpdate = msg.timestamp;
+      } else if (msg.type === 'agent_message' && msg.data.content) {
+        states[agent].messages.push({
+          content: msg.data.content,
+          round: msg.data.round || 1,
+          timestamp: msg.timestamp,
+        });
+        states[agent].lastUpdate = msg.timestamp;
+      }
+    });
+    
+    return states;
+  }, [messages]);
+
+  // Determine which agent is currently active
+  const activeAgent = useMemo(() => {
+    for (const agent of AGENTS) {
+      if (agentStates[agent].status === 'thinking') {
+        return agent;
+      }
+    }
+    return null;
+  }, [agentStates]);
+
+  // Extract final result from messages
+  const finalResult = useMemo(() => {
+    // Try to get from any phase_complete event with result
+    const phaseCompleteEvents = messages.filter(m => m.type === 'phase_complete' && m.data.result);
+    if (phaseCompleteEvents.length > 0) {
+      // Prefer genesis phase, but take any phase_complete with result
+      const genesisComplete = phaseCompleteEvents.find(m => m.data.phase === 'genesis');
+      const phaseComplete = genesisComplete || phaseCompleteEvents[phaseCompleteEvents.length - 1];
+      const result = phaseComplete.data.result;
+      if (typeof result === 'object' && result !== null) {
+        return JSON.stringify(result, null, 2);
+      }
+      return String(result);
+    }
+    
+    // Try generation_complete result_summary
+    const completeEvent = messages.find(m => m.type === 'generation_complete');
+    if (completeEvent?.data.result_summary) {
+      return completeEvent.data.result_summary;
+    }
+    
+    // Prefer Writer's last message as the "final result" (the actual story content)
+    const writerMessages = messages.filter(
+      m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
+    );
+    if (writerMessages.length > 0) {
+      return writerMessages[writerMessages.length - 1].data.content || '';
+    }
+    
+    // Fall back to last substantial agent message
+    const agentMessages = messages.filter(
+      m => m.type === 'agent_message' && m.data.content?.trim()
+    );
+    if (agentMessages.length > 0) {
+      return agentMessages[agentMessages.length - 1].data.content || '';
+    }
+    
+    return '';
+  }, [messages]);
+
+  // Check for errors
+  const generationError = useMemo(() => {
+    const errorEvent = messages.find(m => m.type === 'generation_error' || m.type === 'error');
+    return errorEvent?.data.error || null;
+  }, [messages]);
+
+  if (!runId) {
+    return (
+      <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
+        <div className="w-16 h-16 rounded-full bg-slate-700/50 flex items-center justify-center mx-auto mb-4">
+          <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <p className="text-slate-400">Start a generation to see agent communication</p>
+      </div>
+    );
+  }
+
+  // Get message for display based on selected round
+  const getDisplayMessage = (state: AgentState) => {
+    if (state.messages.length === 0) return null;
+    
+    if (selectedRound !== null) {
+      const roundMessages = state.messages.filter(m => m.round === selectedRound);
+      return roundMessages.length > 0 ? roundMessages[roundMessages.length - 1] : null;
+    }
+    
+    return state.messages[state.messages.length - 1];
+  };
+
+  return (
+    <div className="bg-slate-800/30 border border-slate-700 rounded-xl overflow-hidden">
+      {/* Header */}
+      <div className="bg-slate-900/80 border-b border-slate-700 px-3 sm:px-4 py-2 sm:py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0">
+        <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+          <h3 className="font-bold text-base sm:text-lg">Multi-Agent Orchestration</h3>
+          <div className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs font-medium ${
+            isConnected ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 
+            isComplete ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 
+            'bg-red-500/20 text-red-400 border border-red-500/30'
+          }`}>
+            <div className={`w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full ${
+              isConnected ? 'bg-green-400 animate-pulse' : 
+              isComplete ? 'bg-blue-400' : 
+              'bg-red-400'
+            }`} />
+            {isConnected ? 'Live' : isComplete ? 'Complete' : 'Disconnected'}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-4">
+          <span className="text-xs sm:text-sm text-slate-400">
+            Phase: <span className="text-white font-medium">{currentPhase}</span>
+          </span>
+          {onClose && (
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-700 transition-colors">
+              <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Round Switcher */}
+      {rounds.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 bg-slate-800/50 border-b border-slate-700">
+          <span className="text-xs text-slate-400 font-medium">Rounds:</span>
+          
+          <div className="flex items-center gap-1 flex-wrap">
+            <button
+              onClick={() => setSelectedRound(null)}
+              className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                selectedRound === null 
+                  ? 'bg-blue-500 text-white' 
+                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+              }`}
+            >
+              All
+            </button>
+            
+            {rounds.map(round => (
+              <button
+                key={round}
+                onClick={() => setSelectedRound(round)}
+                className={`px-2 sm:px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                  selectedRound === round 
+                    ? 'bg-blue-500 text-white' 
+                    : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                }`}
+              >
+                {round}
+              </button>
+            ))}
+          </div>
+          
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={togglePlayback}
+              className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-medium transition-all ${
+                isPlaying 
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' 
+                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+              }`}
+            >
+              {isPlaying ? (
+                <>
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="4" width="4" height="16" />
+                    <rect x="14" y="4" width="4" height="16" />
+                  </svg>
+                  Pause
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  Play
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Error Display */}
+      {(error || generationError) && (
+        <div className="bg-red-500/10 border-b border-red-500/30 px-4 py-3">
+          <p className="text-sm text-red-400">{error || generationError}</p>
+        </div>
+      )}
+
+      {/* Agent Grid */}
+      <div className="p-2 sm:p-4">
+        {messages.length === 0 ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-slate-700/50 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-slate-500 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              </div>
+              <p className="text-slate-400 font-medium">Initializing agents...</p>
+              <p className="text-sm text-slate-500 mt-1">Preparing the storytelling ensemble</p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {AGENTS.map(agent => {
+              const state = agentStates[agent];
+              const color = AGENT_COLORS[agent];
+              const borderColor = AGENT_BORDER_COLORS[agent];
+              const glowColor = AGENT_GLOW_COLORS[agent];
+              const textColor = AGENT_TEXT_COLORS[agent];
+              const icon = AGENT_ICONS[agent];
+              const description = AGENT_DESCRIPTIONS[agent];
+              const isActive = activeAgent === agent;
+              const displayMessage = getDisplayMessage(state);
+              const formattedContent = displayMessage ? formatAgentContent(displayMessage.content) : '';
+              const isEditing = editState?.agent === agent;
+              const isLocked = lockedAgents[agent] || false;
+              const hasContent = displayMessage || getAgentContent(agent);
+              
+              return (
+                <div 
+                  key={agent}
+                  className={`
+                    relative rounded-xl overflow-hidden transition-all duration-500
+                    ${isActive ? `border-2 ${borderColor} shadow-lg ${glowColor}` : 'border border-slate-700/50'}
+                    ${state.status === 'idle' && !hasContent ? 'opacity-40' : 'opacity-100'}
+                    ${isLocked ? 'ring-2 ring-amber-500/30' : ''}
+                    hover:border-slate-600 hover:shadow-md
+                    bg-gradient-to-b from-slate-800/80 to-slate-900/80
+                  `}
+                >
+                  {isActive && (
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-pulse" />
+                  )}
+                  
+                  {/* Agent Header */}
+                  <div className={`px-4 py-3 flex items-center gap-3 border-b border-slate-700/50 ${
+                    isActive ? 'bg-slate-800/50' : ''
+                  }`}>
+                    <div className={`
+                      w-10 h-10 rounded-full ${color} flex items-center justify-center flex-shrink-0
+                      ${isActive ? 'animate-pulse' : ''}
+                      shadow-lg
+                    `}>
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
+                      </svg>
+                    </div>
+                    
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-semibold ${textColor}`}>{agent}</span>
+                        {isLocked && (
+                          <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                        )}
+                        {state.status === 'thinking' && (
+                          <span className="flex items-center gap-1 text-xs text-slate-400">
+                            <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </span>
+                        )}
+                        {state.status === 'complete' && !isLocked && (
+                          <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className="text-xs text-slate-500">{description}</span>
+                    </div>
+                    
+                    {/* Edit and Lock buttons */}
+                    {(isComplete || hasContent) && !isEditing && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleToggleLock(agent)}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            isLocked 
+                              ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30' 
+                              : 'text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                          }`}
+                          title={isLocked ? 'Unlock agent' : 'Lock agent'}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            {isLocked ? (
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                            ) : (
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                            )}
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleStartEdit(agent)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-700 hover:text-slate-300 transition-colors"
+                          title="Edit content"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Agent Content */}
+                  <div className="p-4 min-h-[120px] max-h-[300px] overflow-y-auto">
+                    {isEditing ? (
+                      <div className="space-y-3">
+                        <textarea
+                          value={editState.content}
+                          onChange={(e) => setEditState({ ...editState, content: e.target.value })}
+                          className="w-full h-40 bg-slate-900 border border-slate-600 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                          placeholder="Edit agent content..."
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={handleCancelEdit}
+                            className="px-3 py-1.5 text-sm rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleApplyEdit}
+                            className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </div>
+                    ) : !displayMessage && !getAgentContent(agent) ? (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-sm text-slate-500 italic">
+                          {state.status === 'thinking' ? 'Processing...' : 'Awaiting turn...'}
+                        </p>
+                      </div>
+                    ) : (
+                      <MarkdownContent 
+                        content={formattedContent || formatAgentContent(getAgentContent(agent))} 
+                        className="text-sm" 
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Conversation Timeline */}
+      {messages.filter(m => m.type === 'agent_message' && m.data.content).length > 0 && (
+        <div className="border-t border-slate-700">
+          <details className="group" open>
+            <summary className="bg-slate-800/50 px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-slate-800 transition-colors">
+              <svg className="w-5 h-5 text-cyan-400 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <h4 className="font-semibold text-cyan-400">Conversation Timeline</h4>
+              <span className="text-xs text-slate-500 ml-auto">
+                {(() => {
+                  const agentMsgs = messages.filter(m => m.type === 'agent_message' && m.data.content);
+                  const filtered = selectedRound !== null 
+                    ? agentMsgs.filter(m => m.data.round === selectedRound)
+                    : agentMsgs;
+                  return `${filtered.length} messages`;
+                })()}
+              </span>
+            </summary>
+            
+            <div className="p-4 bg-slate-900/30 max-h-[400px] overflow-y-auto">
+              <div className="relative">
+                <div className="absolute left-5 top-0 bottom-0 w-0.5 bg-gradient-to-b from-slate-700 via-slate-600 to-slate-700" />
+                
+                <div className="space-y-4">
+                  {messages
+                    .filter(m => m.type === 'agent_message' && m.data.content)
+                    .filter(m => selectedRound === null || m.data.round === selectedRound)
+                    .map((msg, idx) => {
+                      const agent = msg.data.agent || 'System';
+                      const color = AGENT_COLORS[agent] || AGENT_COLORS.System;
+                      const textColor = AGENT_TEXT_COLORS[agent] || AGENT_TEXT_COLORS.System;
+                      const content = msg.data.content || '';
+                      const round = msg.data.round || 1;
+                      
+                      return (
+                        <div key={msg.id || idx} className="relative flex gap-4 pl-2">
+                          <div className={`
+                            relative z-10 w-8 h-8 rounded-full ${color} flex items-center justify-center flex-shrink-0
+                            shadow-lg ring-4 ring-slate-900
+                          `}>
+                            <span className="text-xs font-bold text-white">{idx + 1}</span>
+                          </div>
+                          
+                          <div className="flex-1 bg-slate-800/50 rounded-lg p-4 border border-slate-700/50 hover:border-slate-600 transition-colors">
+                            <div className="flex items-center gap-3 mb-2">
+                              <span className={`font-semibold ${textColor}`}>{agent}</span>
+                              <button
+                                onClick={() => setSelectedRound(round)}
+                                className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-400 hover:bg-slate-600 transition-colors"
+                              >
+                                Round {round}
+                              </button>
+                              <span className="text-xs text-slate-500 ml-auto">
+                                {new Date(msg.timestamp).toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <MarkdownContent content={formatAgentContent(content)} className="text-sm" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+      )}
+
+      {/* Result Section */}
+      {(isComplete || finalResult) && (
+        <div className="border-t border-slate-700">
+          <div className="bg-slate-800/50 px-4 py-3 flex items-center gap-3">
+            <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <h4 className="font-semibold text-green-400">Generated Result</h4>
+          </div>
+          <div className="p-4 bg-slate-900/30 max-h-[300px] overflow-y-auto">
+            {finalResult ? (
+              <MarkdownContent content={formatAgentContent(finalResult)} />
+            ) : (
+              <p className="text-sm text-slate-500 italic">Processing result...</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="bg-slate-900/50 border-t border-slate-700 px-4 py-2 flex items-center justify-between text-xs text-slate-500">
+        <span>Run ID: {runId.substring(0, 8)}...</span>
+        <span>{messages.length} events</span>
+      </div>
+
+      {/* Edit Confirmation Modal */}
+      {showConfirmModal && pendingEdit && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-slate-700">
+              <h3 className="text-xl font-bold text-white">Confirm Edit & Regenerate</h3>
+              <p className="text-sm text-slate-400 mt-1">
+                You edited <span className={AGENT_TEXT_COLORS[pendingEdit.agent]}>{pendingEdit.agent}</span>. 
+                This will affect downstream agents.
+              </p>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              {/* Edit Comment */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  What did you change? <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  value={editComment}
+                  onChange={(e) => setEditComment(e.target.value)}
+                  className="w-full h-24 bg-slate-900 border border-slate-600 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"
+                  placeholder="Describe your changes so the AI can understand the context..."
+                />
+              </div>
+              
+              {/* Dependency Graph */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-3">
+                  Agent Dependency Flow
+                </label>
+                <div className="bg-slate-900/50 rounded-lg p-4">
+                  <div className="flex items-center justify-center gap-2 flex-wrap">
+                    {AGENTS.map((agent, idx) => {
+                      const isEdited = agent === pendingEdit.agent;
+                      const isAffected = AGENT_DEPENDENCIES[pendingEdit.agent as AgentName]?.includes(agent as AgentName);
+                      const isLocked = lockedAgents[agent];
+                      const willRegenerate = agentsToRegenerate.includes(agent);
+                      
+                      return (
+                        <div key={agent} className="flex items-center gap-2">
+                          <div 
+                            className={`
+                              px-3 py-2 rounded-lg text-sm font-medium transition-all
+                              ${isEdited ? 'bg-blue-500/30 border-2 border-blue-500 text-blue-300' : ''}
+                              ${isAffected && !isEdited ? (isLocked ? 'bg-amber-500/20 border border-amber-500/50 text-amber-300' : willRegenerate ? 'bg-green-500/20 border border-green-500/50 text-green-300' : 'bg-slate-700 border border-slate-600 text-slate-400') : ''}
+                              ${!isEdited && !isAffected ? 'bg-slate-800 border border-slate-700 text-slate-500' : ''}
+                            `}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              {isLocked && (
+                                <svg className="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                </svg>
+                              )}
+                              {isEdited && (
+                                <svg className="w-3 h-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                              )}
+                              {agent}
+                            </div>
+                          </div>
+                          {idx < AGENTS.length - 1 && (
+                            <svg className="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center justify-center gap-4 mt-4 text-xs text-slate-500">
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-blue-500/30 border border-blue-500"></span> Edited
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-green-500/20 border border-green-500/50"></span> Will Regenerate
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-3 rounded bg-amber-500/20 border border-amber-500/50"></span> Locked
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Agents to Regenerate */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-3">
+                  Select agents to regenerate
+                </label>
+                <div className="space-y-2">
+                  {AGENTS.filter(agent => agent !== pendingEdit.agent).map(agent => {
+                    const isAffected = AGENT_DEPENDENCIES[pendingEdit.agent as AgentName]?.includes(agent as AgentName);
+                    const isLocked = lockedAgents[agent];
+                    const willRegenerate = agentsToRegenerate.includes(agent);
+                    
+                    return (
+                      <div 
+                        key={agent}
+                        className={`
+                          flex items-center justify-between p-3 rounded-lg border transition-all
+                          ${isLocked ? 'bg-amber-500/10 border-amber-500/30' : willRegenerate ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-800/50 border-slate-700'}
+                        `}
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={willRegenerate}
+                            onChange={() => handleToggleAgentRegenerate(agent)}
+                            disabled={isLocked}
+                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500/50 disabled:opacity-50"
+                          />
+                          <div className={`w-8 h-8 rounded-full ${AGENT_COLORS[agent]} flex items-center justify-center`}>
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={AGENT_ICONS[agent]} />
+                            </svg>
+                          </div>
+                          <div>
+                            <span className={`font-medium ${AGENT_TEXT_COLORS[agent]}`}>{agent}</span>
+                            <span className="text-xs text-slate-500 ml-2">{AGENT_DESCRIPTIONS[agent]}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isAffected && !isLocked && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400">Affected</span>
+                          )}
+                          <button
+                            onClick={() => handleToggleLock(agent)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              isLocked 
+                                ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30' 
+                                : 'text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                            }`}
+                            title={isLocked ? 'Unlock agent' : 'Lock agent'}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              {isLocked ? (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                              ) : (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                              )}
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-slate-700 flex justify-end gap-3">
+              <button
+                onClick={handleCancelConfirm}
+                className="px-4 py-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmRegenerate}
+                disabled={!editComment.trim()}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Regenerate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
