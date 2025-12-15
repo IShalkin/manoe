@@ -19,6 +19,8 @@ from models import (
 from prompts import (
     ARCHITECT_SYSTEM_PROMPT,
     CRITIC_SYSTEM_PROMPT,
+    IMPACT_ASSESSMENT_SYSTEM_PROMPT,
+    ORIGINALITY_CHECK_SYSTEM_PROMPT,
     POLISH_SYSTEM_PROMPT,
     PROFILER_SYSTEM_PROMPT,
     STRATEGIST_SYSTEM_PROMPT,
@@ -38,6 +40,8 @@ class GenerationPhase(str, Enum):
     DRAFTING = "drafting"
     CRITIQUE = "critique"
     REVISION = "revision"
+    ORIGINALITY_CHECK = "originality_check"
+    IMPACT_ASSESSMENT = "impact_assessment"
     POLISH = "polish"
 
 
@@ -98,6 +102,8 @@ class StorytellerGroupChat:
         self.strategist: Optional[AssistantAgent] = None
         self.writer: Optional[AssistantAgent] = None
         self.critic: Optional[AssistantAgent] = None
+        self.originality: Optional[AssistantAgent] = None
+        self.impact: Optional[AssistantAgent] = None
 
         # Qdrant memory service (optional)
         self.qdrant_memory: Optional[QdrantMemoryService] = None
@@ -285,6 +291,8 @@ class StorytellerGroupChat:
             "writer": (agent_configs.writer_provider, agent_configs.writer_model),
             "critic": (agent_configs.critic_provider, agent_configs.critic_model),
             "polish": (agent_configs.polish_provider, agent_configs.polish_model),
+            "originality": (agent_configs.critic_provider, agent_configs.critic_model),
+            "impact": (agent_configs.critic_provider, agent_configs.critic_model),
         }
 
         provider, model = provider_map[agent_name]
@@ -392,6 +400,32 @@ Focus on sentence-level refinement without changing meaning or voice.
 Always output polished scenes as valid JSON wrapped in ```json``` blocks.
 """
 
+        originality_prompt = ORIGINALITY_CHECK_SYSTEM_PROMPT + """
+
+## Communication Protocol
+
+You can communicate with other agents:
+- ARTIFACT: Output your originality analysis as final artifact
+- QUESTION to Writer: Ask about intentional trope usage
+- QUESTION to Critic: Ask about previous feedback on originality
+
+Identify cliches and overused tropes, but consider intentional usage.
+Always output originality analysis as valid JSON wrapped in ```json``` blocks.
+"""
+
+        impact_prompt = IMPACT_ASSESSMENT_SYSTEM_PROMPT + """
+
+## Communication Protocol
+
+You can communicate with other agents:
+- ARTIFACT: Output your impact assessment as final artifact
+- QUESTION to Writer: Ask about intended emotional effects
+- QUESTION to Critic: Ask about emotional feedback from critique
+
+Evaluate emotional impact against intended beats.
+Always output impact assessment as valid JSON wrapped in ```json``` blocks.
+"""
+
         # Create agent instances with enhanced prompts
         # Note: We'll use custom message handling instead of AutoGen's built-in
         self.architect = self._create_agent("Architect", architect_prompt)
@@ -401,6 +435,8 @@ Always output polished scenes as valid JSON wrapped in ```json``` blocks.
         self.writer = self._create_agent("Writer", writer_prompt)
         self.critic = self._create_agent("Critic", critic_prompt)
         self.polish = self._create_agent("Polish", polish_prompt)
+        self.originality = self._create_agent("Originality", originality_prompt)
+        self.impact = self._create_agent("Impact", impact_prompt)
 
     def _create_agent(self, name: str, system_prompt: str) -> Dict[str, Any]:
         """Create an agent configuration (not AutoGen agent directly due to async requirements)."""
@@ -1383,6 +1419,394 @@ Output as valid JSON with the polished content and a summary of changes made.
             "changes_summary": polished_content.get("polish_summary", "") if isinstance(polished_content, dict) else "",
         }
 
+    async def run_originality_check(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        moral_compass: str,
+        target_audience: str,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+        genre_context: str = "General Fiction",
+    ) -> Dict[str, Any]:
+        """
+        Run the Originality Check phase on a scene draft.
+        Identifies cliches, overused tropes, and predictable elements.
+
+        Args:
+            scene_number: The scene number being checked
+            draft: The scene draft to analyze
+            moral_compass: Moral compass setting for the story
+            target_audience: Target audience for context
+            emotional_beat: Optional emotional beat information
+            genre_context: Genre context for trope evaluation
+        """
+        self.state.phase = GenerationPhase.ORIGINALITY_CHECK
+
+        self._emit_event("phase_start", {
+            "phase": "originality_check",
+            "scene_number": scene_number,
+        })
+
+        # Format sensory details
+        sensory_details = draft.get("sensory_details", {})
+        sensory_str = "\n".join([
+            f"- {sense.capitalize()}: {', '.join(detail) if isinstance(detail, list) else detail}"
+            for sense, detail in sensory_details.items()
+            if detail
+        ]) if sensory_details else "No sensory details provided"
+
+        # Format dialogue entries
+        dialogue_entries = draft.get("dialogue_entries", [])
+        dialogue_str = "\n".join([
+            f"**{d.get('speaker', 'Unknown')}**: \"{d.get('spoken_text', d.get('line', ''))}\""
+            for d in dialogue_entries
+        ]) if dialogue_entries else "No dialogue entries"
+
+        # Format emotional beat
+        emotional_initial = ""
+        emotional_climax = ""
+        emotional_final = ""
+        if emotional_beat:
+            emotional_initial = emotional_beat.get("initial_state", "")
+            emotional_climax = emotional_beat.get("climax", "")
+            emotional_final = emotional_beat.get("final_state", "")
+
+        originality_prompt = f"""
+## Scene for Originality Analysis
+
+**Scene Number:** {scene_number}
+**Scene Title:** {draft.get('title', draft.get('scene_title', 'Untitled'))}
+
+**Genre/Style Context:** {genre_context}
+
+**Moral Compass:** {moral_compass}
+
+**Target Audience:** {target_audience}
+
+## Scene Content
+
+{draft.get('narrative_content', json.dumps(draft, indent=2))}
+
+## Sensory Details
+
+{sensory_str}
+
+## Dialogue Entries
+
+{dialogue_str}
+
+## Intended Emotional Beat
+
+- Initial: {emotional_initial}
+- Climax: {emotional_climax}
+- Final: {emotional_final}
+
+## Previous Originality Issues (if revision)
+
+N/A
+
+---
+
+Analyze this scene for originality. Identify cliches, evaluate trope usage, assess predictability, and provide specific suggestions for making the narrative fresher and more original. Output as valid JSON following the specified schema.
+"""
+
+        originality_response = await self._call_agent(self.originality, originality_prompt)
+        originality_msg = self._parse_agent_message("Originality", originality_response)
+        self.state.messages.append(originality_msg)
+
+        originality_result = originality_msg.content if isinstance(originality_msg.content, dict) else {}
+
+        # Determine if revision is required based on score
+        originality_score = originality_result.get("originality_score", 10)
+        revision_required = originality_score < 6.0 or originality_result.get("revision_required", False)
+
+        self._emit_event("phase_complete", {
+            "phase": "originality_check",
+            "scene_number": scene_number,
+            "originality_score": originality_score,
+            "revision_required": revision_required,
+        })
+
+        return {
+            "originality_analysis": originality_result,
+            "originality_score": originality_score,
+            "revision_required": revision_required,
+            "cliche_count": len(originality_result.get("cliche_instances", [])),
+            "flagged_sections": originality_result.get("flagged_sections", []),
+        }
+
+    async def run_impact_assessment(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        target_audience: str,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+        genre_context: str = "General Fiction",
+    ) -> Dict[str, Any]:
+        """
+        Run the Impact Assessment phase on a scene draft.
+        Evaluates emotional impact and alignment with intended beats.
+
+        Args:
+            scene_number: The scene number being assessed
+            draft: The scene draft to analyze
+            characters: List of character profiles for context
+            moral_compass: Moral compass setting for the story
+            target_audience: Target audience for calibration
+            emotional_beat: Optional intended emotional beat information
+            genre_context: Genre context for impact expectations
+        """
+        self.state.phase = GenerationPhase.IMPACT_ASSESSMENT
+
+        self._emit_event("phase_start", {
+            "phase": "impact_assessment",
+            "scene_number": scene_number,
+        })
+
+        # Format character context
+        present_characters = draft.get("characters_present", [])
+        character_context_str = "\n\n".join([
+            f"**{c.get('name', 'Unknown')}**\n"
+            f"- Core Motivation: {c.get('core_motivation', 'Unknown')}\n"
+            f"- Inner Trap: {c.get('inner_trap', 'Unknown')}\n"
+            f"- Psychological Wound: {c.get('psychological_wound', 'Unknown')}\n"
+            f"- Deepest Fear: {c.get('deepest_fear', 'Unknown')}"
+            for c in characters
+            if c.get("name") in present_characters
+        ]) if present_characters else "\n\n".join([
+            f"**{c.get('name', 'Unknown')}**\n"
+            f"- Core Motivation: {c.get('core_motivation', 'Unknown')}\n"
+            f"- Inner Trap: {c.get('inner_trap', 'Unknown')}"
+            for c in characters[:3]  # Include first 3 characters if none specified
+        ])
+
+        # Format sensory details
+        sensory_details = draft.get("sensory_details", {})
+        sensory_str = "\n".join([
+            f"- {sense.capitalize()}: {', '.join(detail) if isinstance(detail, list) else detail}"
+            for sense, detail in sensory_details.items()
+            if detail
+        ]) if sensory_details else "No sensory details provided"
+
+        # Format dialogue entries
+        dialogue_entries = draft.get("dialogue_entries", [])
+        dialogue_str = "\n".join([
+            f"**{d.get('speaker', 'Unknown')}**: \"{d.get('spoken_text', d.get('line', ''))}\""
+            for d in dialogue_entries
+        ]) if dialogue_entries else "No dialogue entries"
+
+        # Format emotional beat
+        emotional_initial = ""
+        emotional_climax = ""
+        emotional_final = ""
+        if emotional_beat:
+            emotional_initial = emotional_beat.get("initial_state", "")
+            emotional_climax = emotional_beat.get("climax", "")
+            emotional_final = emotional_beat.get("final_state", "")
+
+        impact_prompt = f"""
+## Scene for Impact Assessment
+
+**Scene Number:** {scene_number}
+**Scene Title:** {draft.get('title', draft.get('scene_title', 'Untitled'))}
+
+**Genre/Style Context:** {genre_context}
+
+**Moral Compass:** {moral_compass}
+
+**Target Audience:** {target_audience}
+
+## Intended Emotional Beat
+
+- **Initial State:** {emotional_initial}
+- **Climax:** {emotional_climax}
+- **Final State:** {emotional_final}
+
+## Scene Content
+
+{draft.get('narrative_content', json.dumps(draft, indent=2))}
+
+## Sensory Details
+
+{sensory_str}
+
+## Dialogue Entries
+
+{dialogue_str}
+
+## Character Context
+
+{character_context_str}
+
+## Previous Impact Issues (if revision)
+
+N/A
+
+---
+
+Assess the emotional impact of this scene. Evaluate how well the intended emotional beats are achieved, analyze the depth and layers of emotional engagement, assess the effectiveness of craft techniques, and provide specific suggestions for enhancing impact. Output as valid JSON following the specified schema.
+"""
+
+        impact_response = await self._call_agent(self.impact, impact_prompt)
+        impact_msg = self._parse_agent_message("Impact", impact_response)
+        self.state.messages.append(impact_msg)
+
+        impact_result = impact_msg.content if isinstance(impact_msg.content, dict) else {}
+
+        # Determine if revision is required based on score
+        impact_score = impact_result.get("impact_score", 10)
+        revision_required = impact_score < 6.0 or impact_result.get("revision_required", False)
+
+        # Extract emotional effectiveness details
+        emotional_effectiveness = impact_result.get("emotional_effectiveness", {})
+        beat_alignment = {
+            "initial": emotional_effectiveness.get("initial_alignment", 0),
+            "climax": emotional_effectiveness.get("climax_alignment", 0),
+            "final": emotional_effectiveness.get("final_alignment", 0),
+        }
+
+        self._emit_event("phase_complete", {
+            "phase": "impact_assessment",
+            "scene_number": scene_number,
+            "impact_score": impact_score,
+            "revision_required": revision_required,
+        })
+
+        return {
+            "impact_analysis": impact_result,
+            "impact_score": impact_score,
+            "revision_required": revision_required,
+            "beat_alignment": beat_alignment,
+            "weak_sections": impact_result.get("weak_sections", []),
+            "enhancement_suggestions": impact_result.get("enhancement_suggestions", []),
+        }
+
+    async def run_quality_gate(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        target_audience: str,
+        emotional_beat: Optional[Dict[str, Any]] = None,
+        critique: Optional[Dict[str, Any]] = None,
+        genre_context: str = "General Fiction",
+        quality_thresholds: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run the complete quality gate: Originality Check + Impact Assessment.
+        Returns combined quality metrics and determines if scene passes quality standards.
+
+        Args:
+            scene_number: The scene number being evaluated
+            draft: The scene draft to analyze
+            characters: List of character profiles
+            moral_compass: Moral compass setting
+            target_audience: Target audience
+            emotional_beat: Intended emotional beat
+            critique: Optional critique from Critic agent
+            genre_context: Genre context
+            quality_thresholds: Optional custom thresholds (defaults provided)
+        """
+        # Default quality thresholds
+        thresholds = quality_thresholds or {
+            "critic_overall": 7.0,
+            "critic_category_min": 5,
+            "originality_score": 6.0,
+            "impact_score": 6.0,
+        }
+
+        self._emit_event("quality_gate_start", {
+            "scene_number": scene_number,
+            "thresholds": thresholds,
+        })
+
+        # Run originality check
+        originality_result = await self.run_originality_check(
+            scene_number=scene_number,
+            draft=draft,
+            moral_compass=moral_compass,
+            target_audience=target_audience,
+            emotional_beat=emotional_beat,
+            genre_context=genre_context,
+        )
+
+        # Run impact assessment
+        impact_result = await self.run_impact_assessment(
+            scene_number=scene_number,
+            draft=draft,
+            characters=characters,
+            moral_compass=moral_compass,
+            target_audience=target_audience,
+            emotional_beat=emotional_beat,
+            genre_context=genre_context,
+        )
+
+        # Evaluate critic scores if available
+        critic_passed = True
+        critic_issues = []
+        if critique:
+            overall_score = critique.get("overall_score", 10)
+            if overall_score < thresholds["critic_overall"]:
+                critic_passed = False
+                critic_issues.append(f"Overall score {overall_score} below threshold {thresholds['critic_overall']}")
+
+            # Check individual category scores
+            feedback_items = critique.get("feedback_items", [])
+            for item in feedback_items:
+                score = item.get("score", 10)
+                if score < thresholds["critic_category_min"]:
+                    critic_passed = False
+                    critic_issues.append(
+                        f"Category '{item.get('category', 'Unknown')}' score {score} below minimum {thresholds['critic_category_min']}"
+                    )
+
+        # Determine overall quality gate pass/fail
+        originality_passed = originality_result["originality_score"] >= thresholds["originality_score"]
+        impact_passed = impact_result["impact_score"] >= thresholds["impact_score"]
+
+        quality_passed = critic_passed and originality_passed and impact_passed
+
+        # Compile issues for revision
+        revision_issues = []
+        if not critic_passed:
+            revision_issues.extend(critic_issues)
+        if not originality_passed:
+            revision_issues.append(f"Originality score {originality_result['originality_score']} below threshold {thresholds['originality_score']}")
+            revision_issues.extend([
+                f"Cliche: {c.get('text', 'Unknown')}" for c in originality_result.get("flagged_sections", [])[:3]
+            ])
+        if not impact_passed:
+            revision_issues.append(f"Impact score {impact_result['impact_score']} below threshold {thresholds['impact_score']}")
+            revision_issues.extend([
+                f"Weak section: {s.get('location', 'Unknown')}" for s in impact_result.get("weak_sections", [])[:3]
+            ])
+
+        self._emit_event("quality_gate_complete", {
+            "scene_number": scene_number,
+            "quality_passed": quality_passed,
+            "originality_score": originality_result["originality_score"],
+            "impact_score": impact_result["impact_score"],
+            "critic_passed": critic_passed,
+        })
+
+        return {
+            "quality_passed": quality_passed,
+            "originality_result": originality_result,
+            "impact_result": impact_result,
+            "critic_passed": critic_passed,
+            "critic_issues": critic_issues,
+            "revision_issues": revision_issues,
+            "scores": {
+                "originality": originality_result["originality_score"],
+                "impact": impact_result["impact_score"],
+                "critic_overall": critique.get("overall_score") if critique else None,
+            },
+            "thresholds": thresholds,
+        }
+
     async def run_demo_generation(
         self,
         project: StoryProject,
@@ -1793,7 +2217,27 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         results["phases"]["drafting"] = {"scenes": drafts}
 
-        # Phase 6: Polish (all approved scenes)
+        # Phase 6: Quality Gate (Originality Check + Impact Assessment)
+        quality_results = []
+        for i, draft_result in enumerate(drafts):
+            if draft_result.get("draft"):
+                scene = scenes[i] if i < len(scenes) else {}
+                emotional_beat = scene.get("emotional_beat", {})
+
+                quality_result = await self.run_quality_gate(
+                    scene_number=i + 1,
+                    draft=draft_result["draft"],
+                    characters=characters_result["characters"],
+                    moral_compass=project.moral_compass.value,
+                    target_audience=project.target_audience,
+                    emotional_beat=emotional_beat,
+                    critique=draft_result.get("critique"),
+                )
+                quality_results.append(quality_result)
+
+        results["phases"]["quality_gate"] = {"scenes": quality_results}
+
+        # Phase 7: Polish (all approved scenes)
         polished_drafts = []
         for i, draft_result in enumerate(drafts):
             if draft_result.get("draft"):
