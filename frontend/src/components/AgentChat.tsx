@@ -949,7 +949,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       {/* Round Switcher */}
       {rounds.length > 1 && (
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 bg-slate-800/50 border-b border-slate-700">
-          <span className="text-xs text-slate-400 font-medium">Rounds:</span>
+          <span className="text-xs text-slate-400 font-medium">Steps:</span>
           
           <div className="flex items-center gap-1 flex-wrap">
             <button
