@@ -845,31 +845,34 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
 
   // Extract final result from messages
   const finalResult = useMemo(() => {
-    // Try to get from any phase_complete event with result
-    const phaseCompleteEvents = messages.filter(m => m.type === 'phase_complete' && m.data.result);
-    if (phaseCompleteEvents.length > 0) {
-      // Prefer genesis phase, but take any phase_complete with result
-      const genesisComplete = phaseCompleteEvents.find(m => m.data.phase === 'genesis');
-      const phaseComplete = genesisComplete || phaseCompleteEvents[phaseCompleteEvents.length - 1];
-      const result = phaseComplete.data.result;
-      if (typeof result === 'object' && result !== null) {
-        return JSON.stringify(result, null, 2);
-      }
-      return String(result);
-    }
-    
-    // Try generation_complete result_summary
+    // Try generation_complete result_summary first (most authoritative)
     const completeEvent = messages.find(m => m.type === 'generation_complete');
     if (completeEvent?.data.result_summary) {
       return completeEvent.data.result_summary;
     }
     
-    // Prefer Writer's last message as the "final result" (the actual story content)
+    // Prefer Polish agent's last message (final polished story content)
+    const polishMessages = messages.filter(
+      m => m.type === 'agent_message' && m.data.agent === 'Polish' && m.data.content?.trim()
+    );
+    if (polishMessages.length > 0) {
+      return polishMessages[polishMessages.length - 1].data.content || '';
+    }
+    
+    // Fall back to Writer's last message (draft story content)
     const writerMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
     );
     if (writerMessages.length > 0) {
       return writerMessages[writerMessages.length - 1].data.content || '';
+    }
+    
+    // Fall back to Critic's last message (critique of the story)
+    const criticMessages = messages.filter(
+      m => m.type === 'agent_message' && m.data.agent === 'Critic' && m.data.content?.trim()
+    );
+    if (criticMessages.length > 0) {
+      return criticMessages[criticMessages.length - 1].data.content || '';
     }
     
     // Fall back to last substantial agent message
@@ -878,6 +881,18 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     );
     if (agentMessages.length > 0) {
       return agentMessages[agentMessages.length - 1].data.content || '';
+    }
+    
+    // Last resort: try phase_complete events (but prefer later phases)
+    const phaseCompleteEvents = messages.filter(m => m.type === 'phase_complete' && m.data.result);
+    if (phaseCompleteEvents.length > 0) {
+      // Take the last phase_complete event (most recent phase)
+      const phaseComplete = phaseCompleteEvents[phaseCompleteEvents.length - 1];
+      const result = phaseComplete.data.result;
+      if (typeof result === 'object' && result !== null) {
+        return JSON.stringify(result, null, 2);
+      }
+      return String(result);
     }
     
     return '';
