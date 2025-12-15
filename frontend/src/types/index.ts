@@ -59,6 +59,36 @@ export const NARRATOR_STANCE_OPTIONS: { value: NarratorStance; label: string; de
   { value: 'sympathetic', label: 'Sympathetic', desc: 'Empathizes with characters' },
 ];
 
+// Narrative Possibilities Branching Types (based on Storyteller Framework Section 1.4)
+export type ConflictType = 'vs_nature' | 'vs_society' | 'vs_self' | 'vs_other';
+export type EstimatedTone = 'dark' | 'hopeful' | 'bittersweet' | 'intense' | 'contemplative';
+
+export interface NarrativePossibility {
+  id: number;
+  title: string;
+  genre_approach: string;
+  plot_summary: string;
+  setting_description: string;
+  main_conflict: string;
+  conflict_type: ConflictType;
+  potential_characters: string[];
+  possible_twists: string[];
+  thematic_elements: string[];
+  moral_compass_application: string;
+  unique_appeal: string;
+  estimated_tone: EstimatedTone;
+}
+
+export interface NarrativePossibilitiesRecommendation {
+  preferred_id: number;
+  rationale: string;
+}
+
+export interface NarrativePossibilitiesResult {
+  narrative_possibilities: NarrativePossibility[];
+  recommendation: NarrativePossibilitiesRecommendation;
+}
+
 export interface Project {
   id: string;
   name: string;

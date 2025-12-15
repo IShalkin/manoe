@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { ProjectResult } from '../hooks/useProjects';
 import { orchestratorFetch, getAuthenticatedSSEUrl } from '../lib/api';
+import type { NarrativePossibility, NarrativePossibilitiesRecommendation } from '../types';
+import { NarrativePossibilitiesSelector } from './NarrativePossibilitiesSelector';
 
 // Tolerant JSON parser that handles common LLM output issues
 function tolerantJsonParse(str: string): unknown | null {
@@ -420,6 +422,7 @@ interface AgentChatProps {
   projectResult?: ProjectResult | null;
   onUpdateResult?: (result: ProjectResult) => void;
   onRegenerate?: (constraints: RegenerationConstraints) => void;
+  onNarrativePossibilitySelected?: (possibility: NarrativePossibility) => void;
 }
 
 export interface RegenerationConstraints {
@@ -526,7 +529,7 @@ interface AgentState {
   lastUpdate: string;
 }
 
-export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate }: AgentChatProps) {
+export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate, onNarrativePossibilitySelected }: AgentChatProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -537,6 +540,9 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const [isResuming, setIsResuming] = useState(false);
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [narrativePossibilities, setNarrativePossibilities] = useState<NarrativePossibility[] | null>(null);
+  const [narrativeRecommendation, setNarrativeRecommendation] = useState<NarrativePossibilitiesRecommendation | null>(null);
+  const [isSelectingNarrative, setIsSelectingNarrative] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const currentRoundRef = useRef(1);
@@ -852,6 +858,19 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
             currentRoundRef.current += 1;
             hasMessageInCurrentRoundRef.current = false;
           }
+        }
+
+        // Handle narrative possibilities generated event (branching mode)
+        if (data.type === 'narrative_possibilities_generated') {
+          const possibilities = (data.data as unknown as { possibilities: NarrativePossibility[] }).possibilities || [];
+          const recommendation = (data.data as unknown as { recommendation: NarrativePossibilitiesRecommendation }).recommendation || null;
+          setNarrativePossibilities(possibilities);
+          setNarrativeRecommendation(recommendation);
+          setCurrentPhase('Select Narrative');
+          setIsComplete(true);
+          if (eventSource) eventSource.close();
+          setIsConnected(false);
+          return;
         }
         
         setMessages((prev) => [...prev, data]);
@@ -1310,8 +1329,25 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         </div>
       )}
 
+      {/* Narrative Possibilities Selector (Branching Mode) */}
+      {narrativePossibilities && narrativePossibilities.length > 0 && (
+        <div className="p-4">
+          <NarrativePossibilitiesSelector
+            possibilities={narrativePossibilities}
+            recommendation={narrativeRecommendation || undefined}
+            onSelect={(possibility) => {
+              setIsSelectingNarrative(true);
+              if (onNarrativePossibilitySelected) {
+                onNarrativePossibilitySelected(possibility);
+              }
+            }}
+            isLoading={isSelectingNarrative}
+          />
+        </div>
+      )}
+
       {/* Agent Grid */}
-      <div className="p-2 sm:p-4">
+      <div className="p-2 sm:p-4" style={{ display: narrativePossibilities && narrativePossibilities.length > 0 ? 'none' : 'block' }}>
         {messages.length === 0 ? (
           <div className="flex items-center justify-center py-16">
             <div className="text-center">
