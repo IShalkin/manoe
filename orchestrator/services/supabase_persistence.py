@@ -386,3 +386,162 @@ class SupabasePersistenceService:
             print(f"Failed to store generation event: {e}")
             
         return None
+
+    async def store_run_artifact(
+        self, project_id: str, run_id: str, phase: str, artifact_type: str, content: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Store a phase artifact for a generation run.
+        
+        Args:
+            project_id: UUID of the project
+            run_id: UUID of the generation run
+            phase: Phase name (genesis, characters, worldbuilding, outlining, advanced_planning, drafting, polish)
+            artifact_type: Type of artifact (narrative_possibility, characters, worldbuilding, outline, etc.)
+            content: Artifact content as dictionary
+            
+        Returns:
+            Created artifact ID or None
+        """
+        if not self.is_connected:
+            return None
+            
+        try:
+            data = {
+                "project_id": project_id,
+                "run_id": run_id,
+                "phase": phase,
+                "artifact_type": artifact_type,
+                "content": content,
+            }
+            
+            result = self.client.table("run_artifacts").upsert(
+                data,
+                on_conflict="run_id,phase,artifact_type"
+            ).execute()
+            if result.data:
+                return result.data[0]["id"]
+        except Exception as e:
+            print(f"Failed to store run artifact {artifact_type} for phase {phase}: {e}")
+            
+        return None
+
+    async def get_run_artifacts(self, run_id: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all artifacts for a generation run.
+        
+        Args:
+            run_id: UUID of the generation run
+            
+        Returns:
+            Dictionary mapping phase to artifact content
+        """
+        if not self.is_connected:
+            return {}
+            
+        try:
+            result = (
+                self.client.table("run_artifacts")
+                .select("*")
+                .eq("run_id", run_id)
+                .execute()
+            )
+            
+            artifacts = {}
+            for row in result.data or []:
+                phase = row.get("phase")
+                artifact_type = row.get("artifact_type")
+                content = row.get("content")
+                if phase and content:
+                    if phase not in artifacts:
+                        artifacts[phase] = {}
+                    artifacts[phase][artifact_type] = content
+            return artifacts
+        except Exception as e:
+            print(f"Failed to get run artifacts: {e}")
+            return {}
+
+    async def get_run_artifact(self, run_id: str, phase: str, artifact_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a specific artifact for a generation run.
+        
+        Args:
+            run_id: UUID of the generation run
+            phase: Phase name
+            artifact_type: Type of artifact
+            
+        Returns:
+            Artifact content or None
+        """
+        if not self.is_connected:
+            return None
+            
+        try:
+            result = (
+                self.client.table("run_artifacts")
+                .select("content")
+                .eq("run_id", run_id)
+                .eq("phase", phase)
+                .eq("artifact_type", artifact_type)
+                .single()
+                .execute()
+            )
+            return result.data.get("content") if result.data else None
+        except Exception as e:
+            print(f"Failed to get run artifact: {e}")
+            return None
+
+    async def delete_run_artifacts_from_phase(self, run_id: str, from_phase: str) -> bool:
+        """
+        Delete all artifacts from a specific phase onwards for a run.
+        This is used when regenerating from a specific phase.
+        
+        Args:
+            run_id: UUID of the generation run
+            from_phase: Phase to start deleting from
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.is_connected:
+            return False
+        
+        phase_order = [
+            "genesis", "characters", "worldbuilding", "outlining",
+            "advanced_planning", "drafting", "polish"
+        ]
+        
+        try:
+            from_index = phase_order.index(from_phase)
+            phases_to_delete = phase_order[from_index:]
+            
+            for phase in phases_to_delete:
+                self.client.table("run_artifacts").delete().eq("run_id", run_id).eq("phase", phase).execute()
+            
+            return True
+        except ValueError:
+            print(f"Unknown phase: {from_phase}")
+            return False
+        except Exception as e:
+            print(f"Failed to delete run artifacts: {e}")
+            return False
+
+    async def get_project_worldbuilding(self, project_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all worldbuilding elements for a project.
+        
+        Args:
+            project_id: UUID of the project
+            
+        Returns:
+            List of worldbuilding element dictionaries
+        """
+        if not self.is_connected:
+            return []
+            
+        try:
+            result = self.client.table("worldbuilding").select("*").eq("project_id", project_id).execute()
+            return result.data or []
+        except Exception as e:
+            print(f"Failed to get worldbuilding: {e}")
+            return []
