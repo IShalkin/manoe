@@ -222,6 +222,13 @@ class MultiAgentWorker:
                 # Full pipeline: Genesis → Characters → Worldbuilding → Outlining → Drafting with Writer↔Critic loop
                 # Pass OpenAI API key for Qdrant memory embeddings (only works with OpenAI provider)
                 openai_key = api_key if provider == "openai" else None
+                
+                # Extract change_request from constraints if available
+                # This is the "What did you change?" field from the frontend
+                change_request = None
+                if constraints and constraints.get("edit_comment"):
+                    change_request = constraints["edit_comment"]
+                
                 result = await group_chat.run_full_generation(
                     project,
                     target_word_count=target_word_count,
@@ -237,6 +244,7 @@ class MultiAgentWorker:
                     edited_content=edited_content,
                     scenes_to_regenerate=scenes_to_regenerate,
                     previous_run_id=previous_run_id,
+                    change_request=change_request,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow

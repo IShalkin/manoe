@@ -2853,6 +2853,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         edited_content: Optional[Dict[str, Any]] = None,
         scenes_to_regenerate: Optional[List[int]] = None,
         previous_run_id: Optional[str] = None,
+        change_request: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration
@@ -2903,24 +2904,31 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Scene-level regeneration mode
         scene_regen_mode = scenes_to_regenerate is not None and len(scenes_to_regenerate) > 0
 
-        # Extract change_request from edited_content (the "What did you change?" field)
+        # Use change_request parameter if provided (from constraints.edit_comment)
+        # Otherwise, try to extract from edited_content (the "What did you change?" field)
         # This will be passed to all regenerated phases as additional AI context
-        change_request: Optional[str] = None
-        if edited_content:
+        effective_change_request: Optional[str] = change_request
+        if not effective_change_request and edited_content:
             # Check each phase for a comment field
             for phase_name in ["genesis", "characters", "worldbuilding", "outlining", "drafting", "polish"]:
                 if phase_name in edited_content:
                     phase_data = edited_content[phase_name]
                     if isinstance(phase_data, dict) and phase_data.get("comment"):
-                        change_request = phase_data["comment"]
-                        # Limit change_request length to prevent prompt bloat
-                        if len(change_request) > 2000:
-                            change_request = change_request[:2000] + "..."
-                        self._emit_event("change_request_detected", {
-                            "phase": phase_name,
-                            "preview": change_request[:100] + "..." if len(change_request) > 100 else change_request,
-                        })
+                        effective_change_request = phase_data["comment"]
                         break
+        
+        # Limit change_request length to prevent prompt bloat and emit event
+        if effective_change_request:
+            if len(effective_change_request) > 2000:
+                effective_change_request = effective_change_request[:2000] + "..."
+            self._emit_event("change_request_detected", {
+                "source": "constraints" if change_request else "edited_content",
+                "preview": effective_change_request[:100] + "..." if len(effective_change_request) > 100 else effective_change_request,
+                "length": len(effective_change_request),
+            })
+        
+        # Use effective_change_request for all downstream phases
+        change_request = effective_change_request
         if scene_regen_mode:
             if not previous_artifacts:
                 self._emit_event("scene_regeneration_error", {
