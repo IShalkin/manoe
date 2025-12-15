@@ -7,7 +7,7 @@ import asyncio
 import json
 import os
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, SecretStr
@@ -26,18 +26,17 @@ from config import (
 )
 from models import StoryProject
 from services.redis_streams import RedisStreamsService
-from services.supabase_persistence import SupabasePersistenceService
 from services.security import (
     ALLOWED_ORIGINS,
-    get_current_user,
-    run_ownership,
-    check_run_ownership,
-    validate_request_size,
+    MAX_CUSTOM_MORAL_LENGTH,
     MAX_SEED_IDEA_LENGTH,
     MAX_THEMES_LENGTH,
     MAX_TONE_STYLE_LENGTH,
-    MAX_CUSTOM_MORAL_LENGTH,
+    check_run_ownership,
+    get_current_user,
+    run_ownership,
 )
+from services.supabase_persistence import SupabasePersistenceService
 
 load_dotenv()
 
@@ -62,7 +61,7 @@ class MultiAgentWorker:
         self.redis_streams = RedisStreamsService(redis_url)
         await self.redis_streams.connect()
         print(f"Multi-Agent Worker connected to Redis at {redis_url}")
-        
+
         self.persistence_service = SupabasePersistenceService()
         if await self.persistence_service.connect():
             print("Multi-Agent Worker connected to Supabase for artifact persistence")
@@ -116,6 +115,7 @@ class MultiAgentWorker:
         edited_content: Optional[Dict[str, Any]] = None,
         scenes_to_regenerate: Optional[List[int]] = None,
         supabase_project_id: Optional[str] = None,
+        selected_narrative: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -129,6 +129,7 @@ class MultiAgentWorker:
             previous_run_id: Run ID to load previous artifacts from
             edited_content: User-edited content to use instead of regenerating
             scenes_to_regenerate: Optional list of scene numbers to regenerate (1-indexed)
+            selected_narrative: Pre-selected narrative from branching UI
 
         Returns:
             Generation results including all agent messages
@@ -195,11 +196,11 @@ class MultiAgentWorker:
 
             # Create group chat with event callback and user's config
             event_callback = self._create_event_callback(run_id)
-            
+
             # Create pause check callback that checks if this run is paused
             def pause_check_callback() -> bool:
                 return run_id in self._paused_runs
-            
+
             group_chat = StorytellerGroupChat(
                 config=request_config,
                 event_callback=event_callback,
@@ -234,13 +235,13 @@ class MultiAgentWorker:
                 # Full pipeline: Genesis → Characters → Worldbuilding → Outlining → Drafting with Writer↔Critic loop
                 # Pass OpenAI API key for Qdrant memory embeddings (only works with OpenAI provider)
                 openai_key = api_key if provider == "openai" else None
-                
+
                 # Extract change_request from constraints if available
                 # This is the "What did you change?" field from the frontend
                 change_request = None
                 if constraints and constraints.get("edit_comment"):
                     change_request = constraints["edit_comment"]
-                
+
                 result = await group_chat.run_full_generation(
                     project,
                     target_word_count=target_word_count,
@@ -258,6 +259,7 @@ class MultiAgentWorker:
                     previous_run_id=previous_run_id,
                     change_request=change_request,
                     supabase_project_id=supabase_project_id,
+                    selected_narrative=selected_narrative,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow
@@ -302,14 +304,147 @@ class MultiAgentWorker:
                 "error": str(e),
             }
 
+    async def run_narrative_possibilities(
+        self,
+        run_id: str,
+        project_data: Dict[str, Any],
+        api_key: str,
+        provider: str = "openai",
+        model: str = "gpt-4o",
+    ) -> Dict[str, Any]:
+        """
+        Generate multiple narrative possibilities (3-5) for user selection.
+
+        This implements the Narrative Possibilities Branching feature from
+        Storyteller Framework Section 1.4. Instead of generating a single
+        narrative direction, this generates multiple distinct possibilities
+        for the user to choose from.
+
+        Args:
+            run_id: Unique identifier for this generation run
+            project_data: Project configuration data
+            api_key: User's API key for the LLM provider
+            provider: LLM provider to use (default: openai)
+            model: Model to use for generation
+
+        Returns:
+            Dict containing narrative_possibilities array and recommendation
+        """
+        # Publish start event
+        await self.redis_streams.publish_event(
+            run_id,
+            "narrative_possibilities_start",
+            {
+                "run_id": run_id,
+                "project": project_data,
+                "status": "generating_possibilities",
+            }
+        )
+
+        try:
+            # Create project from data
+            project = StoryProject.model_validate(project_data)
+
+            # Create config with user's API key for this request
+            provider_lower = provider.lower()
+
+            # Map provider string to LLMProvider enum
+            provider_enum_map = {
+                "openai": LLMProvider.OPENAI,
+                "anthropic": LLMProvider.CLAUDE,
+                "claude": LLMProvider.CLAUDE,
+                "gemini": LLMProvider.GEMINI,
+                "openrouter": LLMProvider.OPENROUTER,
+                "deepseek": LLMProvider.DEEPSEEK,
+            }
+            llm_provider = provider_enum_map.get(provider_lower, LLMProvider.OPENAI)
+
+            # Create agent model config
+            agent_models = AgentModelConfig(
+                architect_provider=llm_provider,
+                architect_model=model,
+                profiler_provider=llm_provider,
+                profiler_model=model,
+                worldbuilder_provider=llm_provider,
+                worldbuilder_model=model,
+                strategist_provider=llm_provider,
+                strategist_model=model,
+                writer_provider=llm_provider,
+                writer_model=model,
+                critic_provider=llm_provider,
+                critic_model=model,
+                polish_provider=llm_provider,
+                polish_model=model,
+            )
+
+            request_config = LLMConfiguration(
+                openai=OpenAIConfig(api_key=SecretStr(api_key)) if provider_lower == "openai" else None,
+                claude=ClaudeConfig(api_key=SecretStr(api_key)) if provider_lower in ["anthropic", "claude"] else None,
+                gemini=GeminiConfig(api_key=SecretStr(api_key)) if provider_lower == "gemini" else None,
+                openrouter=OpenRouterConfig(api_key=SecretStr(api_key)) if provider_lower == "openrouter" else None,
+                deepseek=DeepSeekConfig(api_key=SecretStr(api_key)) if provider_lower == "deepseek" else None,
+                agent_models=agent_models,
+            )
+
+            # Create group chat with event callback
+            event_callback = self._create_event_callback(run_id)
+
+            group_chat = StorytellerGroupChat(
+                config=request_config,
+                event_callback=event_callback,
+            )
+
+            # Run narrative possibilities generation
+            result = await group_chat.run_narrative_possibilities(project)
+
+            # Flush all pending events before publishing completion
+            await self._flush_pending_events()
+
+            # Publish completion event with possibilities
+            await self.redis_streams.publish_event(
+                run_id,
+                "narrative_possibilities_complete",
+                {
+                    "run_id": run_id,
+                    "status": "completed",
+                    "count": len(result.get("narrative_possibilities", [])),
+                    "narrative_possibilities": result.get("narrative_possibilities", []),
+                    "recommendation": result.get("recommendation", {}),
+                }
+            )
+
+            return {
+                "success": True,
+                "run_id": run_id,
+                "narrative_possibilities": result.get("narrative_possibilities", []),
+                "recommendation": result.get("recommendation", {}),
+            }
+
+        except Exception as e:
+            # Publish error event
+            await self.redis_streams.publish_event(
+                run_id,
+                "narrative_possibilities_error",
+                {
+                    "run_id": run_id,
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            return {
+                "success": False,
+                "run_id": run_id,
+                "error": str(e),
+            }
+
 
 # HTTP API for triggering generation
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -359,7 +494,7 @@ class GenerateRequest(BaseModel):
     model: str = "gpt-4o"
     api_key: str
     constraints: Optional[RegenerationConstraints] = None  # For partial regeneration
-    generation_mode: str = "demo"  # "demo" for quick preview, "full" for complete pipeline
+    generation_mode: str = "demo"  # "demo" for quick preview, "full" for complete pipeline, "branching" for narrative possibilities
     target_word_count: int = Field(50000, ge=1000, le=500000)  # For full mode
     estimated_scenes: int = Field(20, ge=1, le=200)  # For full mode
     preferred_structure: str = "ThreeAct"  # For full mode
@@ -370,6 +505,7 @@ class GenerateRequest(BaseModel):
     edited_content: Optional[Dict[str, Any]] = None  # User-edited content to use instead of regenerating
     scenes_to_regenerate: Optional[List[int]] = None  # Scene numbers to regenerate (1-indexed)
     supabase_project_id: Optional[str] = None  # Supabase project UUID for artifact persistence
+    selected_narrative: Optional[Dict[str, Any]] = None  # Pre-selected narrative from branching UI
 
 
 class GenerateResponse(BaseModel):
@@ -408,7 +544,7 @@ async def generate(gen_request: GenerateRequest, request: Request):
     user_id, _ = await get_current_user(request)
 
     run_id = str(uuid.uuid4())
-    
+
     # Register run ownership
     run_ownership.register_run(run_id, user_id)
 
@@ -444,6 +580,25 @@ async def generate(gen_request: GenerateRequest, request: Request):
             "stance": gen_request.narrator_config.stance,
         }
 
+    # Handle branching mode - generate narrative possibilities instead of full generation
+    if gen_request.generation_mode == "branching":
+        task = asyncio.create_task(worker.run_narrative_possibilities(
+            run_id=run_id,
+            project_data=project_data,
+            api_key=gen_request.api_key,
+            provider=gen_request.provider,
+            model=gen_request.model,
+        ))
+
+        # Track active run for cancellation support
+        worker._active_runs[run_id] = task
+
+        return GenerateResponse(
+            success=True,
+            run_id=run_id,
+            message="Generating narrative possibilities. Connect to SSE endpoint for real-time updates.",
+        )
+
     # Start generation in background with user's API key
     task = asyncio.create_task(worker.run_generation(
         run_id=run_id,
@@ -463,6 +618,7 @@ async def generate(gen_request: GenerateRequest, request: Request):
         edited_content=gen_request.edited_content,
         scenes_to_regenerate=gen_request.scenes_to_regenerate,
         supabase_project_id=gen_request.supabase_project_id,
+        selected_narrative=gen_request.selected_narrative,
     ))
 
     # Track active run for cancellation support
@@ -480,7 +636,7 @@ async def stream_events(run_id: str, request: Request):
     """Stream events for a generation run via SSE. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
-    
+
     # Authenticate user and verify ownership
     user_id, _ = await get_current_user(request)
     check_run_ownership(run_id, user_id)
@@ -522,7 +678,7 @@ async def get_messages(run_id: str, request: Request):
     """Get all agent messages for a run. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
-    
+
     # Authenticate user and verify ownership
     user_id, _ = await get_current_user(request)
     check_run_ownership(run_id, user_id)
@@ -543,7 +699,7 @@ async def cancel_generation(run_id: str, request: Request):
     """Cancel an active generation run. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
-    
+
     # Authenticate user and verify ownership
     user_id, _ = await get_current_user(request)
     check_run_ownership(run_id, user_id)
@@ -577,7 +733,7 @@ async def pause_generation(run_id: str, request: Request):
     """Pause an active generation run. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
-    
+
     # Authenticate user and verify ownership
     user_id, _ = await get_current_user(request)
     check_run_ownership(run_id, user_id)
@@ -612,7 +768,7 @@ async def resume_generation(run_id: str, request: Request):
     """Resume a paused generation run. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
-    
+
     # Authenticate user and verify ownership
     user_id, _ = await get_current_user(request)
     check_run_ownership(run_id, user_id)
@@ -643,7 +799,7 @@ async def get_run_status(run_id: str, request: Request):
     """Get the status of a generation run. Requires authentication and ownership."""
     if not worker:
         raise HTTPException(status_code=503, detail="Worker not initialized")
-    
+
     # Authenticate user and verify ownership
     user_id, _ = await get_current_user(request)
     check_run_ownership(run_id, user_id)
@@ -691,10 +847,10 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
     This validates the API key and returns the list of models the user has access to.
     """
     import httpx
-    
+
     provider = models_request.provider.lower()
     api_key = models_request.api_key
-    
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             if provider == "openai":
@@ -705,7 +861,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                 )
                 if response.status_code != 200:
                     return ModelsResponse(success=False, error=f"OpenAI API error: {response.status_code}")
-                
+
                 data = response.json()
                 models = []
                 # Filter to chat models only
@@ -721,7 +877,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                 # Sort by name
                 models.sort(key=lambda m: m.id, reverse=True)
                 return ModelsResponse(success=True, models=models)
-            
+
             elif provider == "anthropic":
                 # Anthropic doesn't have a models list API, return static list
                 # but validate the key first
@@ -741,7 +897,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                 # Check if key is valid (even error responses indicate valid key format)
                 if response.status_code == 401:
                     return ModelsResponse(success=False, error="Invalid Anthropic API key")
-                
+
                 # Return available Claude models
                 models = [
                     ModelInfo(id="claude-opus-4.5-20251124", name="Claude Opus 4.5 (S+ Prose)", context_length=200000, description="Best for living prose and roleplay"),
@@ -751,7 +907,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                     ModelInfo(id="claude-3-5-haiku-20241022", name="Claude 3.5 Haiku", context_length=200000),
                 ]
                 return ModelsResponse(success=True, models=models)
-            
+
             elif provider == "gemini":
                 # Google Gemini Models API
                 response = await client.get(
@@ -759,7 +915,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                 )
                 if response.status_code != 200:
                     return ModelsResponse(success=False, error=f"Gemini API error: {response.status_code}")
-                
+
                 data = response.json()
                 models = []
                 for model in data.get("models", []):
@@ -772,7 +928,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                             description=model.get("description"),
                         ))
                 return ModelsResponse(success=True, models=models)
-            
+
             elif provider == "openrouter":
                 # OpenRouter Models API
                 response = await client.get(
@@ -781,7 +937,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                 )
                 if response.status_code != 200:
                     return ModelsResponse(success=False, error=f"OpenRouter API error: {response.status_code}")
-                
+
                 data = response.json()
                 models = []
                 for model in data.get("data", []):
@@ -794,7 +950,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                 # Sort by name
                 models.sort(key=lambda m: m.name)
                 return ModelsResponse(success=True, models=models)
-            
+
             elif provider == "deepseek":
                 # DeepSeek uses OpenAI-compatible API
                 response = await client.get(
@@ -803,7 +959,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                 )
                 if response.status_code != 200:
                     return ModelsResponse(success=False, error=f"DeepSeek API error: {response.status_code}")
-                
+
                 data = response.json()
                 models = []
                 for model in data.get("data", []):
@@ -812,7 +968,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                         name=model.get("id", ""),
                     ))
                 return ModelsResponse(success=True, models=models)
-            
+
             elif provider == "venice":
                 # Venice AI Models API
                 response = await client.get(
@@ -821,7 +977,7 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                 )
                 if response.status_code != 200:
                     return ModelsResponse(success=False, error=f"Venice API error: {response.status_code}")
-                
+
                 data = response.json()
                 models = []
                 for model in data.get("data", []):
@@ -832,10 +988,10 @@ async def get_available_models(models_request: ModelsRequest, request: Request):
                         context_length=model.get("context_length"),
                     ))
                 return ModelsResponse(success=True, models=models)
-            
+
             else:
                 return ModelsResponse(success=False, error=f"Unknown provider: {provider}")
-    
+
     except httpx.TimeoutException:
         return ModelsResponse(success=False, error="Request timed out")
     except Exception as e:
