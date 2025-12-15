@@ -434,6 +434,25 @@ const AGENT_DEPENDENCIES: Record<AgentName, AgentName[]> = {
   Critic: ['Writer', 'Critic'],
 };
 
+const AGENT_TO_PHASE: Record<string, string> = {
+  'Architect': 'Genesis',
+  'Profiler': 'Characters',
+  'Worldbuilder': 'Worldbuilding',
+  'Strategist': 'Outlining',
+  'Writer': 'Drafting',
+  'Critic': 'Polish',
+  'Polish': 'Polish',
+};
+
+const PHASE_ORDER = ['Genesis', 'Characters', 'Worldbuilding', 'Outlining', 'Advanced Planning', 'Drafting', 'Polish'];
+
+const getPhasesToRegenerate = (editedAgent: string): string[] => {
+  const startPhase = AGENT_TO_PHASE[editedAgent] || 'Genesis';
+  const startIndex = PHASE_ORDER.indexOf(startPhase);
+  if (startIndex === -1) return PHASE_ORDER;
+  return PHASE_ORDER.slice(startIndex);
+};
+
 const AGENT_COLORS: Record<string, string> = {
   Architect: 'bg-blue-500',
   Profiler: 'bg-cyan-500',
@@ -1467,11 +1486,19 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                 You edited <span className={AGENT_TEXT_COLORS[pendingEdit.agent]}>{pendingEdit.agent}</span>. 
                 This will affect downstream agents.
               </p>
-              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                <p className="text-xs text-amber-300">
-                  <strong>Note:</strong> Regeneration will start a new complete generation run. 
-                  Your edit will be used as context, but all scenes will be regenerated from scratch.
+              <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                <p className="text-xs text-blue-300">
+                  <strong>Phase-Based Regeneration:</strong> Only phases from <span className="font-semibold">{AGENT_TO_PHASE[pendingEdit.agent] || 'Genesis'}</span> onwards will be regenerated.
+                  Previous phases will be preserved from your last run.
                 </p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {getPhasesToRegenerate(pendingEdit.agent).map((phase, idx) => (
+                    <span key={phase} className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                      {idx > 0 && <span className="mr-1">→</span>}
+                      {phase}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
             
