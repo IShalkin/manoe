@@ -7,15 +7,24 @@ import asyncio
 import json
 import os
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
+from pydantic import SecretStr
 
 from autogen_orchestrator import StorytellerGroupChat
-from config import LLMConfiguration, OpenAIConfig, ClaudeConfig, GeminiConfig, OpenRouterConfig, DeepSeekConfig, AgentModelConfig, LLMProvider, create_default_config_from_env
+from config import (
+    AgentModelConfig,
+    ClaudeConfig,
+    DeepSeekConfig,
+    GeminiConfig,
+    LLMConfiguration,
+    LLMProvider,
+    OpenAIConfig,
+    OpenRouterConfig,
+    create_default_config_from_env,
+)
 from models import StoryProject
-from pydantic import SecretStr
 from services.redis_streams import RedisStreamsService
 
 load_dotenv()
@@ -32,6 +41,7 @@ class MultiAgentWorker:
         self._running = False
         self._active_runs: Dict[str, asyncio.Task] = {}
         self._cancelled_runs: set = set()
+        self._paused_runs: set = set()
 
     async def initialize(self) -> None:
         """Initialize Redis Streams connection."""
@@ -50,18 +60,18 @@ class MultiAgentWorker:
         """Create an event callback that publishes to Redis Streams."""
         # Store pending tasks to ensure they complete before generation_complete
         self._pending_event_tasks: list = []
-        
+
         async def callback(event_type: str, data: Dict[str, Any]) -> None:
             if self.redis_streams:
                 await self.redis_streams.publish_event(run_id, event_type, data)
-        
+
         # Return a sync wrapper since StorytellerGroupChat expects sync callback
         def sync_callback(event_type: str, data: Dict[str, Any]) -> None:
             task = asyncio.create_task(callback(event_type, data))
             self._pending_event_tasks.append(task)
-        
+
         return sync_callback
-    
+
     async def _flush_pending_events(self) -> None:
         """Wait for all pending event tasks to complete."""
         if hasattr(self, '_pending_event_tasks') and self._pending_event_tasks:
@@ -81,16 +91,17 @@ class MultiAgentWorker:
         estimated_scenes: int = 20,
         preferred_structure: str = "ThreeAct",
         max_revisions: int = 2,
+        narrator_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
-        
+
         Args:
             run_id: Unique identifier for this generation run
             project_data: Project configuration data
             api_key: User's API key for the LLM provider
             provider: LLM provider to use (default: openai)
-            
+
         Returns:
             Generation results including all agent messages
         """
@@ -108,11 +119,11 @@ class MultiAgentWorker:
         try:
             # Create project from data
             project = StoryProject.model_validate(project_data)
-            
+
             # Create config with user's API key for this request
             # Map frontend provider names to backend config classes and LLMProvider enum
             provider_lower = provider.lower()
-            
+
             # Map provider string to LLMProvider enum
             provider_enum_map = {
                 "openai": LLMProvider.OPENAI,
@@ -123,21 +134,25 @@ class MultiAgentWorker:
                 "deepseek": LLMProvider.DEEPSEEK,
             }
             llm_provider = provider_enum_map.get(provider_lower, LLMProvider.OPENAI)
-            
+
             # Create agent model config - all agents use the same provider/model for now
             agent_models = AgentModelConfig(
                 architect_provider=llm_provider,
                 architect_model=model,
                 profiler_provider=llm_provider,
                 profiler_model=model,
+                worldbuilder_provider=llm_provider,
+                worldbuilder_model=model,
                 strategist_provider=llm_provider,
                 strategist_model=model,
                 writer_provider=llm_provider,
                 writer_model=model,
                 critic_provider=llm_provider,
                 critic_model=model,
+                polish_provider=llm_provider,
+                polish_model=model,
             )
-            
+
             request_config = LLMConfiguration(
                 openai=OpenAIConfig(api_key=SecretStr(api_key)) if provider_lower == "openai" else None,
                 claude=ClaudeConfig(api_key=SecretStr(api_key)) if provider_lower in ["anthropic", "claude"] else None,
@@ -146,7 +161,7 @@ class MultiAgentWorker:
                 deepseek=DeepSeekConfig(api_key=SecretStr(api_key)) if provider_lower == "deepseek" else None,
                 agent_models=agent_models,
             )
-            
+
             # Create group chat with event callback and user's config
             event_callback = self._create_event_callback(run_id)
             group_chat = StorytellerGroupChat(
@@ -166,7 +181,7 @@ class MultiAgentWorker:
 
             # Run generation based on selected mode
             if generation_mode == "full":
-                # Full pipeline: Genesis → Characters → Outlining → Drafting with Writer↔Critic loop
+                # Full pipeline: Genesis → Characters → Worldbuilding → Outlining → Drafting with Writer↔Critic loop
                 # Pass OpenAI API key for Qdrant memory embeddings (only works with OpenAI provider)
                 openai_key = api_key if provider == "openai" else None
                 result = await group_chat.run_full_generation(
@@ -176,10 +191,11 @@ class MultiAgentWorker:
                     preferred_structure=preferred_structure,
                     openai_api_key=openai_key,
                     max_revisions=max_revisions,
+                    narrator_config=narrator_config,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow
-                result = await group_chat.run_demo_generation(project, constraints=constraints)
+                result = await group_chat.run_demo_generation(project, constraints=constraints, narrator_config=narrator_config)
 
             # Flush all pending events before publishing completion
             # This ensures agent_complete events arrive before generation_complete
@@ -248,6 +264,13 @@ class RegenerationConstraints(BaseModel):
     agents_to_regenerate: List[str]  # Which agents to regenerate
 
 
+class NarratorConfig(BaseModel):
+    """Narrator design configuration based on Storyteller Framework Section 3.2."""
+    pov: str = "third_person_limited"  # first_person, third_person_limited, third_person_omniscient, second_person
+    reliability: str = "reliable"  # reliable, unreliable
+    stance: str = "objective"  # objective, judgmental, sympathetic
+
+
 class GenerateRequest(BaseModel):
     seed_idea: str
     moral_compass: str = "ambiguous"
@@ -262,6 +285,7 @@ class GenerateRequest(BaseModel):
     estimated_scenes: int = 20  # For full mode
     preferred_structure: str = "ThreeAct"  # For full mode
     max_revisions: int = 2  # Maximum Writer↔Critic revision cycles per scene (1-5)
+    narrator_config: Optional[NarratorConfig] = None  # Narrator design settings
 
 
 class GenerateResponse(BaseModel):
@@ -296,10 +320,10 @@ async def generate(request: GenerateRequest):
         raise HTTPException(status_code=503, detail="Worker not initialized")
 
     run_id = str(uuid.uuid4())
-    
+
     # Capitalize moral_compass to match enum values (Ethical, Unethical, Amoral, Ambiguous, UserDefined)
     moral_compass_capitalized = request.moral_compass.capitalize() if request.moral_compass else "Ambiguous"
-    
+
     project_data = {
         "seed_idea": request.seed_idea,
         "moral_compass": moral_compass_capitalized,
@@ -318,6 +342,15 @@ async def generate(request: GenerateRequest):
             "agents_to_regenerate": request.constraints.agents_to_regenerate,
         }
 
+    # Convert narrator_config to dict if provided
+    narrator_config_dict = None
+    if request.narrator_config:
+        narrator_config_dict = {
+            "pov": request.narrator_config.pov,
+            "reliability": request.narrator_config.reliability,
+            "stance": request.narrator_config.stance,
+        }
+
     # Start generation in background with user's API key
     task = asyncio.create_task(worker.run_generation(
         run_id=run_id,
@@ -331,8 +364,9 @@ async def generate(request: GenerateRequest):
         estimated_scenes=request.estimated_scenes,
         preferred_structure=request.preferred_structure,
         max_revisions=request.max_revisions,
+        narrator_config=narrator_config_dict,
     ))
-    
+
     # Track active run for cancellation support
     worker._active_runs[run_id] = task
 
@@ -365,7 +399,7 @@ async def stream_events(run_id: str):
         # Then stream new events from where we left off (not from $)
         async for event in worker.redis_streams.stream_events(run_id, start_id=last_id):
             yield f"data: {json.dumps(event)}\n\n"
-            
+
             # Stop streaming if generation is complete or errored
             if event.get("type") in ["generation_complete", "generation_error"]:
                 break
@@ -388,13 +422,13 @@ async def get_messages(run_id: str):
         raise HTTPException(status_code=503, detail="Worker not initialized")
 
     events = await worker.redis_streams.get_events(run_id, start_id="0", count=1000)
-    
+
     # Filter to agent-related events
     agent_messages = []
     for event in events:
         if event.get("type") in ["agent_start", "agent_complete", "agent_message"]:
             agent_messages.append(event)
-    
+
     return {"run_id": run_id, "messages": agent_messages}
 
 
@@ -403,17 +437,17 @@ async def cancel_generation(run_id: str):
     """Cancel an active generation run."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
-    
+
     # Mark the run as cancelled
     worker._cancelled_runs.add(run_id)
-    
+
     # Cancel the task if it exists
     if run_id in worker._active_runs:
         task = worker._active_runs[run_id]
         if not task.done():
             task.cancel()
         del worker._active_runs[run_id]
-    
+
     # Publish cancellation event
     await worker.redis_streams.publish_event(
         run_id,
@@ -424,8 +458,89 @@ async def cancel_generation(run_id: str):
             "message": "Generation was cancelled by user",
         }
     )
-    
+
     return {"success": True, "run_id": run_id, "message": "Generation cancelled"}
+
+
+@app.post("/runs/{run_id}/pause")
+async def pause_generation(run_id: str):
+    """Pause an active generation run."""
+    if not worker or not worker.redis_streams:
+        raise HTTPException(status_code=503, detail="Worker not initialized")
+
+    # Check if run exists and is active
+    if run_id not in worker._active_runs:
+        raise HTTPException(status_code=404, detail="Run not found or not active")
+
+    # Check if already paused
+    if run_id in worker._paused_runs:
+        return {"success": True, "run_id": run_id, "message": "Generation already paused"}
+
+    # Mark the run as paused
+    worker._paused_runs.add(run_id)
+
+    # Publish pause event
+    await worker.redis_streams.publish_event(
+        run_id,
+        "generation_paused",
+        {
+            "run_id": run_id,
+            "status": "paused",
+            "message": "Generation paused by user",
+        }
+    )
+
+    return {"success": True, "run_id": run_id, "message": "Generation paused"}
+
+
+@app.post("/runs/{run_id}/resume")
+async def resume_generation(run_id: str):
+    """Resume a paused generation run."""
+    if not worker or not worker.redis_streams:
+        raise HTTPException(status_code=503, detail="Worker not initialized")
+
+    # Check if run is paused
+    if run_id not in worker._paused_runs:
+        raise HTTPException(status_code=400, detail="Run is not paused")
+
+    # Remove from paused set
+    worker._paused_runs.discard(run_id)
+
+    # Publish resume event
+    await worker.redis_streams.publish_event(
+        run_id,
+        "generation_resumed",
+        {
+            "run_id": run_id,
+            "status": "running",
+            "message": "Generation resumed by user",
+        }
+    )
+
+    return {"success": True, "run_id": run_id, "message": "Generation resumed"}
+
+
+@app.get("/runs/{run_id}/status")
+async def get_run_status(run_id: str):
+    """Get the status of a generation run."""
+    if not worker:
+        raise HTTPException(status_code=503, detail="Worker not initialized")
+
+    status = "unknown"
+    if run_id in worker._cancelled_runs:
+        status = "cancelled"
+    elif run_id in worker._paused_runs:
+        status = "paused"
+    elif run_id in worker._active_runs:
+        task = worker._active_runs[run_id]
+        if task.done():
+            status = "completed"
+        else:
+            status = "running"
+    else:
+        status = "not_found"
+
+    return {"run_id": run_id, "status": status}
 
 
 if __name__ == "__main__":
