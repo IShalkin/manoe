@@ -121,6 +121,7 @@ export function GenerationPage() {
           start_from_phase: startFromPhase,
           previous_run_id: runId,
           edited_content: editedContent,
+          scenes_to_regenerate: constraints.scenesToRegenerate,
         }),
       });
 

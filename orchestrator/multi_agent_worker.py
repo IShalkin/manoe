@@ -103,6 +103,7 @@ class MultiAgentWorker:
         start_from_phase: Optional[str] = None,
         previous_run_id: Optional[str] = None,
         edited_content: Optional[Dict[str, Any]] = None,
+        scenes_to_regenerate: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -115,6 +116,7 @@ class MultiAgentWorker:
             start_from_phase: Phase to start from (for partial regeneration)
             previous_run_id: Run ID to load previous artifacts from
             edited_content: User-edited content to use instead of regenerating
+            scenes_to_regenerate: Optional list of scene numbers to regenerate (1-indexed)
 
         Returns:
             Generation results including all agent messages
@@ -233,6 +235,7 @@ class MultiAgentWorker:
                     start_from_phase=start_from_phase,
                     previous_artifacts=previous_artifacts,
                     edited_content=edited_content,
+                    scenes_to_regenerate=scenes_to_regenerate,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow
@@ -333,6 +336,7 @@ class GenerateRequest(BaseModel):
     start_from_phase: Optional[str] = None  # Phase to start from (for phase-based regeneration)
     previous_run_id: Optional[str] = None  # Run ID to load previous artifacts from
     edited_content: Optional[Dict[str, Any]] = None  # User-edited content to use instead of regenerating
+    scenes_to_regenerate: Optional[List[int]] = None  # Scene numbers to regenerate (1-indexed)
 
 
 class GenerateResponse(BaseModel):
@@ -417,6 +421,7 @@ async def generate(request: GenerateRequest):
         start_from_phase=request.start_from_phase,
         previous_run_id=request.previous_run_id,
         edited_content=request.edited_content,
+        scenes_to_regenerate=request.scenes_to_regenerate,
     ))
 
     # Track active run for cancellation support
