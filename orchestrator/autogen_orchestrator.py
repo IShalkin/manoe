@@ -2940,15 +2940,10 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                         effective_change_request = phase_data["comment"]
                         break
         
-        # Limit change_request length to prevent prompt bloat and emit event
+        # Limit change_request length to prevent prompt bloat
         if effective_change_request:
             if len(effective_change_request) > 2000:
                 effective_change_request = effective_change_request[:2000] + "..."
-            self._emit_event("change_request_detected", {
-                "source": "constraints" if change_request else "edited_content",
-                "preview": effective_change_request[:100] + "..." if len(effective_change_request) > 100 else effective_change_request,
-                "length": len(effective_change_request),
-            })
         
         # Use effective_change_request for all downstream phases
         change_request = effective_change_request
@@ -3110,12 +3105,6 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         if not characters_result:
             await self._check_pause()  # Pause checkpoint
-            # Debug: Log that we're regenerating characters with change_request
-            self._emit_event("debug_characters_regeneration", {
-                "change_request_present": change_request is not None,
-                "change_request_preview": change_request[:100] if change_request else None,
-                "edited_content_has_characters": edited_content is not None and "characters" in edited_content if edited_content else False,
-            })
             characters_result = await self.run_characters_phase(
                 narrative=genesis_result["narrative_possibility"],
                 moral_compass=project.moral_compass.value,
