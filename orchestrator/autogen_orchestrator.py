@@ -3132,7 +3132,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         # Store characters in Qdrant memory for later retrieval
         characters = characters_result.get("characters", [])
         if isinstance(characters, list):
-            await self._store_characters_in_memory(project_id, characters)
+            await self._store_characters_in_memory(memory_project_id, characters)
 
         # Phase 3: Worldbuilding
         worldbuilding_result = None
@@ -3307,13 +3307,13 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 
                 # Retrieve relevant characters from memory for this scene
                 scene_context = scene.get("title", "") + " " + scene.get("conflict", "")
-                relevant_characters = await self._retrieve_relevant_characters(project_id, scene_context, limit=3)
+                relevant_characters = await self._retrieve_relevant_characters(memory_project_id, scene_context, limit=3)
 
                 # Retrieve relevant previous scenes for continuity
-                relevant_scenes = await self._retrieve_relevant_scenes(project_id, scene_context, limit=2)
+                relevant_scenes = await self._retrieve_relevant_scenes(memory_project_id, scene_context, limit=2)
 
                 # Retrieve relevant worldbuilding elements for this scene
-                relevant_worldbuilding = await self._retrieve_worldbuilding(project_id, scene_context, limit=3)
+                relevant_worldbuilding = await self._retrieve_worldbuilding(memory_project_id, scene_context, limit=3)
 
                 # Merge static worldbuilding with retrieved elements
                 scene_worldbuilding = worldbuilding.copy() if worldbuilding else {}
@@ -3381,7 +3381,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 # Store final draft (after quality revisions) in memory for continuity
                 if draft_result.get("draft"):
                     draft = draft_result["draft"]
-                    await self._store_scene_in_memory(project_id, scene_number, draft)
+                    await self._store_scene_in_memory(memory_project_id, scene_number, draft)
                     previous_summary = draft.get("narrative_content", "")[:500] + "..."
 
             # Store all drafts as a single artifact (for backward compatibility)
