@@ -1,13 +1,125 @@
 """
 Advanced Features Prompts for MANOE
-Based on Storyteller Framework Sections 3.5.1, 4.1, and 5.2
+Based on Storyteller Framework Sections 3.2, 3.5.1, 4.1, and 5.2
 
 These prompts support Priority 3 features:
+- Narrator Design (Section 3.2)
 - Internal Contradiction Maps
 - Emotional Beat Sheet
 - Sensory Imagery Blueprint
 - Subtext Design
 - Complexity Layer Checklist
+"""
+
+# =============================================================================
+# Narrator Design (Storyteller Section 3.2)
+# =============================================================================
+
+NARRATOR_DESIGN_PROMPT = """You are designing the Narrator for this story based on the Storyteller Framework Section 3.2.
+
+## Purpose
+Create a comprehensive narrator design that goes beyond basic POV selection to establish a distinctive narrative voice that serves the story's themes and emotional goals.
+
+## User Preferences (if provided)
+These are the user's initial preferences. Use them as a starting point but expand with detailed voice characteristics:
+- POV Preference: {pov_preference}
+- Reliability Preference: {reliability_preference}
+- Stance Preference: {stance_preference}
+
+## Design Elements
+
+1. **Point of View (POV)**
+   - First Person (I/We): Intimate, limited to narrator's knowledge, creates immediate connection
+   - Third Person Limited: Follows one character's perspective, balances intimacy with flexibility
+   - Third Person Omniscient: All-knowing, can access any character's thoughts, god-like perspective
+   - Second Person (You): Immersive, experimental, reader as protagonist
+
+2. **Narrator Reliability**
+   - Reliable: Trustworthy narrator who presents events accurately
+   - Unreliable: Biased, limited, or deceptive narrator - reader must question the narrative
+   - If unreliable, specify: What does the narrator misperceive? What do they hide? Why?
+
+3. **Emotional Stance**
+   - Objective: Reports events without judgment or commentary
+   - Judgmental: Comments on and evaluates characters and events
+   - Sympathetic: Empathizes with characters, emotionally engaged
+   - Ironic: Maintains distance through wit or detachment
+
+4. **Voice Characteristics** (CRITICAL - this is what makes the narrator unique)
+   - Vocabulary level and style (formal, colloquial, poetic, sparse)
+   - Sentence rhythm (long flowing sentences, short punchy ones, varied)
+   - Distinctive verbal tics or patterns
+   - Cultural/temporal markers in language
+   - Emotional temperature (warm, cold, passionate, detached)
+
+5. **Narrative Techniques**
+   - Direct address to reader (if any)
+   - Use of present vs past tense
+   - Handling of time (linear, non-linear, flashbacks)
+   - Interior monologue style
+   - Dialogue attribution style
+
+6. **Relationship to Characters**
+   - Distance from protagonist (intimate, observational, distant)
+   - Access to other characters' interiority
+   - How the narrator reveals character thoughts
+
+## Output Format
+
+```json
+{{
+  "pov": {{
+    "type": "first_person|third_person_limited|third_person_omniscient|second_person",
+    "focal_character": "Name of POV character (if applicable)",
+    "rationale": "Why this POV serves the story"
+  }},
+  "reliability": {{
+    "level": "reliable|unreliable",
+    "if_unreliable": {{
+      "type": "naive|self-deceiving|deliberately_deceptive|mentally_unstable",
+      "blind_spots": ["What the narrator cannot or will not see"],
+      "hidden_truths": ["What the narrator conceals"],
+      "reader_clues": ["How readers can detect unreliability"]
+    }}
+  }},
+  "stance": {{
+    "primary": "objective|judgmental|sympathetic|ironic",
+    "emotional_investment": "How much the narrator cares about events",
+    "moral_position": "Narrator's implicit moral framework"
+  }},
+  "voice_characteristics": {{
+    "vocabulary": {{
+      "level": "simple|moderate|sophisticated|literary",
+      "style": "formal|colloquial|poetic|sparse|ornate",
+      "distinctive_words": ["Words or phrases the narrator favors"]
+    }},
+    "sentence_structure": {{
+      "rhythm": "Description of sentence patterns",
+      "average_length": "short|medium|long|varied",
+      "signature_patterns": ["Distinctive syntactic choices"]
+    }},
+    "verbal_tics": ["Recurring phrases or patterns"],
+    "cultural_markers": ["Language that places narrator in time/place"],
+    "emotional_temperature": "warm|cool|passionate|detached|volatile"
+  }},
+  "narrative_techniques": {{
+    "tense": "past|present",
+    "direct_address": "Whether and how narrator addresses reader",
+    "time_handling": "linear|non-linear|fragmented",
+    "interior_monologue": "How thoughts are presented",
+    "dialogue_style": "How dialogue is attributed and formatted"
+  }},
+  "character_relationship": {{
+    "protagonist_distance": "intimate|close|observational|distant",
+    "interiority_access": "Which characters' thoughts we can access",
+    "revelation_style": "How character psychology is revealed"
+  }},
+  "sample_voice": "A 2-3 sentence example demonstrating this narrator's voice",
+  "integration_notes": "How this narrator design serves the story's themes and goals"
+}}
+```
+
+Design a narrator that will bring this specific story to life with a distinctive, memorable voice.
 """
 
 # =============================================================================
