@@ -7,10 +7,10 @@ import asyncio
 import json
 import os
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
-from pydantic import SecretStr
+from pydantic import BaseModel, Field, SecretStr
 
 from autogen_orchestrator import StorytellerGroupChat
 from config import (
@@ -27,6 +27,17 @@ from config import (
 from models import StoryProject
 from services.redis_streams import RedisStreamsService
 from services.supabase_persistence import SupabasePersistenceService
+from services.security import (
+    ALLOWED_ORIGINS,
+    get_current_user,
+    run_ownership,
+    check_run_ownership,
+    validate_request_size,
+    MAX_SEED_IDEA_LENGTH,
+    MAX_THEMES_LENGTH,
+    MAX_TONE_STYLE_LENGTH,
+    MAX_CUSTOM_MORAL_LENGTH,
+)
 
 load_dotenv()
 
@@ -293,19 +304,29 @@ class MultiAgentWorker:
 
 
 # HTTP API for triggering generation
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(title="MANOE Multi-Agent Orchestrator")
 
+# Add rate limiter to app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS configuration with explicit allowed origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 worker: Optional[MultiAgentWorker] = None
@@ -328,21 +349,21 @@ class NarratorConfig(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    seed_idea: str
+    seed_idea: str = Field(..., max_length=MAX_SEED_IDEA_LENGTH)
     moral_compass: str = "ambiguous"
-    custom_moral_system: Optional[str] = None  # Required if moral_compass is user_defined
-    target_audience: str = ""
-    themes: Optional[str] = None
-    tone_style_references: Optional[str] = None  # Style references (e.g., "Palahniuk-esque cynicism")
+    custom_moral_system: Optional[str] = Field(None, max_length=MAX_CUSTOM_MORAL_LENGTH)
+    target_audience: str = Field("", max_length=1000)
+    themes: Optional[str] = Field(None, max_length=MAX_THEMES_LENGTH)
+    tone_style_references: Optional[str] = Field(None, max_length=MAX_TONE_STYLE_LENGTH)
     provider: str = "openai"
     model: str = "gpt-4o"
     api_key: str
     constraints: Optional[RegenerationConstraints] = None  # For partial regeneration
     generation_mode: str = "demo"  # "demo" for quick preview, "full" for complete pipeline
-    target_word_count: int = 50000  # For full mode
-    estimated_scenes: int = 20  # For full mode
+    target_word_count: int = Field(50000, ge=1000, le=500000)  # For full mode
+    estimated_scenes: int = Field(20, ge=1, le=200)  # For full mode
     preferred_structure: str = "ThreeAct"  # For full mode
-    max_revisions: int = 2  # Maximum Writer↔Critic revision cycles per scene (1-5)
+    max_revisions: int = Field(2, ge=1, le=10)  # Maximum Writer↔Critic revision cycles per scene
     narrator_config: Optional[NarratorConfig] = None  # Narrator design settings
     start_from_phase: Optional[str] = None  # Phase to start from (for phase-based regeneration)
     previous_run_id: Optional[str] = None  # Run ID to load previous artifacts from
@@ -377,12 +398,19 @@ async def health():
 
 
 @app.post("/generate", response_model=GenerateResponse)
-async def generate(request: GenerateRequest):
-    """Start a multi-agent generation run."""
+@limiter.limit("10/minute")
+async def generate(request: GenerateRequest, http_request: Request):
+    """Start a multi-agent generation run. Requires authentication."""
     if not worker:
         raise HTTPException(status_code=503, detail="Worker not initialized")
 
+    # Authenticate user
+    user_id, _ = await get_current_user(http_request)
+
     run_id = str(uuid.uuid4())
+    
+    # Register run ownership
+    run_ownership.register_run(run_id, user_id)
 
     # Capitalize moral_compass to match enum values (Ethical, Unethical, Amoral, Ambiguous, UserDefined)
     moral_compass_capitalized = request.moral_compass.capitalize() if request.moral_compass else "Ambiguous"
@@ -448,10 +476,14 @@ async def generate(request: GenerateRequest):
 
 
 @app.get("/runs/{run_id}/events")
-async def stream_events(run_id: str):
-    """Stream events for a generation run via SSE."""
+async def stream_events(run_id: str, request: Request):
+    """Stream events for a generation run via SSE. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
+    
+    # Authenticate user and verify ownership
+    user_id, _ = await get_current_user(request)
+    check_run_ownership(run_id, user_id)
 
     async def event_generator():
         # First, get any existing events
@@ -486,10 +518,14 @@ async def stream_events(run_id: str):
 
 
 @app.get("/runs/{run_id}/messages")
-async def get_messages(run_id: str):
-    """Get all agent messages for a run."""
+async def get_messages(run_id: str, request: Request):
+    """Get all agent messages for a run. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
+    
+    # Authenticate user and verify ownership
+    user_id, _ = await get_current_user(request)
+    check_run_ownership(run_id, user_id)
 
     events = await worker.redis_streams.get_events(run_id, start_id="0", count=1000)
 
@@ -503,10 +539,14 @@ async def get_messages(run_id: str):
 
 
 @app.post("/runs/{run_id}/cancel")
-async def cancel_generation(run_id: str):
-    """Cancel an active generation run."""
+async def cancel_generation(run_id: str, request: Request):
+    """Cancel an active generation run. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
+    
+    # Authenticate user and verify ownership
+    user_id, _ = await get_current_user(request)
+    check_run_ownership(run_id, user_id)
 
     # Mark the run as cancelled
     worker._cancelled_runs.add(run_id)
@@ -533,10 +573,14 @@ async def cancel_generation(run_id: str):
 
 
 @app.post("/runs/{run_id}/pause")
-async def pause_generation(run_id: str):
-    """Pause an active generation run."""
+async def pause_generation(run_id: str, request: Request):
+    """Pause an active generation run. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
+    
+    # Authenticate user and verify ownership
+    user_id, _ = await get_current_user(request)
+    check_run_ownership(run_id, user_id)
 
     # Check if run exists and is active
     if run_id not in worker._active_runs:
@@ -564,10 +608,14 @@ async def pause_generation(run_id: str):
 
 
 @app.post("/runs/{run_id}/resume")
-async def resume_generation(run_id: str):
-    """Resume a paused generation run."""
+async def resume_generation(run_id: str, request: Request):
+    """Resume a paused generation run. Requires authentication and ownership."""
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
+    
+    # Authenticate user and verify ownership
+    user_id, _ = await get_current_user(request)
+    check_run_ownership(run_id, user_id)
 
     # Check if run is paused
     if run_id not in worker._paused_runs:
@@ -591,10 +639,14 @@ async def resume_generation(run_id: str):
 
 
 @app.get("/runs/{run_id}/status")
-async def get_run_status(run_id: str):
-    """Get the status of a generation run."""
+async def get_run_status(run_id: str, request: Request):
+    """Get the status of a generation run. Requires authentication and ownership."""
     if not worker:
         raise HTTPException(status_code=503, detail="Worker not initialized")
+    
+    # Authenticate user and verify ownership
+    user_id, _ = await get_current_user(request)
+    check_run_ownership(run_id, user_id)
 
     status = "unknown"
     if run_id in worker._cancelled_runs:
@@ -632,7 +684,8 @@ class ModelsResponse(BaseModel):
 
 
 @app.post("/models", response_model=ModelsResponse)
-async def get_available_models(request: ModelsRequest):
+@limiter.limit("30/minute")
+async def get_available_models(request: ModelsRequest, http_request: Request):
     """
     Fetch available models from a provider using the user's API key.
     This validates the API key and returns the list of models the user has access to.
