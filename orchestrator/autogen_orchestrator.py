@@ -19,6 +19,7 @@ from models import (
 from prompts import (
     ARCHITECT_SYSTEM_PROMPT,
     CRITIC_SYSTEM_PROMPT,
+    POLISH_SYSTEM_PROMPT,
     PROFILER_SYSTEM_PROMPT,
     STRATEGIST_SYSTEM_PROMPT,
     WORLDBUILDER_SYSTEM_PROMPT,
@@ -37,6 +38,7 @@ class GenerationPhase(str, Enum):
     DRAFTING = "drafting"
     CRITIQUE = "critique"
     REVISION = "revision"
+    POLISH = "polish"
 
 
 @dataclass
@@ -282,6 +284,7 @@ class StorytellerGroupChat:
             "strategist": (agent_configs.strategist_provider, agent_configs.strategist_model),
             "writer": (agent_configs.writer_provider, agent_configs.writer_model),
             "critic": (agent_configs.critic_provider, agent_configs.critic_model),
+            "polish": (agent_configs.polish_provider, agent_configs.polish_model),
         }
 
         provider, model = provider_map[agent_name]
@@ -376,6 +379,19 @@ Maximum 2 revision rounds per scene - after that, approve with notes.
 Always output critiques as valid JSON wrapped in ```json``` blocks.
 """
 
+        polish_prompt = POLISH_SYSTEM_PROMPT + """
+
+## Communication Protocol
+
+You can communicate with other agents:
+- ARTIFACT: Output your polished scene as final artifact
+- QUESTION to Writer: Ask about stylistic choices
+- QUESTION to Critic: Ask about specific feedback points
+
+Focus on sentence-level refinement without changing meaning or voice.
+Always output polished scenes as valid JSON wrapped in ```json``` blocks.
+"""
+
         # Create agent instances with enhanced prompts
         # Note: We'll use custom message handling instead of AutoGen's built-in
         self.architect = self._create_agent("Architect", architect_prompt)
@@ -384,6 +400,7 @@ Always output critiques as valid JSON wrapped in ```json``` blocks.
         self.strategist = self._create_agent("Strategist", strategist_prompt)
         self.writer = self._create_agent("Writer", writer_prompt)
         self.critic = self._create_agent("Critic", critic_prompt)
+        self.polish = self._create_agent("Polish", polish_prompt)
 
     def _create_agent(self, name: str, system_prompt: str) -> Dict[str, Any]:
         """Create an agent configuration (not AutoGen agent directly due to async requirements)."""
@@ -1247,6 +1264,125 @@ Output the revised scene as valid JSON.
             ],
         }
 
+    async def run_polish_phase(
+        self,
+        scene_number: int,
+        draft: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        moral_compass: str,
+        critique: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run the Final Polish phase on an approved scene draft.
+        Focuses on sentence-level refinement, rhythm, and consistency.
+
+        Args:
+            scene_number: The scene number being polished
+            draft: The approved scene draft
+            characters: List of character profiles for voice consistency
+            moral_compass: Moral compass setting for the story
+            critique: Optional final critique notes from the Critic
+        """
+        self.state.phase = GenerationPhase.POLISH
+
+        self._emit_event("phase_start", {
+            "phase": "polish",
+            "scene_number": scene_number,
+        })
+
+        # Format character profiles for voice consistency check
+        present_characters = draft.get("characters_present", [])
+        character_profiles_str = "\n\n".join([
+            f"**{c.get('name', 'Unknown')}**\n"
+            f"- Visual Signature: {c.get('visual_signature', 'Unknown')}\n"
+            f"- Quirks: {', '.join(c.get('quirks', []))}\n"
+            f"- Coping Mechanism: {c.get('coping_mechanism', 'Unknown')}"
+            for c in characters
+            if c.get("name") in present_characters
+        ])
+
+        # Format sensory details
+        sensory_details = draft.get("sensory_details", {})
+        sensory_str = "\n".join([
+            f"- {sense.capitalize()}: {detail}"
+            for sense, detail in sensory_details.items()
+            if detail
+        ]) if sensory_details else "No sensory details provided"
+
+        # Format dialogue entries
+        dialogue_entries = draft.get("dialogue_entries", [])
+        dialogue_str = "\n".join([
+            f"**{d.get('speaker', 'Unknown')}**: \"{d.get('line', '')}\""
+            for d in dialogue_entries
+        ]) if dialogue_entries else "No dialogue entries"
+
+        # Format critic notes
+        critic_notes = ""
+        if critique:
+            critic_notes = f"""
+**Overall Score:** {critique.get('overall_score', 'N/A')}
+**Strengths:** {', '.join(critique.get('strengths', []))}
+**Areas for Polish:** {', '.join(critique.get('revision_focus', []))}
+"""
+
+        polish_prompt = f"""
+## Scene for Final Polish
+
+**Scene Number:** {scene_number}
+**Scene Title:** {draft.get('scene_title', 'Untitled')}
+
+**Moral Compass:** {moral_compass}
+
+## Approved Scene Content
+
+{draft.get('narrative_content', json.dumps(draft, indent=2))}
+
+## Sensory Details
+
+{sensory_str}
+
+## Dialogue Entries
+
+{dialogue_str}
+
+## Character Profiles (for voice consistency)
+
+{character_profiles_str}
+
+## Critic's Final Notes
+
+{critic_notes}
+
+---
+
+Perform a final polish pass on this approved scene. Focus on:
+1. Sentence rhythm and flow - vary sentence length for dynamic prose
+2. Word choice precision - replace weak verbs, eliminate unnecessary adverbs
+3. Redundancy elimination - cut repeated information and filler words
+4. Dialogue polish - ensure natural speech patterns and distinct character voices
+5. Opening and closing lines - strengthen hooks and resonant endings
+
+Make surgical improvements that elevate the prose without changing the meaning or voice.
+Output as valid JSON with the polished content and a summary of changes made.
+"""
+
+        polish_response = await self._call_agent(self.polish, polish_prompt)
+        polish_msg = self._parse_agent_message("Polish", polish_response)
+        self.state.messages.append(polish_msg)
+
+        polished_content = polish_msg.content if isinstance(polish_msg.content, dict) else draft
+
+        self._emit_event("phase_complete", {
+            "phase": "polish",
+            "scene_number": scene_number,
+        })
+
+        return {
+            "polished_draft": polished_content,
+            "original_draft": draft,
+            "changes_summary": polished_content.get("polish_summary", "") if isinstance(polished_content, dict) else "",
+        }
+
     async def run_demo_generation(
         self,
         project: StoryProject,
@@ -1656,5 +1792,20 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 previous_summary = draft.get("narrative_content", "")[:500] + "..."
 
         results["phases"]["drafting"] = {"scenes": drafts}
+
+        # Phase 6: Polish (all approved scenes)
+        polished_drafts = []
+        for i, draft_result in enumerate(drafts):
+            if draft_result.get("draft"):
+                polish_result = await self.run_polish_phase(
+                    scene_number=i + 1,
+                    draft=draft_result["draft"],
+                    characters=characters_result["characters"],
+                    moral_compass=project.moral_compass.value,
+                    critique=draft_result.get("critique"),
+                )
+                polished_drafts.append(polish_result)
+
+        results["phases"]["polish"] = {"scenes": polished_drafts}
 
         return results

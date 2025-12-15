@@ -516,6 +516,9 @@ class AgentModelConfig(BaseModel):
     critic_provider: LLMProvider = LLMProvider.OPENAI
     critic_model: str = "gpt-4o"
 
+    polish_provider: LLMProvider = LLMProvider.OPENAI
+    polish_model: str = "gpt-4o"
+
 
 # ============================================================================
 # Master Configuration
@@ -579,6 +582,7 @@ class LLMConfiguration(BaseModel):
             ("strategist", self.agent_models.strategist_provider, self.agent_models.strategist_model),
             ("writer", self.agent_models.writer_provider, self.agent_models.writer_model),
             ("critic", self.agent_models.critic_provider, self.agent_models.critic_model),
+            ("polish", self.agent_models.polish_provider, self.agent_models.polish_model),
         ]
 
         for agent_name, provider, model in agent_configs:
