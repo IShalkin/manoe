@@ -1,0 +1,41 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/manoe
+            git fetch origin
+            git checkout main
+            git pull origin main
+            
+            # Rebuild and restart orchestrator
+            docker compose -f docker-compose.vps.yml build orchestrator
+            docker compose -f docker-compose.vps.yml up -d orchestrator
+            
+            # Rebuild and restart frontend
+            docker compose -f docker-compose.vps.yml build frontend
+            docker compose -f docker-compose.vps.yml up -d frontend
+            
+            # Wait for services to be healthy
+            sleep 10
+            
+            # Verify orchestrator is running
+            curl -f http://localhost:8001/health || exit 1
+            
+            echo "Deployment completed successfully!"
