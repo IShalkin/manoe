@@ -236,6 +236,7 @@ class MultiAgentWorker:
                     previous_artifacts=previous_artifacts,
                     edited_content=edited_content,
                     scenes_to_regenerate=scenes_to_regenerate,
+                    previous_run_id=previous_run_id,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow
