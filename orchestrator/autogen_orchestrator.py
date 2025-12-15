@@ -9,6 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+import os
 from autogen_agentchat.agents import AssistantAgent
 
 from config import LLMConfiguration, LLMProvider
@@ -23,6 +24,7 @@ from prompts import (
     WRITER_SYSTEM_PROMPT,
 )
 from services.model_client import UnifiedModelClient
+from services.qdrant_memory import QdrantMemoryService
 
 
 class GenerationPhase(str, Enum):
@@ -76,6 +78,8 @@ class StorytellerGroupChat:
         self,
         config: LLMConfiguration,
         event_callback: Optional[Callable[[str, Dict], None]] = None,
+        qdrant_url: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
     ):
         self.config = config
         self.model_client = UnifiedModelClient(config)
@@ -89,8 +93,100 @@ class StorytellerGroupChat:
         self.writer: Optional[AssistantAgent] = None
         self.critic: Optional[AssistantAgent] = None
 
+        # Qdrant memory service (optional)
+        self.qdrant_memory: Optional[QdrantMemoryService] = None
+        self._qdrant_url = qdrant_url or os.getenv("QDRANT_URL", "http://localhost:6333")
+        self._openai_api_key = openai_api_key
+
         # Initialize agents
         self._initialize_agents()
+
+    async def initialize_memory(self, openai_api_key: Optional[str] = None) -> bool:
+        """Initialize Qdrant memory service for character/worldbuilding storage.
+        
+        Args:
+            openai_api_key: OpenAI API key for generating embeddings
+            
+        Returns:
+            True if memory was initialized successfully, False otherwise
+        """
+        api_key = openai_api_key or self._openai_api_key
+        if not api_key:
+            self._emit_event("memory_init", {"status": "skipped", "reason": "no_api_key"})
+            return False
+            
+        try:
+            self.qdrant_memory = QdrantMemoryService(url=self._qdrant_url)
+            await self.qdrant_memory.connect(openai_api_key=api_key)
+            self._emit_event("memory_init", {"status": "connected", "url": self._qdrant_url})
+            return True
+        except Exception as e:
+            self._emit_event("memory_init", {"status": "failed", "error": str(e)})
+            self.qdrant_memory = None
+            return False
+
+    async def _store_characters_in_memory(self, project_id: str, characters: List[Dict]) -> None:
+        """Store generated characters in Qdrant for later retrieval."""
+        if not self.qdrant_memory:
+            return
+            
+        for character in characters:
+            try:
+                await self.qdrant_memory.store_character(project_id, character)
+            except Exception as e:
+                self._emit_event("memory_store", {
+                    "type": "character",
+                    "status": "failed",
+                    "character": character.get("name", "unknown"),
+                    "error": str(e)
+                })
+
+    async def _retrieve_relevant_characters(self, project_id: str, query: str, limit: int = 3) -> List[Dict]:
+        """Retrieve relevant characters from memory based on query."""
+        if not self.qdrant_memory:
+            return []
+            
+        try:
+            results = await self.qdrant_memory.search_characters(project_id, query, limit=limit)
+            return [r["character"] for r in results if r.get("character")]
+        except Exception as e:
+            self._emit_event("memory_search", {
+                "type": "character",
+                "status": "failed",
+                "error": str(e)
+            })
+            return []
+
+    async def _store_scene_in_memory(self, project_id: str, scene_number: int, scene: Dict) -> None:
+        """Store a drafted scene in Qdrant for continuity."""
+        if not self.qdrant_memory:
+            return
+            
+        try:
+            await self.qdrant_memory.store_scene(project_id, scene_number, scene)
+        except Exception as e:
+            self._emit_event("memory_store", {
+                "type": "scene",
+                "status": "failed",
+                "scene_number": scene_number,
+                "error": str(e)
+            })
+
+    async def _retrieve_relevant_scenes(self, project_id: str, query: str, limit: int = 2) -> List[Dict]:
+        """Retrieve relevant previous scenes for continuity."""
+        if not self.qdrant_memory:
+            return []
+            
+        try:
+            results = await self.qdrant_memory.search_scenes(project_id, query, limit=limit)
+            return [r["scene"] for r in results if r.get("scene")]
+        except Exception as e:
+            self._emit_event("memory_search", {
+                "type": "scene",
+                "status": "failed",
+                "error": str(e)
+            })
+            return []
 
     def _get_llm_config(self, agent_name: str) -> Dict[str, Any]:
         """Get LLM configuration for a specific agent."""
@@ -672,10 +768,21 @@ Now create the plot outline as valid JSON.
         moral_compass: str,
         worldbuilding: Optional[Dict] = None,
         previous_scene_summary: str = "N/A",
+        memory_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the Drafting phase with Writer↔Critic loop.
         Maximum 2 revisions per scene.
+        
+        Args:
+            scene: Scene outline with title, conflict, emotional beat, etc.
+            characters: List of character profiles
+            moral_compass: Moral compass setting for the story
+            worldbuilding: Optional worldbuilding context
+            previous_scene_summary: Summary of the previous scene for continuity
+            memory_context: Optional context from Qdrant memory with:
+                - relevant_characters: Characters retrieved by semantic search
+                - relevant_scenes: Previous scenes retrieved for continuity
         """
         self.state.phase = GenerationPhase.DRAFTING
         scene_number = scene.get("scene_number", 1)
@@ -701,6 +808,22 @@ Now create the plot outline as valid JSON.
         ])
 
         emotional_beat = scene.get("emotional_beat", {})
+        
+        # Format memory context if available
+        memory_context_str = ""
+        if memory_context:
+            relevant_chars = memory_context.get("relevant_characters", [])
+            relevant_scenes = memory_context.get("relevant_scenes", [])
+            
+            if relevant_chars:
+                memory_context_str += "\n## Retrieved Character Context (from memory)\n\n"
+                for char in relevant_chars:
+                    memory_context_str += f"**{char.get('name', 'Unknown')}**: {char.get('core_motivation', '')} - {char.get('inner_trap', '')}\n"
+            
+            if relevant_scenes:
+                memory_context_str += "\n## Related Previous Scenes (from memory)\n\n"
+                for scene_mem in relevant_scenes:
+                    memory_context_str += f"- {scene_mem.get('title', 'Scene')}: {scene_mem.get('narrative_content', '')[:200]}...\n"
 
         user_prompt = f"""
 ## Scene Context
@@ -739,7 +862,7 @@ Now create the plot outline as valid JSON.
 ## Previous Scene Summary
 
 {previous_scene_summary}
-
+{memory_context_str}
 ## Style Guidelines
 
 **Moral Compass:** {moral_compass}
@@ -1108,14 +1231,31 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         target_word_count: int = 50000,
         estimated_scenes: int = 20,
         preferred_structure: str = "ThreeAct",
+        openai_api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Run the complete story generation pipeline.
+        Run the complete story generation pipeline with optional Qdrant memory integration.
+        
+        Args:
+            project: Story project configuration
+            target_word_count: Target word count for the full story
+            estimated_scenes: Estimated number of scenes
+            preferred_structure: Story structure (ThreeAct, HeroJourney, etc.)
+            openai_api_key: OpenAI API key for embeddings (enables Qdrant memory)
         """
         results = {
             "project": project.model_dump(),
             "phases": {},
+            "memory_enabled": False,
         }
+        
+        # Generate a unique project ID for memory storage
+        project_id = project.seed_idea[:20].replace(" ", "_") + "_" + str(hash(project.seed_idea))[:8]
+
+        # Initialize Qdrant memory if API key provided
+        if openai_api_key:
+            memory_initialized = await self.initialize_memory(openai_api_key)
+            results["memory_enabled"] = memory_initialized
 
         # Phase 1: Genesis
         genesis_result = await self.run_genesis_phase(project)
@@ -1134,6 +1274,11 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         if not characters_result.get("characters"):
             return {"error": "Characters phase failed", **results}
+            
+        # Store characters in Qdrant memory for later retrieval
+        characters = characters_result.get("characters", [])
+        if isinstance(characters, list):
+            await self._store_characters_in_memory(project_id, characters)
 
         # Phase 3: Outlining
         outlining_result = await self.run_outlining_phase(
@@ -1155,18 +1300,30 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         drafts = []
 
         previous_summary = "N/A"
-        for scene in scenes:
+        for i, scene in enumerate(scenes):
+            # Retrieve relevant characters from memory for this scene
+            scene_context = scene.get("title", "") + " " + scene.get("conflict", "")
+            relevant_characters = await self._retrieve_relevant_characters(project_id, scene_context, limit=3)
+            
+            # Retrieve relevant previous scenes for continuity
+            relevant_scenes = await self._retrieve_relevant_scenes(project_id, scene_context, limit=2)
+            
             draft_result = await self.run_drafting_phase(
                 scene=scene,
                 characters=characters_result["characters"],
                 moral_compass=project.moral_compass.value,
                 previous_scene_summary=previous_summary,
+                memory_context={
+                    "relevant_characters": relevant_characters,
+                    "relevant_scenes": relevant_scenes,
+                } if (relevant_characters or relevant_scenes) else None,
             )
             drafts.append(draft_result)
 
-            # Update previous summary for next scene
+            # Store drafted scene in memory for continuity
             if draft_result.get("draft"):
                 draft = draft_result["draft"]
+                await self._store_scene_in_memory(project_id, i + 1, draft)
                 previous_summary = draft.get("narrative_content", "")[:500] + "..."
 
         results["phases"]["drafting"] = {"scenes": drafts}
