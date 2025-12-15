@@ -365,7 +365,19 @@ The system aims for high-quality narrative output measured by structural adheren
 
 ## License
 
-MIT License
+This project is licensed under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0)**.
+
+You are free to share and adapt this work for non-commercial purposes, provided you give appropriate credit and distribute any derivative works under the same license.
+
+**Citation:**
+```
+Shalkin, I. (2025). MANOE: Multi-Agent Narrative Orchestration Engine. 
+GitHub. https://github.com/IShalkin/manoe
+```
+
+For commercial licensing inquiries, contact: mailtoshalkin@gmail.com
+
+See [LICENSE](LICENSE) for full details.
 
 ## Contributing
 
