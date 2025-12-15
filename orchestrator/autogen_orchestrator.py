@@ -494,6 +494,9 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """Call an agent and get its response."""
+        # Check pause before every agent call for responsive pause behavior
+        await self._check_pause()
+        
         messages = [{"role": "system", "content": agent["system_prompt"]}]
 
         if conversation_history:
