@@ -2770,6 +2770,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         previous_artifacts: Optional[Dict[str, Dict[str, Any]]] = None,
         edited_content: Optional[Dict[str, Any]] = None,
         scenes_to_regenerate: Optional[List[int]] = None,
+        previous_run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration
@@ -2792,6 +2793,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 Format: {"phase": "characters", "content": {...}}
             scenes_to_regenerate: Optional list of scene numbers to regenerate (1-indexed)
                 If provided, only these scenes will be regenerated while keeping others intact
+            previous_run_id: Run ID of the previous generation run (for loading existing scenes)
         """
         results = {
             "project": project.model_dump(),
@@ -2861,8 +2863,8 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Helper function to get existing scene from previous run
         async def get_existing_scene(scene_number: int) -> Optional[Dict[str, Any]]:
-            if persistence_service and run_id and persistence_service.is_connected:
-                return await persistence_service.get_scene_artifact(run_id, scene_number)
+            if persistence_service and previous_run_id and persistence_service.is_connected:
+                return await persistence_service.get_scene_artifact(previous_run_id, scene_number)
             return None
 
         # Helper function to check if we should skip a phase (use previous artifacts)
