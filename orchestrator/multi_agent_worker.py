@@ -685,15 +685,15 @@ class ModelsResponse(BaseModel):
 
 @app.post("/models", response_model=ModelsResponse)
 @limiter.limit("30/minute")
-async def get_available_models(request: ModelsRequest, http_request: Request):
+async def get_available_models(models_request: ModelsRequest, request: Request):
     """
     Fetch available models from a provider using the user's API key.
     This validates the API key and returns the list of models the user has access to.
     """
     import httpx
     
-    provider = request.provider.lower()
-    api_key = request.api_key
+    provider = models_request.provider.lower()
+    api_key = models_request.api_key
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
