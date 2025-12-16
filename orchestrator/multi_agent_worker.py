@@ -701,16 +701,22 @@ async def stream_events(run_id: str, request: Request):
     owner = run_ownership.get_owner(run_id)
     if owner is None:
         # Run not in memory - check if it exists in Supabase (interrupted run)
-        # Return a special SSE response indicating the run was interrupted
+        # Return a generation_error event that the frontend already handles
         async def interrupted_event_generator():
-            # Try to get state from Supabase
-            state_info = {"status": "interrupted", "can_resume": False, "resume_from_phase": None}
+            import datetime
+            # Build error info from Supabase artifacts
+            error_msg = "Run interrupted by orchestrator redeploy"
+            can_resume = False
+            resume_from_phase = None
+            artifacts_count = 0
+            
             if worker.persistence_service and worker.persistence_service.is_connected:
                 try:
                     artifacts = await worker.persistence_service.get_run_artifacts(run_id)
                     if artifacts:
                         # Run exists in database - it was interrupted
-                        state_info["can_resume"] = True
+                        can_resume = True
+                        artifacts_count = len(artifacts)
                         # Determine resume phase from artifacts
                         completed_phases = set()
                         for artifact in artifacts:
@@ -721,18 +727,28 @@ async def stream_events(run_id: str, request: Request):
                         phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", "outlining", "advanced_planning", "drafting", "polish"]
                         for phase in phase_order:
                             if phase not in completed_phases:
-                                state_info["resume_from_phase"] = phase
+                                resume_from_phase = phase
                                 break
-                        state_info["status"] = "interrupted"
-                        state_info["artifacts_count"] = len(artifacts)
+                        error_msg = f"Run interrupted. Completed {len(completed_phases)} phases. Can resume from {resume_from_phase}."
                     else:
-                        state_info["status"] = "not_found"
+                        error_msg = "Run not found"
                 except Exception as e:
-                    state_info["status"] = "error"
-                    state_info["error"] = str(e)
+                    error_msg = f"Error checking run state: {str(e)}"
             
-            # Emit the status event and close
-            yield f"data: {json.dumps({'type': 'run_status', **state_info})}\n\n"
+            # Emit generation_error event with proper data structure that frontend expects
+            event = {
+                "type": "generation_error",
+                "id": f"interrupted-{run_id}",
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+                "data": {
+                    "error": error_msg,
+                    "status": "interrupted",
+                    "can_resume": can_resume,
+                    "resume_from_phase": resume_from_phase,
+                    "artifacts_count": artifacts_count,
+                }
+            }
+            yield f"data: {json.dumps(event)}\n\n"
         
         return StreamingResponse(
             interrupted_event_generator(),
@@ -747,7 +763,7 @@ async def stream_events(run_id: str, request: Request):
     # Verify ownership for active runs
     if owner != user_id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=403,
             detail="You don't have permission to access this run",
         )
 
