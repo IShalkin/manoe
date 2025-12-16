@@ -593,9 +593,9 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         provider = self._get_provider_from_config(llm_config)
         model = llm_config.get("model", "")
         
+        # Log without exposing API key
         logger.info(f"[_call_agent] Agent: {agent['name']}, Provider: {provider}, Model: '{model}'")
-        logger.info(f"[_call_agent] llm_config keys: {list(llm_config.keys())}")
-        logger.info(f"[_call_agent] llm_config: {llm_config}")
+        logger.info(f"[_call_agent] api_key_present: {'api_key' in llm_config and bool(llm_config.get('api_key'))}")
 
         self._emit_event("agent_start", {
             "agent": agent["name"],
@@ -639,30 +639,73 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         return LLMProvider.OPENAI
 
     def _extract_json(self, text: str) -> Optional[Dict]:
-        """Extract JSON from agent response."""
+        """Extract JSON from agent response with robust parsing."""
+        if not text or not text.strip():
+            logger.warning("[_extract_json] Empty text provided")
+            return None
+
+        # Log preview for debugging
+        preview = text[:500] + "..." if len(text) > 500 else text
+        logger.debug(f"[_extract_json] Attempting to parse text (len={len(text)}): {preview}")
+
+        # Method 1: Try direct JSON parse
         try:
-            # Try direct JSON parse
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
+            result = json.loads(text)
+            logger.debug("[_extract_json] Direct JSON parse succeeded")
+            return result
+        except json.JSONDecodeError as e:
+            logger.debug(f"[_extract_json] Direct parse failed: {e}")
 
-        # Try to extract from markdown code block
-        if "```json" in text:
-            try:
-                json_str = text.split("```json")[1].split("```")[0].strip()
-                return json.loads(json_str)
-            except (IndexError, json.JSONDecodeError):
-                pass
+        # Method 2: Try to extract from markdown code block (```json or ```)
+        code_block_patterns = ["```json", "```JSON", "```"]
+        for pattern in code_block_patterns:
+            if pattern in text:
+                try:
+                    # Find the content between the code block markers
+                    parts = text.split(pattern)
+                    if len(parts) >= 2:
+                        json_str = parts[1].split("```")[0].strip()
+                        result = json.loads(json_str)
+                        logger.debug(f"[_extract_json] Code block extraction succeeded with pattern '{pattern}'")
+                        return result
+                except (IndexError, json.JSONDecodeError) as e:
+                    logger.debug(f"[_extract_json] Code block extraction failed for '{pattern}': {e}")
 
-        # Try to find JSON object in text
+        # Method 3: Use json.JSONDecoder().raw_decode to find JSON starting at first { or [
+        for start_char in ["{", "["]:
+            start_idx = text.find(start_char)
+            if start_idx >= 0:
+                try:
+                    decoder = json.JSONDecoder()
+                    result, _ = decoder.raw_decode(text[start_idx:])
+                    logger.debug(f"[_extract_json] raw_decode succeeded starting at '{start_char}' (index {start_idx})")
+                    return result
+                except json.JSONDecodeError as e:
+                    logger.debug(f"[_extract_json] raw_decode failed for '{start_char}': {e}")
+
+        # Method 4: Fallback - try to find balanced braces (for nested JSON)
         try:
             start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                return json.loads(text[start:end])
-        except json.JSONDecodeError:
-            pass
+            if start >= 0:
+                brace_count = 0
+                end = start
+                for i, char in enumerate(text[start:], start):
+                    if char == "{":
+                        brace_count += 1
+                    elif char == "}":
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end = i + 1
+                            break
+                if end > start:
+                    json_str = text[start:end]
+                    result = json.loads(json_str)
+                    logger.debug(f"[_extract_json] Balanced brace extraction succeeded")
+                    return result
+        except json.JSONDecodeError as e:
+            logger.debug(f"[_extract_json] Balanced brace extraction failed: {e}")
 
+        logger.warning(f"[_extract_json] All extraction methods failed for text (len={len(text)})")
         return None
 
     def _parse_agent_message(self, agent_name: str, response: str) -> AgentMessage:
@@ -1331,6 +1374,57 @@ Now create the plot outline as valid JSON.
             self.state.messages.append(strategist_msg)
 
         self.state.outline = strategist_msg.content if isinstance(strategist_msg.content, dict) else None
+
+        # Recovery path: if parsing failed, retry with explicit JSON-only instruction
+        if self.state.outline is None:
+            logger.warning(f"[run_outlining_phase] Initial parsing failed. Content type: {type(strategist_msg.content).__name__}")
+            if isinstance(strategist_msg.content, str):
+                logger.warning(f"[run_outlining_phase] Content preview (first 500 chars): {strategist_msg.content[:500]}")
+
+            # Retry with explicit JSON-only instruction
+            retry_prompt = f"""Your previous response could not be parsed as valid JSON.
+
+Please provide ONLY the outline as a valid JSON object with NO markdown formatting, NO code fences, NO explanatory text.
+
+The JSON must have this structure:
+{{
+  "scenes": [
+    {{
+      "scene_number": 1,
+      "title": "Scene Title",
+      "location": "Location name",
+      "characters": ["Character1", "Character2"],
+      "conflict": "The main conflict in this scene",
+      "emotional_beat": "The emotional tone/beat",
+      "purpose": "What this scene accomplishes",
+      "word_count_target": 2500
+    }}
+  ],
+  "act_structure": {{
+    "act_1": [1, 2, 3],
+    "act_2": [4, 5, 6, 7, 8],
+    "act_3": [9, 10]
+  }}
+}}
+
+Output ONLY the JSON, starting with {{ and ending with }}. No other text."""
+
+            logger.info("[run_outlining_phase] Attempting recovery with JSON-only prompt")
+            retry_response = await self._call_agent(
+                self.strategist,
+                retry_prompt,
+                [{"role": "assistant", "content": strategist_response}],
+            )
+            retry_msg = self._parse_agent_message("Strategist", retry_response)
+            self.state.messages.append(retry_msg)
+
+            if isinstance(retry_msg.content, dict):
+                logger.info("[run_outlining_phase] Recovery succeeded - got valid JSON")
+                self.state.outline = retry_msg.content
+            else:
+                logger.error(f"[run_outlining_phase] Recovery failed. Content type: {type(retry_msg.content).__name__}")
+                if isinstance(retry_msg.content, str):
+                    logger.error(f"[run_outlining_phase] Recovery content preview: {retry_msg.content[:500]}")
 
         self._emit_event("phase_complete", {
             "phase": "outlining",
