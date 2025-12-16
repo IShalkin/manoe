@@ -143,6 +143,19 @@ class MultiAgentWorker:
         logger.info(f"[run_generation] provider='{provider}', model='{model}'")
         logger.info(f"[run_generation] api_key provided: {bool(api_key)}, api_key length: {len(api_key) if api_key else 0}")
         
+        # Default model fallback if empty string is provided
+        if not model or model.strip() == "":
+            default_models = {
+                "openai": "gpt-4o",
+                "anthropic": "claude-3-5-sonnet-20241022",
+                "claude": "claude-3-5-sonnet-20241022",
+                "gemini": "gemini-1.5-pro",
+                "openrouter": "openai/gpt-4o",
+                "deepseek": "deepseek-chat",
+            }
+            model = default_models.get(provider.lower(), "gpt-4o")
+            logger.info(f"[run_generation] Empty model provided, using default: '{model}'")
+        
         # Publish start event
         is_regeneration = start_from_phase is not None
         await self.redis_streams.publish_event(
@@ -345,6 +358,25 @@ class MultiAgentWorker:
         Returns:
             Dict containing narrative_possibilities array and recommendation
         """
+        # Log incoming parameters and apply default model fallback
+        import logging
+        logger = logging.getLogger("orchestrator")
+        logger.info(f"[run_narrative_possibilities] Starting with run_id={run_id}")
+        logger.info(f"[run_narrative_possibilities] provider='{provider}', model='{model}'")
+        
+        # Default model fallback if empty string is provided
+        if not model or model.strip() == "":
+            default_models = {
+                "openai": "gpt-4o",
+                "anthropic": "claude-3-5-sonnet-20241022",
+                "claude": "claude-3-5-sonnet-20241022",
+                "gemini": "gemini-1.5-pro",
+                "openrouter": "openai/gpt-4o",
+                "deepseek": "deepseek-chat",
+            }
+            model = default_models.get(provider.lower(), "gpt-4o")
+            logger.info(f"[run_narrative_possibilities] Empty model provided, using default: '{model}'")
+        
         # Publish start event
         await self.redis_streams.publish_event(
             run_id,
