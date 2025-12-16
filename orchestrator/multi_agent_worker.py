@@ -1174,37 +1174,54 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
 
     query_text = f"{research_request.seed_idea} | {research_request.target_audience} | {','.join(themes_list)} | {research_request.moral_compass}"
 
+    # Helper to validate UUID format
+    def is_valid_uuid(val: str) -> bool:
+        try:
+            uuid.UUID(val)
+            return True
+        except (ValueError, TypeError):
+            return False
+
     if research_request.reuse_policy != "force_new":
         try:
             similar_results = await rms.search_similar_research(
                 query_text=query_text,
                 user_id=user_id,
-                limit=1,
+                limit=5,  # Get more results to filter invalid ones
                 score_threshold=research_request.similarity_threshold,
             )
 
             if similar_results:
-                best_match = similar_results[0]
-                similarity_score = best_match.get("score", 0)
-                research_id = best_match.get("payload", {}).get("research_id")
+                # Filter out results with invalid research_ids (like "pending")
+                for match in similar_results:
+                    similarity_score = match.get("score", 0)
+                    research_id = match.get("payload", {}).get("research_id")
 
-                if research_id:
-                    existing = await supa.get_research_result_by_id(research_id)
-                    if existing:
-                        return ResearchResponse(
-                            success=True,
-                            provider=existing.get("provider"),
-                            model=existing.get("model"),
-                            content=existing.get("content"),
-                            prompt_context=existing.get("prompt_context"),
-                            citations=existing.get("citations"),
-                            search_results=existing.get("search_results"),
-                            web_searches=existing.get("web_searches"),
-                            usage=existing.get("usage"),
-                            research_id=research_id,
-                            reused=True,
-                            similarity_score=similarity_score,
-                        )
+                    # Skip invalid UUIDs (like "pending" placeholder)
+                    if not research_id or not is_valid_uuid(research_id):
+                        print(f"Skipping invalid research_id: {research_id}")
+                        continue
+
+                    try:
+                        existing = await supa.get_research_result_by_id(research_id)
+                        if existing:
+                            return ResearchResponse(
+                                success=True,
+                                provider=existing.get("provider"),
+                                model=existing.get("model"),
+                                content=existing.get("content"),
+                                prompt_context=existing.get("prompt_context"),
+                                citations=existing.get("citations"),
+                                search_results=existing.get("search_results"),
+                                web_searches=existing.get("web_searches"),
+                                usage=existing.get("usage"),
+                                research_id=research_id,
+                                reused=True,
+                                similarity_score=similarity_score,
+                            )
+                    except Exception as e:
+                        print(f"Failed to get research result: {e}")
+                        continue
         except Exception as e:
             print(f"Error searching similar research: {e}")
             if research_request.reuse_policy == "force_reuse":
@@ -1235,22 +1252,7 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
             error=result.get("error", "Research failed"),
         )
 
-    qdrant_point_id = None
-    try:
-        qdrant_point_id = await rms.store_research(
-            research_id="pending",
-            user_id=user_id,
-            query_text=query_text,
-            seed_idea=research_request.seed_idea,
-            target_audience=research_request.target_audience,
-            themes=themes_list,
-            moral_compass=research_request.moral_compass,
-            provider=result.get("provider", ""),
-            model=result.get("model"),
-        )
-    except Exception as e:
-        print(f"Error storing research in Qdrant: {e}")
-
+    # First store in Supabase to get the real research_id
     research_id = None
     try:
         research_id = await supa.store_research_result(
@@ -1268,16 +1270,28 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
             web_searches=result.get("web_searches"),
             usage=result.get("usage"),
             project_id=research_request.project_id,
-            qdrant_point_id=qdrant_point_id,
+            qdrant_point_id=None,  # Will update after Qdrant storage
         )
-
-        if research_id and qdrant_point_id:
-            try:
-                await rms.update_research_id(qdrant_point_id, research_id)
-            except Exception as e:
-                print(f"Error updating Qdrant with research_id: {e}")
     except Exception as e:
         print(f"Error storing research in Supabase: {e}")
+
+    # Only store in Qdrant if we have a valid Supabase research_id
+    # This prevents "pending" placeholder IDs from polluting the vector store
+    if research_id:
+        try:
+            await rms.store_research(
+                research_id=research_id,  # Use real UUID, not "pending"
+                user_id=user_id,
+                query_text=query_text,
+                seed_idea=research_request.seed_idea,
+                target_audience=research_request.target_audience,
+                themes=themes_list,
+                moral_compass=research_request.moral_compass,
+                provider=result.get("provider", ""),
+                model=result.get("model"),
+            )
+        except Exception as e:
+            print(f"Error storing research in Qdrant: {e}")
 
     return ResearchResponse(
         success=True,
