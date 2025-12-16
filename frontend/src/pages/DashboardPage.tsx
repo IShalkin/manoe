@@ -405,6 +405,7 @@ export function DashboardPage() {
             reliability: formData.narratorReliability,
             stance: formData.narratorStance,
           },
+          research_context: researchResult || undefined,
         }),
       });
       
