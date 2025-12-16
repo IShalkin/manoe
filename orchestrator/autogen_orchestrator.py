@@ -591,7 +591,11 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
 
         llm_config = agent["llm_config"]
         provider = self._get_provider_from_config(llm_config)
-        model = llm_config["model"]
+        model = llm_config.get("model", "")
+        
+        logger.info(f"[_call_agent] Agent: {agent['name']}, Provider: {provider}, Model: '{model}'")
+        logger.info(f"[_call_agent] llm_config keys: {list(llm_config.keys())}")
+        logger.info(f"[_call_agent] llm_config: {llm_config}")
 
         self._emit_event("agent_start", {
             "agent": agent["name"],
