@@ -9,9 +9,14 @@ import {
   NarrativePOV, 
   NarratorReliability, 
   NarratorStance,
+  OutputFormat,
+  ReaderSensibilities,
   NARRATIVE_POV_OPTIONS,
   NARRATOR_RELIABILITY_OPTIONS,
   NARRATOR_STANCE_OPTIONS,
+  OUTPUT_FORMAT_OPTIONS,
+  CONTENT_SENSITIVITY_OPTIONS,
+  DEFAULT_READER_SENSIBILITIES,
 } from '../types';
 
 // Helper to format date as dd/mm/yyyy
@@ -138,6 +143,8 @@ interface ProjectFormData {
   targetAudience: string;
   themes: string;
   toneStyleReferences: string;
+  outputFormat: OutputFormat;
+  readerSensibilities: ReaderSensibilities;
   generationMode: GenerationMode;
   maxRevisions: number;
   narrativePov: NarrativePOV;
@@ -166,6 +173,8 @@ export function DashboardPage() {
       targetAudience: '',
       themes: '',
       toneStyleReferences: '',
+      outputFormat: 'short_story',
+      readerSensibilities: { ...DEFAULT_READER_SENSIBILITIES },
       generationMode: 'demo',
       maxRevisions: 2,
       narrativePov: 'third_person_limited',
@@ -183,6 +192,8 @@ export function DashboardPage() {
         targetAudience: '',
         themes: '',
         toneStyleReferences: '',
+        outputFormat: 'short_story',
+        readerSensibilities: { ...DEFAULT_READER_SENSIBILITIES },
         generationMode: 'demo',
         maxRevisions: 2,
         narrativePov: 'third_person_limited',
@@ -203,6 +214,8 @@ export function DashboardPage() {
         targetAudience: project.targetAudience,
         themes: project.themes,
         toneStyleReferences: '',
+        outputFormat: (project.outputFormat as OutputFormat) || 'short_story',
+        readerSensibilities: (project.readerSensibilities as unknown as ReaderSensibilities) || { ...DEFAULT_READER_SENSIBILITIES },
         generationMode: 'demo',
         maxRevisions: 2,
         narrativePov: 'third_person_limited',
@@ -263,6 +276,8 @@ export function DashboardPage() {
           target_audience: formData.targetAudience || undefined,
           themes: formData.themes || undefined,
           tone_style_references: formData.toneStyleReferences || undefined,
+          output_format: formData.outputFormat,
+          reader_sensibilities: formData.readerSensibilities,
           generation_mode: formData.generationMode,
           max_revisions: formData.maxRevisions,
           narrator_config: {
@@ -285,6 +300,8 @@ export function DashboardPage() {
             moralCompass: formData.moralCompass,
             targetAudience: formData.targetAudience,
             themes: formData.themes,
+            outputFormat: formData.outputFormat,
+            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
             status: 'pending',
             result: null,
           });
@@ -296,6 +313,8 @@ export function DashboardPage() {
             moralCompass: formData.moralCompass,
             targetAudience: formData.targetAudience,
             themes: formData.themes,
+            outputFormat: formData.outputFormat,
+            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
           });
           projectId = newProject.id;
         }
@@ -506,6 +525,90 @@ export function DashboardPage() {
                               <p className="text-xs text-slate-500 mt-1">
                                 Reference authors, styles, or tonal qualities to guide the narrative voice
                               </p>
+                            </div>
+
+                            {/* Output Format Selection */}
+                            <div className="border-t border-slate-700 pt-4 mt-2">
+                              <h3 className="text-sm font-semibold text-slate-300 mb-3">Output Format</h3>
+                              <div className="grid grid-cols-2 gap-3">
+                                {OUTPUT_FORMAT_OPTIONS.map((option) => (
+                                  <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, outputFormat: option.value })}
+                                    className={`p-4 rounded-xl border text-left transition-all ${
+                                      formData.outputFormat === option.value
+                                        ? 'border-blue-500 bg-blue-500/10'
+                                        : 'border-slate-600 hover:border-slate-500'
+                                    }`}
+                                  >
+                                    <div className="font-medium">{option.label}</div>
+                                    <div className="text-xs text-slate-500">{option.desc}</div>
+                                    <div className="text-xs text-slate-400 mt-1">{option.wordCount}</div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Reader Sensibilities/Triggers */}
+                            <div className="border-t border-slate-700 pt-4 mt-2">
+                              <h3 className="text-sm font-semibold text-slate-300 mb-3">Reader Sensibilities</h3>
+                              <p className="text-xs text-slate-500 mb-4">
+                                Configure content sensitivity levels for your narrative
+                              </p>
+                              <div className="space-y-4">
+                                {(['violence', 'sexualContent', 'profanity', 'drugUse', 'darkThemes'] as const).map((category) => (
+                                  <div key={category} className="flex items-center justify-between">
+                                    <label className="text-sm font-medium capitalize">
+                                      {category === 'sexualContent' ? 'Sexual Content' : 
+                                       category === 'drugUse' ? 'Drug Use' : 
+                                       category === 'darkThemes' ? 'Dark Themes' : category}
+                                    </label>
+                                    <div className="flex gap-1">
+                                      {CONTENT_SENSITIVITY_OPTIONS.map((option) => (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          onClick={() => setFormData({
+                                            ...formData,
+                                            readerSensibilities: {
+                                              ...formData.readerSensibilities,
+                                              [category]: option.value,
+                                            },
+                                          })}
+                                          className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${
+                                            formData.readerSensibilities[category] === option.value
+                                              ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                                              : 'border-slate-600 hover:border-slate-500 text-slate-400'
+                                          }`}
+                                          title={option.desc}
+                                        >
+                                          {option.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                                <div>
+                                  <label className="block text-sm font-medium mb-2">Trigger Warnings (comma-separated)</label>
+                                  <input
+                                    type="text"
+                                    value={formData.readerSensibilities.triggerWarnings.join(', ')}
+                                    onChange={(e) => setFormData({
+                                      ...formData,
+                                      readerSensibilities: {
+                                        ...formData.readerSensibilities,
+                                        triggerWarnings: e.target.value.split(',').map(t => t.trim()).filter(t => t),
+                                      },
+                                    })}
+                                    placeholder="death, trauma, abuse"
+                                    className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors"
+                                  />
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    Specific content warnings to include in the generated story
+                                  </p>
+                                </div>
+                              </div>
                             </div>
 
                             {/* Narrator Design Section */}
