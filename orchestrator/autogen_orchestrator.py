@@ -2367,14 +2367,15 @@ Make sure your output reflects these requirements.
             for d in dialogue_entries
         ]) if dialogue_entries else "No dialogue entries"
 
-        # Format emotional beat
+        # Format emotional beat (normalize to handle string values)
         emotional_initial = ""
         emotional_climax = ""
         emotional_final = ""
         if emotional_beat:
-            emotional_initial = emotional_beat.get("initial_state", "")
-            emotional_climax = emotional_beat.get("climax", "")
-            emotional_final = emotional_beat.get("final_state", "")
+            normalized_beat = _normalize_dict(emotional_beat, fallback_key="initial_state")
+            emotional_initial = normalized_beat.get("initial_state", "")
+            emotional_climax = normalized_beat.get("climax", "")
+            emotional_final = normalized_beat.get("final_state", "")
 
         originality_prompt = f"""
 ## Scene for Originality Analysis
@@ -2502,14 +2503,15 @@ Analyze this scene for originality. Identify cliches, evaluate trope usage, asse
             for d in dialogue_entries
         ]) if dialogue_entries else "No dialogue entries"
 
-        # Format emotional beat
+        # Format emotional beat (normalize to handle string values)
         emotional_initial = ""
         emotional_climax = ""
         emotional_final = ""
         if emotional_beat:
-            emotional_initial = emotional_beat.get("initial_state", "")
-            emotional_climax = emotional_beat.get("climax", "")
-            emotional_final = emotional_beat.get("final_state", "")
+            normalized_beat = _normalize_dict(emotional_beat, fallback_key="initial_state")
+            emotional_initial = normalized_beat.get("initial_state", "")
+            emotional_climax = normalized_beat.get("climax", "")
+            emotional_final = normalized_beat.get("final_state", "")
 
         impact_prompt = f"""
 ## Scene for Impact Assessment
@@ -3572,9 +3574,9 @@ Create the emotional beat sheet as valid JSON.
 **Conflict:** {scene.get("conflict_description", "")}
 
 **Emotional Beat:**
-- Initial: {emotional_beat.get("initial_state", "") if emotional_beat else scene.get("emotional_beat", {}).get("initial_state", "")}
-- Climax: {emotional_beat.get("climax", "") if emotional_beat else scene.get("emotional_beat", {}).get("climax", "")}
-- Final: {emotional_beat.get("final_state", "") if emotional_beat else scene.get("emotional_beat", {}).get("final_state", "")}
+- Initial: {_normalize_dict(emotional_beat if emotional_beat else scene.get("emotional_beat"), fallback_key="initial_state").get("initial_state", "")}
+- Climax: {_normalize_dict(emotional_beat if emotional_beat else scene.get("emotional_beat"), fallback_key="initial_state").get("climax", "")}
+- Final: {_normalize_dict(emotional_beat if emotional_beat else scene.get("emotional_beat"), fallback_key="initial_state").get("final_state", "")}
 
 ## Characters Present
 
