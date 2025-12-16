@@ -5,11 +5,22 @@ Implements multi-agent narrative generation with real agent communication.
 
 import asyncio
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
+
+# Configure logging for orchestrator
+logger = logging.getLogger("orchestrator")
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+    logger.addHandler(handler)
 
 from autogen_agentchat.agents import AssistantAgent
 
@@ -1381,6 +1392,8 @@ Now create the plot outline as valid JSON.
         self.state.current_scene = scene_number
         self.state.revision_count[scene_number] = 0
 
+        logger.info(f"[run_drafting_phase] Starting drafting for scene {scene_number}: {scene.get('title', 'untitled')}")
+        
         self._emit_event("phase_start", {
             "phase": "drafting",
             "scene_number": scene_number,
@@ -3808,6 +3821,12 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             research_context: Market research context (prompt_context) to inject into agent prompts
                 This is the distilled summary from Eternal Memory research results
         """
+        logger.info(f"[run_full_generation] Starting full generation for run_id={run_id}")
+        logger.info(f"[run_full_generation] Parameters: target_word_count={target_word_count}, estimated_scenes={estimated_scenes}, preferred_structure={preferred_structure}")
+        logger.info(f"[run_full_generation] start_from_phase={start_from_phase}, scenes_to_regenerate={scenes_to_regenerate}")
+        logger.info(f"[run_full_generation] selected_narrative provided: {selected_narrative is not None}")
+        logger.info(f"[run_full_generation] research_context provided: {research_context is not None}")
+        
         results = {
             "project": project.model_dump(),
             "phases": {},
@@ -4169,10 +4188,15 @@ Apply these insights naturally without explicitly referencing "market research" 
         results["phases"]["outlining"] = outlining_result
 
         if not outlining_result.get("outline"):
+            logger.error("[run_full_generation] Outlining phase failed - no outline returned")
             return {"error": "Outlining phase failed", **results}
 
         outline = outlining_result["outline"]
         scenes = outline.get("scenes", [])
+        logger.info(f"[run_full_generation] Outlining complete. Outline keys: {list(outline.keys()) if isinstance(outline, dict) else 'not a dict'}")
+        logger.info(f"[run_full_generation] Number of scenes extracted: {len(scenes)}")
+        if scenes:
+            logger.info(f"[run_full_generation] First scene: {scenes[0].get('title', 'no title') if isinstance(scenes[0], dict) else scenes[0]}")
 
         # Phase 4.5: Motif Layer Planning (Symbolic/Motif Bible)
         motif_layer_result = None
@@ -4222,16 +4246,23 @@ Apply these insights naturally without explicitly referencing "market research" 
         complexity_checklist = advanced_planning_result.get("complexity_checklist", {})
 
         # Phase 6: Drafting (all scenes or selective regeneration)
+        logger.info(f"[run_full_generation] === ENTERING DRAFTING PHASE ===")
+        logger.info(f"[run_full_generation] Total scenes to draft: {len(scenes)}")
+        logger.info(f"[run_full_generation] should_skip_phase('drafting'): {should_skip_phase('drafting')}")
+        logger.info(f"[run_full_generation] scene_regen_mode: {scene_regen_mode}")
+        
         drafts = []
         previous_drafts = None
 
         # Get previous drafts for scene-level regeneration or phase skip
         if should_skip_phase("drafting") or scene_regen_mode:
             previous_drafts = get_previous_artifact("drafting", "drafts")
+            logger.info(f"[run_full_generation] previous_drafts loaded: {previous_drafts is not None}")
             if previous_drafts and should_skip_phase("drafting") and not scene_regen_mode:
                 drafts = previous_drafts.get("scenes", [])
                 results["phases"]["drafting"] = {"scenes": drafts}
                 self._emit_event("phase_skipped", {"phase": "drafting", "reason": "using_previous_artifact"})
+                logger.info(f"[run_full_generation] Drafting phase SKIPPED - using previous artifact")
 
         # Helper to get continuity context from adjacent scenes
         def get_continuity_context(scene_index: int, all_drafts: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -4253,7 +4284,12 @@ Apply these insights naturally without explicitly referencing "market research" 
 
             return context
 
-        if not (should_skip_phase("drafting") and not scene_regen_mode):
+        drafting_condition = not (should_skip_phase("drafting") and not scene_regen_mode)
+        logger.info(f"[run_full_generation] Will enter drafting loop: {drafting_condition}")
+        logger.info(f"[run_full_generation] Condition breakdown: should_skip_phase('drafting')={should_skip_phase('drafting')}, scene_regen_mode={scene_regen_mode}")
+        
+        if drafting_condition:
+            logger.info(f"[run_full_generation] === STARTING DRAFTING LOOP for {len(scenes)} scenes ===")
             # Initialize drafts list with previous drafts if in scene regen mode
             if scene_regen_mode and previous_drafts:
                 drafts = previous_drafts.get("scenes", [])
@@ -4264,6 +4300,7 @@ Apply these insights naturally without explicitly referencing "market research" 
             previous_summary = "N/A"
             for i, scene in enumerate(scenes):
                 scene_number = i + 1
+                logger.info(f"[run_full_generation] Processing scene {scene_number}/{len(scenes)}: {scene.get('title', 'untitled')}")
 
                 # Check if this scene should be regenerated or kept
                 if scene_regen_mode and scenes_to_regenerate and scene_number not in scenes_to_regenerate:
@@ -4509,4 +4546,9 @@ Apply these insights naturally without explicitly referencing "market research" 
 
         results["phases"]["polish"] = {"scenes": polished_drafts}
 
+        logger.info(f"[run_full_generation] === GENERATION COMPLETE ===")
+        logger.info(f"[run_full_generation] Total drafts: {len(drafts)}")
+        logger.info(f"[run_full_generation] Total polished: {len(polished_drafts)}")
+        logger.info(f"[run_full_generation] Phases completed: {list(results['phases'].keys())}")
+        
         return results
