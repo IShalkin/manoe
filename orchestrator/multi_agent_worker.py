@@ -37,6 +37,7 @@ from services.security import (
     run_ownership,
 )
 from services.supabase_persistence import SupabasePersistenceService
+from services.research_service import ResearchService, ResearchProvider
 
 load_dotenv()
 
@@ -837,6 +838,84 @@ class ModelsResponse(BaseModel):
     success: bool
     models: Optional[List[ModelInfo]] = None
     error: Optional[str] = None
+
+
+class ResearchRequest(BaseModel):
+    """Request model for market research."""
+    seed_idea: str = Field(..., max_length=MAX_SEED_IDEA_LENGTH)
+    target_audience: str = Field("", max_length=1000)
+    themes: Optional[str] = Field(None, max_length=MAX_THEMES_LENGTH)
+    moral_compass: str = "ambiguous"
+    provider: str = Field(..., description="Research provider: openai_deep_research or perplexity")
+    api_key: str = Field(..., description="API key for the research provider")
+    model: Optional[str] = Field(None, description="Optional model override")
+
+
+class ResearchResponse(BaseModel):
+    """Response model for market research."""
+    success: bool
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    content: Optional[str] = None
+    citations: Optional[List[Dict[str, Any]]] = None
+    search_results: Optional[List[Dict[str, Any]]] = None
+    web_searches: Optional[List[Dict[str, Any]]] = None
+    usage: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+research_service: Optional[ResearchService] = None
+
+
+@app.post("/research", response_model=ResearchResponse)
+@limiter.limit("5/minute")
+async def conduct_research(research_request: ResearchRequest, request: Request):
+    """
+    Conduct market research using OpenAI Deep Research or Perplexity APIs.
+    
+    Supported providers:
+    - openai_deep_research: Uses OpenAI's o3-deep-research or o4-mini-deep-research models
+    - perplexity: Uses Perplexity's sonar-deep-research model
+    
+    Requires authentication.
+    """
+    global research_service
+    
+    # Authenticate user
+    await get_current_user(request)
+    
+    # Initialize research service if needed
+    if research_service is None:
+        research_service = ResearchService()
+        await research_service.initialize()
+    
+    # Parse themes
+    themes_list = []
+    if research_request.themes:
+        themes_list = [t.strip() for t in research_request.themes.split(",") if t.strip()]
+    
+    # Conduct research
+    result = await research_service.conduct_research(
+        provider=research_request.provider,
+        api_key=research_request.api_key,
+        seed_idea=research_request.seed_idea,
+        target_audience=research_request.target_audience,
+        themes=themes_list,
+        moral_compass=research_request.moral_compass,
+        model=research_request.model,
+    )
+    
+    return ResearchResponse(
+        success=result.get("success", False),
+        provider=result.get("provider"),
+        model=result.get("model"),
+        content=result.get("content"),
+        citations=result.get("citations"),
+        search_results=result.get("search_results"),
+        web_searches=result.get("web_searches"),
+        usage=result.get("usage"),
+        error=result.get("error"),
+    )
 
 
 @app.post("/models", response_model=ModelsResponse)
