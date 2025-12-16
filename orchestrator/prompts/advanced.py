@@ -1,13 +1,10 @@
 """
 Advanced Features Prompts for MANOE
-Based on Storyteller Framework Sections 3.2, 3.5.1, 4.1, and 5.2
-
-These prompts support Priority 3 features:
-- Narrator Design (Section 3.2)
-Based on Storyteller Framework Sections 1.4, 3.5.1, 4.1, and 5.2
+Based on Storyteller Framework Sections 1.4, 3.2, 3.5.1, 4.1, and 5.2
 
 These prompts support Priority 3 features:
 - Narrative Possibilities Branching (Section 1.4)
+- Narrator Design (Section 3.2)
 - Internal Contradiction Maps
 - Emotional Beat Sheet
 - Sensory Imagery Blueprint
@@ -67,41 +64,6 @@ These are the user's initial preferences. Use them as a starting point but expan
    - Distance from protagonist (intimate, observational, distant)
    - Access to other characters' interiority
    - How the narrator reveals character thoughts
-# Narrative Possibilities Branching (Storyteller Section 1.4)
-# =============================================================================
-
-NARRATIVE_POSSIBILITIES_PROMPT = """You are the Architect Agent generating MULTIPLE Narrative Possibilities for the user to choose from.
-
-## Purpose
-Instead of generating a single narrative direction, create 3-5 DISTINCT narrative possibilities that explore different interpretations of the seed idea. Each possibility should be viable and compelling, but take the story in meaningfully different directions.
-
-## Project Configuration
-- Seed Idea: {seed_idea}
-- Moral Compass: {moral_compass}
-- Target Audience: {target_audience}
-- Core Themes: {theme_core}
-- Style References: {tone_style_references}
-{custom_moral_system_section}
-
-## Requirements for Each Possibility
-
-Each narrative possibility must:
-1. Be a COMPLETE, viable story direction (not a fragment)
-2. Differ MEANINGFULLY from the others (not just minor variations)
-3. Apply the same Moral Compass consistently
-4. Be appropriate for the Target Audience
-5. Have room for character development and thematic exploration
-
-## Differentiation Strategies
-
-Create variety by exploring different:
-- **Genre Interpretations**: Same seed, different genre lens (thriller vs. drama vs. literary)
-- **Conflict Types**: Hero vs. Nature, Hero vs. Society, Hero vs. Self
-- **Tonal Approaches**: Dark and serious vs. hopeful vs. bittersweet
-- **Structural Choices**: Linear vs. non-linear, single POV vs. multiple
-- **Thematic Emphasis**: Which themes take center stage
-- **Setting Variations**: Same concept in different times/places
-- **Character Focus**: Different protagonist choices or relationships
 
 ## Output Format
 
@@ -159,6 +121,49 @@ Create variety by exploring different:
 ```
 
 Design a narrator that will bring this specific story to life with a distinctive, memorable voice.
+"""
+
+# =============================================================================
+# Narrative Possibilities Branching (Storyteller Section 1.4)
+# =============================================================================
+
+NARRATIVE_POSSIBILITIES_PROMPT = """You are the Architect Agent generating MULTIPLE Narrative Possibilities for the user to choose from.
+
+## Purpose
+Instead of generating a single narrative direction, create 3-5 DISTINCT narrative possibilities that explore different interpretations of the seed idea. Each possibility should be viable and compelling, but take the story in meaningfully different directions.
+
+## Project Configuration
+- Seed Idea: {seed_idea}
+- Moral Compass: {moral_compass}
+- Target Audience: {target_audience}
+- Core Themes: {theme_core}
+- Style References: {tone_style_references}
+{custom_moral_system_section}
+
+## Requirements for Each Possibility
+
+Each narrative possibility must:
+1. Be a COMPLETE, viable story direction (not a fragment)
+2. Differ MEANINGFULLY from the others (not just minor variations)
+3. Apply the same Moral Compass consistently
+4. Be appropriate for the Target Audience
+5. Have room for character development and thematic exploration
+
+## Differentiation Strategies
+
+Create variety by exploring different:
+- **Genre Interpretations**: Same seed, different genre lens (thriller vs. drama vs. literary)
+- **Conflict Types**: Hero vs. Nature, Hero vs. Society, Hero vs. Self
+- **Tonal Approaches**: Dark and serious vs. hopeful vs. bittersweet
+- **Structural Choices**: Linear vs. non-linear, single POV vs. multiple
+- **Thematic Emphasis**: Which themes take center stage
+- **Setting Variations**: Same concept in different times/places
+- **Character Focus**: Different protagonist choices or relationships
+
+## Output Format
+
+```json
+{{
   "narrative_possibilities": [
     {{
       "id": 1,
