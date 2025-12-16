@@ -1119,11 +1119,17 @@ class ResearchResponse(BaseModel):
     research_id: Optional[str] = None
     reused: bool = False
     similarity_score: Optional[float] = None
+    # Async job fields
+    job_id: Optional[str] = None
+    status: Optional[str] = None  # pending, running, completed, failed
 
 
 research_service: Optional[ResearchService] = None
 research_memory_service: Optional[ResearchMemoryService] = None
 supabase_service: Optional[SupabasePersistenceService] = None
+
+# In-memory storage for research jobs (could use Redis for persistence across restarts)
+research_jobs: Dict[str, Dict[str, Any]] = {}
 
 
 async def get_research_services():
@@ -1145,11 +1151,105 @@ async def get_research_services():
     return research_service, research_memory_service, supabase_service
 
 
+async def _run_research_job(
+    job_id: str,
+    user_id: Optional[str],
+    research_request: ResearchRequest,
+    themes_list: List[str],
+    query_text: str,
+):
+    """Background task to run research and store results."""
+    global research_jobs
+    
+    try:
+        research_jobs[job_id]["status"] = "running"
+        
+        rs, rms, supa = await get_research_services()
+        
+        # Conduct the actual research (this is the slow part)
+        result = await rs.conduct_research(
+            provider=research_request.provider,
+            api_key=research_request.api_key,
+            seed_idea=research_request.seed_idea,
+            target_audience=research_request.target_audience,
+            themes=themes_list,
+            moral_compass=research_request.moral_compass,
+            model=research_request.model,
+        )
+        
+        if not result.get("success"):
+            research_jobs[job_id]["status"] = "failed"
+            research_jobs[job_id]["error"] = result.get("error", "Research failed")
+            return
+        
+        # Store in Supabase
+        research_id = None
+        try:
+            research_id = await supa.store_research_result(
+                user_id=user_id,
+                provider=result.get("provider", ""),
+                model=result.get("model"),
+                seed_idea=research_request.seed_idea,
+                target_audience=research_request.target_audience,
+                themes=themes_list,
+                moral_compass=research_request.moral_compass,
+                content=result.get("content", ""),
+                prompt_context=result.get("prompt_context"),
+                citations=result.get("citations"),
+                search_results=result.get("search_results"),
+                web_searches=result.get("web_searches"),
+                usage=result.get("usage"),
+                project_id=research_request.project_id,
+                qdrant_point_id=None,
+            )
+        except Exception as e:
+            print(f"Error storing research in Supabase: {e}")
+        
+        # Store in Qdrant if we have a valid research_id
+        if research_id:
+            try:
+                await rms.store_research(
+                    research_id=research_id,
+                    user_id=user_id,
+                    query_text=query_text,
+                    seed_idea=research_request.seed_idea,
+                    target_audience=research_request.target_audience,
+                    themes=themes_list,
+                    moral_compass=research_request.moral_compass,
+                    provider=result.get("provider", ""),
+                    model=result.get("model"),
+                )
+            except Exception as e:
+                print(f"Error storing research in Qdrant: {e}")
+        
+        # Update job with results
+        research_jobs[job_id].update({
+            "status": "completed",
+            "research_id": research_id,
+            "provider": result.get("provider"),
+            "model": result.get("model"),
+            "content": result.get("content"),
+            "prompt_context": result.get("prompt_context"),
+            "citations": result.get("citations"),
+            "search_results": result.get("search_results"),
+            "web_searches": result.get("web_searches"),
+            "usage": result.get("usage"),
+        })
+        
+    except Exception as e:
+        print(f"Research job {job_id} failed: {e}")
+        research_jobs[job_id]["status"] = "failed"
+        research_jobs[job_id]["error"] = str(e)
+
+
 @app.post("/research", response_model=ResearchResponse)
 @limiter.limit("5/minute")
 async def conduct_research(research_request: ResearchRequest, request: Request):
     """
     Conduct market research using OpenAI Deep Research or Perplexity APIs.
+    
+    This endpoint is ASYNC - it returns immediately with a job_id.
+    Poll GET /research/job/{job_id} to check status and get results.
 
     Implements "Eternal Memory" - checks for similar past research before conducting new research.
 
@@ -1182,22 +1282,21 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
         except (ValueError, TypeError):
             return False
 
+    # Check for existing similar research first (this is fast)
     if research_request.reuse_policy != "force_new":
         try:
             similar_results = await rms.search_similar_research(
                 query_text=query_text,
                 user_id=user_id,
-                limit=5,  # Get more results to filter invalid ones
+                limit=5,
                 score_threshold=research_request.similarity_threshold,
             )
 
             if similar_results:
-                # Filter out results with invalid research_ids (like "pending")
                 for match in similar_results:
                     similarity_score = match.get("score", 0)
                     research_id = match.get("payload", {}).get("research_id")
 
-                    # Skip invalid UUIDs (like "pending" placeholder)
                     if not research_id or not is_valid_uuid(research_id):
                         print(f"Skipping invalid research_id: {research_id}")
                         continue
@@ -1205,8 +1304,10 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
                     try:
                         existing = await supa.get_research_result_by_id(research_id)
                         if existing:
+                            # Return immediately with cached result
                             return ResearchResponse(
                                 success=True,
+                                status="completed",
                                 provider=existing.get("provider"),
                                 model=existing.get("model"),
                                 content=existing.get("content"),
@@ -1236,74 +1337,91 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
             error="No similar research found and force_reuse policy set",
         )
 
-    result = await rs.conduct_research(
-        provider=research_request.provider,
-        api_key=research_request.api_key,
-        seed_idea=research_request.seed_idea,
-        target_audience=research_request.target_audience,
-        themes=themes_list,
-        moral_compass=research_request.moral_compass,
-        model=research_request.model,
-    )
-
-    if not result.get("success"):
-        return ResearchResponse(
-            success=False,
-            error=result.get("error", "Research failed"),
-        )
-
-    # First store in Supabase to get the real research_id
-    research_id = None
-    try:
-        research_id = await supa.store_research_result(
-            user_id=user_id,
-            provider=result.get("provider", ""),
-            model=result.get("model"),
-            seed_idea=research_request.seed_idea,
-            target_audience=research_request.target_audience,
-            themes=themes_list,
-            moral_compass=research_request.moral_compass,
-            content=result.get("content", ""),
-            prompt_context=result.get("prompt_context"),
-            citations=result.get("citations"),
-            search_results=result.get("search_results"),
-            web_searches=result.get("web_searches"),
-            usage=result.get("usage"),
-            project_id=research_request.project_id,
-            qdrant_point_id=None,  # Will update after Qdrant storage
-        )
-    except Exception as e:
-        print(f"Error storing research in Supabase: {e}")
-
-    # Only store in Qdrant if we have a valid Supabase research_id
-    # This prevents "pending" placeholder IDs from polluting the vector store
-    if research_id:
-        try:
-            await rms.store_research(
-                research_id=research_id,  # Use real UUID, not "pending"
-                user_id=user_id,
-                query_text=query_text,
-                seed_idea=research_request.seed_idea,
-                target_audience=research_request.target_audience,
-                themes=themes_list,
-                moral_compass=research_request.moral_compass,
-                provider=result.get("provider", ""),
-                model=result.get("model"),
-            )
-        except Exception as e:
-            print(f"Error storing research in Qdrant: {e}")
-
+    # No cached result found - start async job
+    job_id = str(uuid.uuid4())
+    research_jobs[job_id] = {
+        "status": "pending",
+        "user_id": user_id,
+        "created_at": asyncio.get_event_loop().time(),
+    }
+    
+    # Start background task
+    asyncio.create_task(_run_research_job(
+        job_id=job_id,
+        user_id=user_id,
+        research_request=research_request,
+        themes_list=themes_list,
+        query_text=query_text,
+    ))
+    
+    # Return immediately with job_id
     return ResearchResponse(
         success=True,
-        provider=result.get("provider"),
-        model=result.get("model"),
-        content=result.get("content"),
-        prompt_context=result.get("prompt_context"),
-        citations=result.get("citations"),
-        search_results=result.get("search_results"),
-        web_searches=result.get("web_searches"),
-        usage=result.get("usage"),
-        research_id=research_id,
+        status="pending",
+        job_id=job_id,
+    )
+
+
+@app.get("/research/job/{job_id}", response_model=ResearchResponse)
+async def get_research_job(job_id: str, request: Request):
+    """
+    Get the status and results of an async research job.
+    
+    Poll this endpoint until status is 'completed' or 'failed'.
+    """
+    user_id, _ = await get_current_user(request)
+    
+    if job_id not in research_jobs:
+        return ResearchResponse(
+            success=False,
+            error="Job not found",
+        )
+    
+    job = research_jobs[job_id]
+    
+    # Verify ownership
+    if job.get("user_id") != user_id:
+        return ResearchResponse(
+            success=False,
+            error="Job not found",
+        )
+    
+    if job["status"] == "pending":
+        return ResearchResponse(
+            success=True,
+            status="pending",
+            job_id=job_id,
+        )
+    
+    if job["status"] == "running":
+        return ResearchResponse(
+            success=True,
+            status="running",
+            job_id=job_id,
+        )
+    
+    if job["status"] == "failed":
+        return ResearchResponse(
+            success=False,
+            status="failed",
+            job_id=job_id,
+            error=job.get("error", "Research failed"),
+        )
+    
+    # Completed - return full results
+    return ResearchResponse(
+        success=True,
+        status="completed",
+        job_id=job_id,
+        research_id=job.get("research_id"),
+        provider=job.get("provider"),
+        model=job.get("model"),
+        content=job.get("content"),
+        prompt_context=job.get("prompt_context"),
+        citations=job.get("citations"),
+        search_results=job.get("search_results"),
+        web_searches=job.get("web_searches"),
+        usage=job.get("usage"),
         reused=False,
     )
 
