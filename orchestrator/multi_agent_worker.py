@@ -26,6 +26,8 @@ from config import (
 )
 from models import StoryProject
 from services.redis_streams import RedisStreamsService
+from services.research_memory import ResearchMemoryService
+from services.research_service import ResearchService
 from services.security import (
     ALLOWED_ORIGINS,
     MAX_CUSTOM_MORAL_LENGTH,
@@ -37,7 +39,6 @@ from services.security import (
     run_ownership,
 )
 from services.supabase_persistence import SupabasePersistenceService
-from services.research_service import ResearchService, ResearchProvider
 
 load_dotenv()
 
@@ -135,6 +136,28 @@ class MultiAgentWorker:
         Returns:
             Generation results including all agent messages
         """
+        # Log incoming parameters
+        import logging
+        logger = logging.getLogger("orchestrator")
+        logger.info(f"[run_generation] Starting with run_id={run_id}")
+        logger.info(f"[run_generation] provider='{provider}', model='{model}'")
+        logger.info(f"[run_generation] api_key provided: {bool(api_key)}, api_key length: {len(api_key) if api_key else 0}")
+
+        # Default model fallback if empty string is provided
+        # Models based on README.md Model Tiers (December 2025)
+        if not model or model.strip() == "":
+            default_models = {
+                "openai": "gpt-5.2",
+                "anthropic": "claude-opus-4.5",
+                "claude": "claude-opus-4.5",
+                "gemini": "gemini-3-pro",
+                "openrouter": "google/gemini-3-pro",
+                "deepseek": "deepseek-v3",
+                "venice": "dolphin-mistral-24b",
+            }
+            model = default_models.get(provider.lower(), "gpt-5.2")
+            logger.info(f"[run_generation] Empty model provided, using default: '{model}'")
+
         # Publish start event
         is_regeneration = start_from_phase is not None
         await self.redis_streams.publish_event(
@@ -289,6 +312,11 @@ class MultiAgentWorker:
             }
 
         except Exception as e:
+            # Log full traceback for debugging
+            import traceback
+            error_traceback = traceback.format_exc()
+            print(f"Generation error for run {run_id}:\n{error_traceback}")
+
             # Publish error event
             await self.redis_streams.publish_event(
                 run_id,
@@ -297,6 +325,7 @@ class MultiAgentWorker:
                     "run_id": run_id,
                     "status": "error",
                     "error": str(e),
+                    "traceback": error_traceback,
                 }
             )
             return {
@@ -331,6 +360,27 @@ class MultiAgentWorker:
         Returns:
             Dict containing narrative_possibilities array and recommendation
         """
+        # Log incoming parameters and apply default model fallback
+        import logging
+        logger = logging.getLogger("orchestrator")
+        logger.info(f"[run_narrative_possibilities] Starting with run_id={run_id}")
+        logger.info(f"[run_narrative_possibilities] provider='{provider}', model='{model}'")
+
+        # Default model fallback if empty string is provided
+        # Models based on README.md Model Tiers (December 2025)
+        if not model or model.strip() == "":
+            default_models = {
+                "openai": "gpt-5.2",
+                "anthropic": "claude-opus-4.5",
+                "claude": "claude-opus-4.5",
+                "gemini": "gemini-3-pro",
+                "openrouter": "google/gemini-3-pro",
+                "deepseek": "deepseek-v3",
+                "venice": "dolphin-mistral-24b",
+            }
+            model = default_models.get(provider.lower(), "gpt-5.2")
+            logger.info(f"[run_narrative_possibilities] Empty model provided, using default: '{model}'")
+
         # Publish start event
         await self.redis_streams.publish_event(
             run_id,
@@ -422,6 +472,11 @@ class MultiAgentWorker:
             }
 
         except Exception as e:
+            # Log full traceback for debugging
+            import traceback
+            error_traceback = traceback.format_exc()
+            print(f"Narrative possibilities error for run {run_id}:\n{error_traceback}")
+
             # Publish error event
             await self.redis_streams.publish_event(
                 run_id,
@@ -430,6 +485,7 @@ class MultiAgentWorker:
                     "run_id": run_id,
                     "status": "error",
                     "error": str(e),
+                    "traceback": error_traceback,
                 }
             )
             return {
@@ -638,9 +694,78 @@ async def stream_events(run_id: str, request: Request):
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
 
-    # Authenticate user and verify ownership
+    # Authenticate user
     user_id, _ = await get_current_user(request)
-    check_run_ownership(run_id, user_id)
+    
+    # Check if run is in memory (active)
+    owner = run_ownership.get_owner(run_id)
+    if owner is None:
+        # Run not in memory - check if it exists in Supabase (interrupted run)
+        # Return a generation_error event that the frontend already handles
+        async def interrupted_event_generator():
+            import datetime
+            # Build error info from Supabase artifacts
+            error_msg = "Run interrupted by orchestrator redeploy"
+            can_resume = False
+            resume_from_phase = None
+            artifacts_count = 0
+            
+            if worker.persistence_service and worker.persistence_service.is_connected:
+                try:
+                    artifacts = await worker.persistence_service.get_run_artifacts(run_id)
+                    if artifacts:
+                        # Run exists in database - it was interrupted
+                        can_resume = True
+                        artifacts_count = len(artifacts)
+                        # Determine resume phase from artifacts
+                        completed_phases = set()
+                        for artifact in artifacts:
+                            phase = artifact.get("phase")
+                            if phase:
+                                completed_phases.add(phase)
+                        # Determine next phase
+                        phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", "outlining", "advanced_planning", "drafting", "polish"]
+                        for phase in phase_order:
+                            if phase not in completed_phases:
+                                resume_from_phase = phase
+                                break
+                        error_msg = f"Run interrupted. Completed {len(completed_phases)} phases. Can resume from {resume_from_phase}."
+                    else:
+                        error_msg = "Run not found"
+                except Exception as e:
+                    error_msg = f"Error checking run state: {str(e)}"
+            
+            # Emit generation_error event with proper data structure that frontend expects
+            event = {
+                "type": "generation_error",
+                "id": f"interrupted-{run_id}",
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+                "data": {
+                    "error": error_msg,
+                    "status": "interrupted",
+                    "can_resume": can_resume,
+                    "resume_from_phase": resume_from_phase,
+                    "artifacts_count": artifacts_count,
+                }
+            }
+            yield f"data: {json.dumps(event)}\n\n"
+        
+        return StreamingResponse(
+            interrupted_event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+    
+    # Verify ownership for active runs
+    if owner != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to access this run",
+        )
 
     async def event_generator():
         # First, get any existing events
@@ -822,6 +947,131 @@ async def get_run_status(run_id: str, request: Request):
     return {"run_id": run_id, "status": status}
 
 
+@app.get("/runs/{run_id}/state")
+async def get_run_state(run_id: str, request: Request):
+    """
+    Get the current state of a generation run from Supabase artifacts.
+    
+    This endpoint is used for state recovery after SSE reconnection or page refresh.
+    It returns all stored artifacts and phase statuses for the run, allowing the
+    frontend to reconstruct the UI state without replaying all events.
+    
+    Returns:
+        - run_id: The run identifier
+        - status: Current run status (running, completed, interrupted, not_found)
+        - artifacts: Dict of phase -> artifact_type -> content
+        - phase_statuses: Dict of phase -> status info (started/completed/failed)
+        - last_completed_phase: The last phase that completed successfully
+        - can_resume: Whether the run can be resumed from the last completed phase
+    """
+    if not worker:
+        raise HTTPException(status_code=503, detail="Worker not initialized")
+
+    # Authenticate user and verify ownership
+    user_id, _ = await get_current_user(request)
+    check_run_ownership(run_id, user_id)
+
+    # Determine in-memory status
+    in_memory_status = "unknown"
+    if run_id in worker._cancelled_runs:
+        in_memory_status = "cancelled"
+    elif run_id in worker._paused_runs:
+        in_memory_status = "paused"
+    elif run_id in worker._active_runs:
+        task = worker._active_runs[run_id]
+        if task.done():
+            in_memory_status = "completed"
+        else:
+            in_memory_status = "running"
+    else:
+        in_memory_status = "not_in_memory"
+
+    # Get artifacts from Supabase
+    artifacts = {}
+    phase_statuses = {}
+    last_completed_phase = None
+    
+    if worker.persistence_service and worker.persistence_service.is_connected:
+        # Get all artifacts for this run
+        artifacts = await worker.persistence_service.get_run_artifacts(run_id)
+        
+        # Extract phase statuses from artifacts
+        phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", 
+                       "outlining", "motif_layer", "advanced_planning", "drafting", "polish"]
+        
+        for phase in phase_order:
+            if phase in artifacts:
+                phase_artifacts = artifacts[phase]
+                # Check for phase_status artifact
+                if "phase_status" in phase_artifacts:
+                    phase_statuses[phase] = phase_artifacts["phase_status"]
+                    if phase_artifacts["phase_status"].get("status") == "completed":
+                        last_completed_phase = phase
+                else:
+                    # Infer completed if we have the main artifact
+                    main_artifact_types = {
+                        "genesis": "narrative_possibility",
+                        "characters": "characters",
+                        "narrator_design": "narrator_design",
+                        "worldbuilding": "worldbuilding",
+                        "outlining": "outline",
+                        "motif_layer": "motif_bible",
+                        "advanced_planning": "advanced_planning",
+                        "drafting": "drafts",
+                        "polish": "polished",
+                    }
+                    if main_artifact_types.get(phase) in phase_artifacts:
+                        phase_statuses[phase] = {"status": "completed", "inferred": True}
+                        last_completed_phase = phase
+
+    # Determine overall status
+    has_artifacts = bool(artifacts)
+    if in_memory_status == "running":
+        status = "running"
+    elif in_memory_status == "completed":
+        status = "completed"
+    elif in_memory_status == "cancelled":
+        status = "cancelled"
+    elif in_memory_status == "paused":
+        status = "paused"
+    elif has_artifacts:
+        # Has artifacts but not in memory - likely interrupted by redeploy
+        # Check if we have a completed generation
+        if "polish" in phase_statuses and phase_statuses["polish"].get("status") == "completed":
+            status = "completed"
+        else:
+            status = "interrupted"
+    else:
+        status = "not_found"
+
+    # Determine if resume is possible
+    can_resume = status == "interrupted" and last_completed_phase is not None
+
+    return {
+        "run_id": run_id,
+        "status": status,
+        "in_memory_status": in_memory_status,
+        "artifacts": artifacts,
+        "phase_statuses": phase_statuses,
+        "last_completed_phase": last_completed_phase,
+        "can_resume": can_resume,
+        "resume_from_phase": _get_next_phase(last_completed_phase) if can_resume else None,
+    }
+
+
+def _get_next_phase(current_phase: str) -> str:
+    """Get the next phase after the current one."""
+    phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", 
+                   "outlining", "motif_layer", "advanced_planning", "drafting", "polish"]
+    try:
+        idx = phase_order.index(current_phase)
+        if idx < len(phase_order) - 1:
+            return phase_order[idx + 1]
+    except ValueError:
+        pass
+    return None
+
+
 class ModelsRequest(BaseModel):
     provider: str
     api_key: str
@@ -849,6 +1099,9 @@ class ResearchRequest(BaseModel):
     provider: str = Field(..., description="Research provider: openai_deep_research or perplexity")
     api_key: str = Field(..., description="API key for the research provider")
     model: Optional[str] = Field(None, description="Optional model override")
+    project_id: Optional[str] = Field(None, description="Optional project ID to link research to")
+    reuse_policy: str = Field("auto", description="Reuse policy: auto, force_new, force_reuse")
+    similarity_threshold: float = Field(0.8, description="Similarity threshold for reuse (0.0-1.0)")
 
 
 class ResearchResponse(BaseModel):
@@ -857,14 +1110,39 @@ class ResearchResponse(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     content: Optional[str] = None
+    prompt_context: Optional[str] = None
     citations: Optional[List[Dict[str, Any]]] = None
     search_results: Optional[List[Dict[str, Any]]] = None
     web_searches: Optional[List[Dict[str, Any]]] = None
     usage: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    research_id: Optional[str] = None
+    reused: bool = False
+    similarity_score: Optional[float] = None
 
 
 research_service: Optional[ResearchService] = None
+research_memory_service: Optional[ResearchMemoryService] = None
+supabase_service: Optional[SupabasePersistenceService] = None
+
+
+async def get_research_services():
+    """Initialize and return research services."""
+    global research_service, research_memory_service, supabase_service
+
+    if research_service is None:
+        research_service = ResearchService()
+        await research_service.initialize()
+
+    if research_memory_service is None:
+        research_memory_service = ResearchMemoryService()
+        await research_memory_service.initialize()
+
+    if supabase_service is None:
+        supabase_service = SupabasePersistenceService()
+        supabase_service.connect()
+
+    return research_service, research_memory_service, supabase_service
 
 
 @app.post("/research", response_model=ResearchResponse)
@@ -872,30 +1150,76 @@ research_service: Optional[ResearchService] = None
 async def conduct_research(research_request: ResearchRequest, request: Request):
     """
     Conduct market research using OpenAI Deep Research or Perplexity APIs.
-    
+
+    Implements "Eternal Memory" - checks for similar past research before conducting new research.
+
     Supported providers:
     - openai_deep_research: Uses OpenAI's o3-deep-research or o4-mini-deep-research models
     - perplexity: Uses Perplexity's sonar-deep-research model
-    
+
+    Reuse policies:
+    - auto: Check for similar research, reuse if similarity > threshold
+    - force_new: Always conduct new research
+    - force_reuse: Only return existing research (fail if none found)
+
     Requires authentication.
     """
-    global research_service
-    
-    # Authenticate user
-    await get_current_user(request)
-    
-    # Initialize research service if needed
-    if research_service is None:
-        research_service = ResearchService()
-        await research_service.initialize()
-    
-    # Parse themes
+    user_id, _ = await get_current_user(request)
+
+    rs, rms, supa = await get_research_services()
+
     themes_list = []
     if research_request.themes:
         themes_list = [t.strip() for t in research_request.themes.split(",") if t.strip()]
-    
-    # Conduct research
-    result = await research_service.conduct_research(
+
+    query_text = f"{research_request.seed_idea} | {research_request.target_audience} | {','.join(themes_list)} | {research_request.moral_compass}"
+
+    if research_request.reuse_policy != "force_new":
+        try:
+            similar_results = await rms.search_similar_research(
+                query_text=query_text,
+                user_id=user_id,
+                limit=1,
+                score_threshold=research_request.similarity_threshold,
+            )
+
+            if similar_results:
+                best_match = similar_results[0]
+                similarity_score = best_match.get("score", 0)
+                research_id = best_match.get("payload", {}).get("research_id")
+
+                if research_id:
+                    existing = await supa.get_research_result_by_id(research_id)
+                    if existing:
+                        return ResearchResponse(
+                            success=True,
+                            provider=existing.get("provider"),
+                            model=existing.get("model"),
+                            content=existing.get("content"),
+                            prompt_context=existing.get("prompt_context"),
+                            citations=existing.get("citations"),
+                            search_results=existing.get("search_results"),
+                            web_searches=existing.get("web_searches"),
+                            usage=existing.get("usage"),
+                            research_id=research_id,
+                            reused=True,
+                            similarity_score=similarity_score,
+                        )
+        except Exception as e:
+            print(f"Error searching similar research: {e}")
+            if research_request.reuse_policy == "force_reuse":
+                return ResearchResponse(
+                    success=False,
+                    error=f"No similar research found and force_reuse policy set: {e}",
+                )
+
+    if research_request.reuse_policy == "force_reuse":
+        return ResearchResponse(
+            success=False,
+            error="No similar research found and force_reuse policy set",
+        )
+
+    result = await rs.conduct_research(
         provider=research_request.provider,
         api_key=research_request.api_key,
         seed_idea=research_request.seed_idea,
@@ -904,18 +1228,188 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
         moral_compass=research_request.moral_compass,
         model=research_request.model,
     )
-    
+
+    if not result.get("success"):
+        return ResearchResponse(
+            success=False,
+            error=result.get("error", "Research failed"),
+        )
+
+    qdrant_point_id = None
+    try:
+        qdrant_point_id = await rms.store_research(
+            research_id="pending",
+            user_id=user_id,
+            query_text=query_text,
+            seed_idea=research_request.seed_idea,
+            target_audience=research_request.target_audience,
+            themes=themes_list,
+            moral_compass=research_request.moral_compass,
+            provider=result.get("provider", ""),
+            model=result.get("model"),
+        )
+    except Exception as e:
+        print(f"Error storing research in Qdrant: {e}")
+
+    research_id = None
+    try:
+        research_id = await supa.store_research_result(
+            user_id=user_id,
+            provider=result.get("provider", ""),
+            model=result.get("model"),
+            seed_idea=research_request.seed_idea,
+            target_audience=research_request.target_audience,
+            themes=themes_list,
+            moral_compass=research_request.moral_compass,
+            content=result.get("content", ""),
+            prompt_context=result.get("prompt_context"),
+            citations=result.get("citations"),
+            search_results=result.get("search_results"),
+            web_searches=result.get("web_searches"),
+            usage=result.get("usage"),
+            project_id=research_request.project_id,
+            qdrant_point_id=qdrant_point_id,
+        )
+
+        if research_id and qdrant_point_id:
+            try:
+                await rms.update_research_id(qdrant_point_id, research_id)
+            except Exception as e:
+                print(f"Error updating Qdrant with research_id: {e}")
+    except Exception as e:
+        print(f"Error storing research in Supabase: {e}")
+
     return ResearchResponse(
-        success=result.get("success", False),
+        success=True,
         provider=result.get("provider"),
         model=result.get("model"),
         content=result.get("content"),
+        prompt_context=result.get("prompt_context"),
         citations=result.get("citations"),
         search_results=result.get("search_results"),
         web_searches=result.get("web_searches"),
         usage=result.get("usage"),
-        error=result.get("error"),
+        research_id=research_id,
+        reused=False,
     )
+
+
+class ResearchHistoryResponse(BaseModel):
+    """Response model for research history."""
+    success: bool
+    research: List[Dict[str, Any]] = []
+    error: Optional[str] = None
+
+
+class SimilarResearchRequest(BaseModel):
+    """Request model for similar research search."""
+    seed_idea: str = Field(..., max_length=MAX_SEED_IDEA_LENGTH)
+    target_audience: str = Field("", max_length=1000)
+    themes: Optional[str] = Field(None, max_length=MAX_THEMES_LENGTH)
+    moral_compass: str = "ambiguous"
+    similarity_threshold: float = Field(0.5, description="Minimum similarity score (0.0-1.0)")
+    limit: int = Field(5, description="Maximum number of results")
+
+
+class SimilarResearchResponse(BaseModel):
+    """Response model for similar research search."""
+    success: bool
+    similar_research: List[Dict[str, Any]] = []
+    error: Optional[str] = None
+
+
+@app.get("/research/history", response_model=ResearchHistoryResponse)
+@limiter.limit("30/minute")
+async def get_research_history(
+    request: Request,
+    project_id: Optional[str] = None,
+    limit: int = 20,
+):
+    """
+    Get research history for the authenticated user.
+
+    Optionally filter by project_id.
+    """
+    user_id, _ = await get_current_user(request)
+
+    _, _, supa = await get_research_services()
+
+    try:
+        research = await supa.get_research_results(
+            user_id=user_id,
+            project_id=project_id,
+            limit=limit,
+        )
+        return ResearchHistoryResponse(success=True, research=research)
+    except Exception as e:
+        return ResearchHistoryResponse(success=False, error=str(e))
+
+
+@app.get("/research/{research_id}", response_model=ResearchResponse)
+@limiter.limit("30/minute")
+async def get_research_by_id(research_id: str, request: Request):
+    """
+    Get a specific research result by ID.
+    """
+    await get_current_user(request)
+
+    _, _, supa = await get_research_services()
+
+    try:
+        research = await supa.get_research_result_by_id(research_id)
+        if not research:
+            return ResearchResponse(success=False, error="Research not found")
+
+        return ResearchResponse(
+            success=True,
+            provider=research.get("provider"),
+            model=research.get("model"),
+            content=research.get("content"),
+            prompt_context=research.get("prompt_context"),
+            citations=research.get("citations"),
+            search_results=research.get("search_results"),
+            web_searches=research.get("web_searches"),
+            usage=research.get("usage"),
+            research_id=research_id,
+            reused=False,
+        )
+    except Exception as e:
+        return ResearchResponse(success=False, error=str(e))
+
+
+@app.post("/research/similar", response_model=SimilarResearchResponse)
+@limiter.limit("10/minute")
+async def search_similar_research(
+    similar_request: SimilarResearchRequest,
+    request: Request,
+):
+    """
+    Search for similar research results using semantic similarity.
+
+    This enables the "Eternal Memory" feature - finding past research
+    that matches the current query before conducting new research.
+    """
+    user_id, _ = await get_current_user(request)
+
+    _, rms, _ = await get_research_services()
+
+    themes_list = []
+    if similar_request.themes:
+        themes_list = [t.strip() for t in similar_request.themes.split(",") if t.strip()]
+
+    query_text = f"{similar_request.seed_idea} | {similar_request.target_audience} | {','.join(themes_list)} | {similar_request.moral_compass}"
+
+    try:
+        similar_results = await rms.search_similar_research(
+            query_text=query_text,
+            user_id=user_id,
+            limit=similar_request.limit,
+            score_threshold=similar_request.similarity_threshold,
+        )
+
+        return SimilarResearchResponse(success=True, similar_research=similar_results)
+    except Exception as e:
+        return SimilarResearchResponse(success=False, error=str(e))
 
 
 @app.post("/models", response_model=ModelsResponse)

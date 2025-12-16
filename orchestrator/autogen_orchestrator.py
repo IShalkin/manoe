@@ -5,11 +5,22 @@ Implements multi-agent narrative generation with real agent communication.
 
 import asyncio
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
+
+# Configure logging for orchestrator
+logger = logging.getLogger("orchestrator")
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+    logger.addHandler(handler)
 
 from autogen_agentchat.agents import AssistantAgent
 
@@ -54,6 +65,40 @@ class GenerationPhase(str, Enum):
     ORIGINALITY_CHECK = "originality_check"
     IMPACT_ASSESSMENT = "impact_assessment"
     POLISH = "polish"
+
+
+# Dynamic max_tokens limits based on phase/task type
+# These are tuned for the expected output size of each phase
+PHASE_MAX_TOKENS = {
+    # High token phases - complex JSON structures or long prose
+    GenerationPhase.OUTLINING: 16384,      # 20+ scenes with detailed info
+    GenerationPhase.DRAFTING: 16384,       # Long prose scenes (2000-3000 words)
+    GenerationPhase.REVISION: 16384,       # Revised scenes can be long
+    GenerationPhase.POLISH: 12288,         # Polished prose
+    
+    # Medium token phases - structured JSON responses
+    GenerationPhase.WORLDBUILDING: 12288,  # Detailed world info
+    GenerationPhase.CHARACTERS: 10240,     # Multiple character profiles
+    GenerationPhase.GENESIS: 8192,         # Narrative possibilities
+    GenerationPhase.IMPACT_ASSESSMENT: 8192,
+    
+    # Lower token phases - shorter responses
+    GenerationPhase.CRITIQUE: 6144,        # Feedback and suggestions
+    GenerationPhase.ORIGINALITY_CHECK: 4096,
+}
+
+DEFAULT_MAX_TOKENS = 8192  # Fallback for unknown phases
+
+
+def get_max_tokens_for_phase(phase: Optional[GenerationPhase]) -> int:
+    """Get appropriate max_tokens limit based on current phase.
+    
+    This provides dynamic token limits based on the expected output size
+    of each phase, rather than hardcoding per-agent limits.
+    """
+    if phase is None:
+        return DEFAULT_MAX_TOKENS
+    return PHASE_MAX_TOKENS.get(phase, DEFAULT_MAX_TOKENS)
 
 
 @dataclass
@@ -102,6 +147,40 @@ def _safe_join(items: List[Any], separator: str = ", ") -> str:
         else:
             result.append(str(item))
     return separator.join(result)
+
+
+def _normalize_dict(value: Any, fallback_key: str = "description") -> Dict[str, Any]:
+    """
+    Normalize a value to a dict, handling cases where LLM returns a string instead of dict.
+    
+    This is a defensive helper to handle schema drift in LLM outputs.
+    
+    Args:
+        value: The value to normalize (could be dict, str, or None)
+        fallback_key: Key to use when wrapping a string value into a dict
+        
+    Returns:
+        A dict (possibly empty if value was None/invalid)
+    """
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        # Try to parse as JSON first (in case it's a serialized dict)
+        if value.strip().startswith("{"):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        # Wrap string in a dict to preserve information
+        logger.warning(f"[_normalize_dict] Expected dict but got string (len={len(value)}), wrapping with key '{fallback_key}'")
+        return {fallback_key: value}
+    # For other types, return empty dict
+    logger.warning(f"[_normalize_dict] Expected dict but got {type(value).__name__}, returning empty dict")
+    return {}
 
 
 class StorytellerGroupChat:
@@ -561,13 +640,74 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
             "to_agent": to_agent,
         })
 
+    def _is_retryable_error(self, error: Exception) -> bool:
+        """Check if an error is retryable (transient network/API errors).
+        
+        Retryable errors include:
+        - Network timeouts and connection errors
+        - HTTP 429 (rate limit), 500, 502, 503, 504 (server errors)
+        - Provider-specific overload/rate limit exceptions
+        
+        Non-retryable errors include:
+        - HTTP 400 (bad request), 401 (auth), 403 (forbidden)
+        - Invalid API key or model errors
+        """
+        error_str = str(error).lower()
+        error_type = type(error).__name__
+        
+        # Check for retryable HTTP status codes in error message
+        retryable_patterns = [
+            "429", "rate limit", "rate_limit", "ratelimit",
+            "500", "502", "503", "504",
+            "timeout", "timed out", "connection",
+            "overloaded", "overload", "capacity",
+            "temporarily unavailable", "service unavailable",
+            "internal server error", "bad gateway", "gateway timeout",
+        ]
+        
+        # Check for non-retryable patterns
+        non_retryable_patterns = [
+            "401", "403", "400",
+            "invalid api key", "invalid_api_key", "authentication",
+            "unauthorized", "forbidden", "invalid model",
+            "model not found", "does not exist",
+        ]
+        
+        # First check if it's explicitly non-retryable
+        for pattern in non_retryable_patterns:
+            if pattern in error_str:
+                return False
+        
+        # Then check if it matches retryable patterns
+        for pattern in retryable_patterns:
+            if pattern in error_str:
+                return True
+        
+        # Check for common exception types
+        retryable_types = ["timeout", "connection", "network", "http"]
+        for rtype in retryable_types:
+            if rtype in error_type.lower():
+                return True
+        
+        return False
+
     async def _call_agent(
         self,
         agent: Dict[str, Any],
         user_message: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
+        max_tokens: Optional[int] = None,
+        max_retries: int = 3,
     ) -> str:
-        """Call an agent and get its response."""
+        """Call an agent and get its response with automatic retry for transient errors.
+        
+        Args:
+            agent: Agent configuration dict
+            user_message: The user message to send
+            conversation_history: Optional conversation history
+            max_tokens: Maximum tokens for response. If None, uses phase-based dynamic limit.
+            max_retries: Maximum number of retry attempts for transient errors (default: 3)
+        """
         # Check pause before every agent call for responsive pause behavior
         await self._check_pause()
 
@@ -580,34 +720,102 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
 
         llm_config = agent["llm_config"]
         provider = self._get_provider_from_config(llm_config)
-        model = llm_config["model"]
+        model = llm_config.get("model", "")
+        
+        # Dynamic max_tokens based on current phase (not agent)
+        # This allows different models to be used for different tasks
+        if max_tokens is None:
+            current_phase = self.state.phase if self.state else None
+            max_tokens = get_max_tokens_for_phase(current_phase)
+        
+        # Log without exposing API key
+        phase_name = self.state.phase.value if self.state and self.state.phase else "unknown"
+        logger.info(f"[_call_agent] Agent: {agent['name']}, Phase: {phase_name}, Provider: {provider}, Model: '{model}', max_tokens: {max_tokens}")
+        logger.info(f"[_call_agent] api_key_present: {'api_key' in llm_config and bool(llm_config.get('api_key'))}")
 
         self._emit_event("agent_start", {
             "agent": agent["name"],
             "phase": self.state.phase.value if self.state else "unknown",
         })
 
-        response = await self.model_client.create_chat_completion(
-            messages=messages,
-            model=model,
-            provider=provider,
-            temperature=0.7,
-            response_format={"type": "json_object"} if "json" in user_message.lower() else None,
-        )
+        # Retry loop with exponential backoff
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    # Exponential backoff: 1s, 3s, 9s (with jitter)
+                    import random
+                    base_delay = 3 ** attempt  # 1, 3, 9
+                    jitter = random.uniform(0, 1)
+                    delay = base_delay + jitter
+                    logger.info(f"[_call_agent] Retry attempt {attempt + 1}/{max_retries} for {agent['name']} after {delay:.1f}s delay")
+                    self._emit_event("agent_retry", {
+                        "agent": agent["name"],
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                        "delay": delay,
+                        "error": str(last_error) if last_error else None,
+                    })
+                    await asyncio.sleep(delay)
+                
+                response = await self.model_client.create_chat_completion(
+                    messages=messages,
+                    model=model,
+                    provider=provider,
+                    temperature=0.7,
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"} if "json" in user_message.lower() else None,
+                )
 
-        self._emit_event("agent_complete", {
-            "agent": agent["name"],
-            "usage": response.usage,
-        })
+                # Log finish_reason to detect truncation
+                logger.info(f"[_call_agent] Agent: {agent['name']}, finish_reason: {response.finish_reason}, usage: {response.usage}")
+                if response.finish_reason in ("length", "max_tokens"):
+                    logger.warning(f"[_call_agent] Agent {agent['name']} response was TRUNCATED (finish_reason={response.finish_reason})")
 
-        # Emit the agent's message for chat visualization
-        self._emit_agent_message(
-            agent_name=agent["name"],
-            message_type="response",
-            content=response.content,
-        )
+                self._emit_event("agent_complete", {
+                    "agent": agent["name"],
+                    "usage": response.usage,
+                    "finish_reason": response.finish_reason,
+                    "attempts": attempt + 1,
+                })
 
-        return response.content
+                # Emit the agent's message for chat visualization
+                self._emit_agent_message(
+                    agent_name=agent["name"],
+                    message_type="response",
+                    content=response.content,
+                )
+
+                return response.content
+                
+            except Exception as e:
+                last_error = e
+                logger.warning(f"[_call_agent] Agent {agent['name']} attempt {attempt + 1}/{max_retries} failed: {e}")
+                
+                # Check if error is retryable
+                if not self._is_retryable_error(e):
+                    logger.error(f"[_call_agent] Non-retryable error for {agent['name']}: {e}")
+                    self._emit_event("agent_failed", {
+                        "agent": agent["name"],
+                        "error": str(e),
+                        "retryable": False,
+                        "attempts": attempt + 1,
+                    })
+                    raise
+                
+                # If this was the last attempt, raise the error
+                if attempt == max_retries - 1:
+                    logger.error(f"[_call_agent] All {max_retries} retry attempts exhausted for {agent['name']}")
+                    self._emit_event("agent_failed", {
+                        "agent": agent["name"],
+                        "error": str(e),
+                        "retryable": True,
+                        "attempts": max_retries,
+                    })
+                    raise
+        
+        # This should never be reached, but just in case
+        raise last_error if last_error else RuntimeError("Unexpected error in _call_agent")
 
     def _get_provider_from_config(self, llm_config: Dict[str, Any]) -> LLMProvider:
         """Determine provider from LLM config."""
@@ -624,30 +832,73 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         return LLMProvider.OPENAI
 
     def _extract_json(self, text: str) -> Optional[Dict]:
-        """Extract JSON from agent response."""
+        """Extract JSON from agent response with robust parsing."""
+        if not text or not text.strip():
+            logger.warning("[_extract_json] Empty text provided")
+            return None
+
+        # Log preview for debugging
+        preview = text[:500] + "..." if len(text) > 500 else text
+        logger.debug(f"[_extract_json] Attempting to parse text (len={len(text)}): {preview}")
+
+        # Method 1: Try direct JSON parse
         try:
-            # Try direct JSON parse
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
+            result = json.loads(text)
+            logger.debug("[_extract_json] Direct JSON parse succeeded")
+            return result
+        except json.JSONDecodeError as e:
+            logger.debug(f"[_extract_json] Direct parse failed: {e}")
 
-        # Try to extract from markdown code block
-        if "```json" in text:
-            try:
-                json_str = text.split("```json")[1].split("```")[0].strip()
-                return json.loads(json_str)
-            except (IndexError, json.JSONDecodeError):
-                pass
+        # Method 2: Try to extract from markdown code block (```json or ```)
+        code_block_patterns = ["```json", "```JSON", "```"]
+        for pattern in code_block_patterns:
+            if pattern in text:
+                try:
+                    # Find the content between the code block markers
+                    parts = text.split(pattern)
+                    if len(parts) >= 2:
+                        json_str = parts[1].split("```")[0].strip()
+                        result = json.loads(json_str)
+                        logger.debug(f"[_extract_json] Code block extraction succeeded with pattern '{pattern}'")
+                        return result
+                except (IndexError, json.JSONDecodeError) as e:
+                    logger.debug(f"[_extract_json] Code block extraction failed for '{pattern}': {e}")
 
-        # Try to find JSON object in text
+        # Method 3: Use json.JSONDecoder().raw_decode to find JSON starting at first { or [
+        for start_char in ["{", "["]:
+            start_idx = text.find(start_char)
+            if start_idx >= 0:
+                try:
+                    decoder = json.JSONDecoder()
+                    result, _ = decoder.raw_decode(text[start_idx:])
+                    logger.debug(f"[_extract_json] raw_decode succeeded starting at '{start_char}' (index {start_idx})")
+                    return result
+                except json.JSONDecodeError as e:
+                    logger.debug(f"[_extract_json] raw_decode failed for '{start_char}': {e}")
+
+        # Method 4: Fallback - try to find balanced braces (for nested JSON)
         try:
             start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                return json.loads(text[start:end])
-        except json.JSONDecodeError:
-            pass
+            if start >= 0:
+                brace_count = 0
+                end = start
+                for i, char in enumerate(text[start:], start):
+                    if char == "{":
+                        brace_count += 1
+                    elif char == "}":
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end = i + 1
+                            break
+                if end > start:
+                    json_str = text[start:end]
+                    result = json.loads(json_str)
+                    logger.debug(f"[_extract_json] Balanced brace extraction succeeded")
+                    return result
+        except json.JSONDecodeError as e:
+            logger.debug(f"[_extract_json] Balanced brace extraction failed: {e}")
 
+        logger.warning(f"[_extract_json] All extraction methods failed for text (len={len(text)})")
         return None
 
     def _parse_agent_message(self, agent_name: str, response: str) -> AgentMessage:
@@ -1317,6 +1568,57 @@ Now create the plot outline as valid JSON.
 
         self.state.outline = strategist_msg.content if isinstance(strategist_msg.content, dict) else None
 
+        # Recovery path: if parsing failed, retry with explicit JSON-only instruction
+        if self.state.outline is None:
+            logger.warning(f"[run_outlining_phase] Initial parsing failed. Content type: {type(strategist_msg.content).__name__}")
+            if isinstance(strategist_msg.content, str):
+                logger.warning(f"[run_outlining_phase] Content preview (first 500 chars): {strategist_msg.content[:500]}")
+
+            # Retry with explicit JSON-only instruction
+            retry_prompt = f"""Your previous response could not be parsed as valid JSON.
+
+Please provide ONLY the outline as a valid JSON object with NO markdown formatting, NO code fences, NO explanatory text.
+
+The JSON must have this structure:
+{{
+  "scenes": [
+    {{
+      "scene_number": 1,
+      "title": "Scene Title",
+      "location": "Location name",
+      "characters": ["Character1", "Character2"],
+      "conflict": "The main conflict in this scene",
+      "emotional_beat": "The emotional tone/beat",
+      "purpose": "What this scene accomplishes",
+      "word_count_target": 2500
+    }}
+  ],
+  "act_structure": {{
+    "act_1": [1, 2, 3],
+    "act_2": [4, 5, 6, 7, 8],
+    "act_3": [9, 10]
+  }}
+}}
+
+Output ONLY the JSON, starting with {{ and ending with }}. No other text."""
+
+            logger.info("[run_outlining_phase] Attempting recovery with JSON-only prompt")
+            retry_response = await self._call_agent(
+                self.strategist,
+                retry_prompt,
+                [{"role": "assistant", "content": strategist_response}],
+            )
+            retry_msg = self._parse_agent_message("Strategist", retry_response)
+            self.state.messages.append(retry_msg)
+
+            if isinstance(retry_msg.content, dict):
+                logger.info("[run_outlining_phase] Recovery succeeded - got valid JSON")
+                self.state.outline = retry_msg.content
+            else:
+                logger.error(f"[run_outlining_phase] Recovery failed. Content type: {type(retry_msg.content).__name__}")
+                if isinstance(retry_msg.content, str):
+                    logger.error(f"[run_outlining_phase] Recovery content preview: {retry_msg.content[:500]}")
+
         self._emit_event("phase_complete", {
             "phase": "outlining",
             "scene_count": len(self.state.outline.get("scenes", [])) if self.state.outline else 0,
@@ -1381,6 +1683,8 @@ Now create the plot outline as valid JSON.
         self.state.current_scene = scene_number
         self.state.revision_count[scene_number] = 0
 
+        logger.info(f"[run_drafting_phase] Starting drafting for scene {scene_number}: {scene.get('title', 'untitled')}")
+        
         self._emit_event("phase_start", {
             "phase": "drafting",
             "scene_number": scene_number,
@@ -1399,7 +1703,7 @@ Now create the plot outline as valid JSON.
             for c in present_characters
         ])
 
-        emotional_beat = scene.get("emotional_beat", {})
+        emotional_beat = _normalize_dict(scene.get("emotional_beat"), fallback_key="initial_state")
 
         # Format memory context if available
         memory_context_str = ""
@@ -2063,14 +2367,15 @@ Make sure your output reflects these requirements.
             for d in dialogue_entries
         ]) if dialogue_entries else "No dialogue entries"
 
-        # Format emotional beat
+        # Format emotional beat (normalize to handle string values)
         emotional_initial = ""
         emotional_climax = ""
         emotional_final = ""
         if emotional_beat:
-            emotional_initial = emotional_beat.get("initial_state", "")
-            emotional_climax = emotional_beat.get("climax", "")
-            emotional_final = emotional_beat.get("final_state", "")
+            normalized_beat = _normalize_dict(emotional_beat, fallback_key="initial_state")
+            emotional_initial = normalized_beat.get("initial_state", "")
+            emotional_climax = normalized_beat.get("climax", "")
+            emotional_final = normalized_beat.get("final_state", "")
 
         originality_prompt = f"""
 ## Scene for Originality Analysis
@@ -2198,14 +2503,15 @@ Analyze this scene for originality. Identify cliches, evaluate trope usage, asse
             for d in dialogue_entries
         ]) if dialogue_entries else "No dialogue entries"
 
-        # Format emotional beat
+        # Format emotional beat (normalize to handle string values)
         emotional_initial = ""
         emotional_climax = ""
         emotional_final = ""
         if emotional_beat:
-            emotional_initial = emotional_beat.get("initial_state", "")
-            emotional_climax = emotional_beat.get("climax", "")
-            emotional_final = emotional_beat.get("final_state", "")
+            normalized_beat = _normalize_dict(emotional_beat, fallback_key="initial_state")
+            emotional_initial = normalized_beat.get("initial_state", "")
+            emotional_climax = normalized_beat.get("climax", "")
+            emotional_final = normalized_beat.get("final_state", "")
 
         impact_prompt = f"""
 ## Scene for Impact Assessment
@@ -2717,6 +3023,13 @@ Output your revised scene as valid JSON with the same structure as the original 
             stance_preference=stance_pref,
         )
 
+        # Build character summary list outside f-string to avoid set literal issue
+        character_summary = [
+            {"name": c.get("name"), "archetype": c.get("archetype"), "role": c.get("role", "supporting")}
+            for c in characters
+        ]
+        character_summary_json = json.dumps(character_summary, indent=2)
+
         user_prompt = f"""
 ## Story Context
 
@@ -2736,7 +3049,7 @@ Output your revised scene as valid JSON with the same structure as the original 
 
 ## All Characters
 
-{json.dumps([{{"name": c.get("name"), "archetype": c.get("archetype"), "role": c.get("role", "supporting")}} for c in characters], indent=2)}
+{character_summary_json}
 
 ---
 
@@ -2744,6 +3057,38 @@ Output your revised scene as valid JSON with the same structure as the original 
 
 Design the narrator for this story as valid JSON.
 """
+
+        # Call the architect agent to design the narrator
+        # Note: We use Architect agent but emit as "Narrator" for UI visibility
+        logger.info("[run_narrator_design] Starting narrator design generation")
+        narrator_response = await self._call_agent(self.architect, user_prompt)
+        
+        # Parse and emit as "Narrator" agent for UI card visibility
+        narrator_msg = self._parse_agent_message("Narrator", narrator_response)
+        self.state.messages.append(narrator_msg)
+        
+        # Emit agent message for UI to show Narrator card
+        self._emit_agent_message("Narrator", "response", narrator_response)
+
+        # Parse narrator design
+        narrator_design = {}
+        if isinstance(narrator_msg.content, dict):
+            narrator_design = narrator_msg.content
+        
+        logger.info(f"[run_narrator_design] Narrator design generated: POV={narrator_design.get('pov', {}).get('type', 'unknown')}")
+
+        self._emit_event("phase_complete", {
+            "phase": "narrator_design",
+            "pov": narrator_design.get("pov", "unknown"),
+        })
+
+        return {
+            "narrator_design": narrator_design,
+            "messages": [
+                {"agent": m.from_agent, "type": m.type}
+                for m in self.state.messages if m.type in ["question", "response"]
+            ],
+        }
 
     # Priority 2: Deepening Checkpoints (Storyteller Section 6.1)
     # =========================================================================
@@ -3238,9 +3583,9 @@ Create the emotional beat sheet as valid JSON.
 **Conflict:** {scene.get("conflict_description", "")}
 
 **Emotional Beat:**
-- Initial: {emotional_beat.get("initial_state", "") if emotional_beat else scene.get("emotional_beat", {}).get("initial_state", "")}
-- Climax: {emotional_beat.get("climax", "") if emotional_beat else scene.get("emotional_beat", {}).get("climax", "")}
-- Final: {emotional_beat.get("final_state", "") if emotional_beat else scene.get("emotional_beat", {}).get("final_state", "")}
+- Initial: {_normalize_dict(emotional_beat if emotional_beat else scene.get("emotional_beat"), fallback_key="initial_state").get("initial_state", "")}
+- Climax: {_normalize_dict(emotional_beat if emotional_beat else scene.get("emotional_beat"), fallback_key="initial_state").get("climax", "")}
+- Final: {_normalize_dict(emotional_beat if emotional_beat else scene.get("emotional_beat"), fallback_key="initial_state").get("final_state", "")}
 
 ## Characters Present
 
@@ -3749,6 +4094,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         change_request: Optional[str] = None,
         supabase_project_id: Optional[str] = None,
         selected_narrative: Optional[Dict[str, Any]] = None,
+        research_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration
@@ -3774,7 +4120,15 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             previous_run_id: Run ID of the previous generation run (for loading existing scenes)
             selected_narrative: Pre-selected narrative possibility from branching UI
                 If provided, skips Genesis phase and uses this narrative directly
+            research_context: Market research context (prompt_context) to inject into agent prompts
+                This is the distilled summary from Eternal Memory research results
         """
+        logger.info(f"[run_full_generation] Starting full generation for run_id={run_id}")
+        logger.info(f"[run_full_generation] Parameters: target_word_count={target_word_count}, estimated_scenes={estimated_scenes}, preferred_structure={preferred_structure}")
+        logger.info(f"[run_full_generation] start_from_phase={start_from_phase}, scenes_to_regenerate={scenes_to_regenerate}")
+        logger.info(f"[run_full_generation] selected_narrative provided: {selected_narrative is not None}")
+        logger.info(f"[run_full_generation] research_context provided: {research_context is not None}")
+        
         results = {
             "project": project.model_dump(),
             "phases": {},
@@ -3782,7 +4136,23 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             "run_id": run_id,
             "regeneration_mode": start_from_phase is not None,
             "scene_regeneration_mode": scenes_to_regenerate is not None and len(scenes_to_regenerate) > 0,
+            "research_context_applied": research_context is not None,
         }
+        
+        # Build research context section for prompt injection
+        # This is injected into relevant phase prompts to guide content creation
+        research_context_section = ""
+        if research_context:
+            research_context_section = f"""
+
+## MARKET RESEARCH GUIDANCE
+
+The following market research has been conducted for this project. Use these insights to guide your creative decisions:
+
+{research_context}
+
+Apply these insights naturally without explicitly referencing "market research" in the narrative.
+"""
 
         # Phase order for determining what to skip/regenerate
         phase_order = ["genesis", "characters", "worldbuilding", "outlining", "advanced_planning", "drafting", "polish"]
@@ -3864,6 +4234,39 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     artifact_type=artifact_type,
                     content=content,
                 )
+
+        # Helper function to store phase status for resume capability
+        async def store_phase_status(
+            phase: str,
+            status: str,
+            error: Optional[str] = None,
+            error_type: Optional[str] = None,
+        ) -> None:
+            """Store phase status artifact for tracking progress and enabling resume.
+            
+            Args:
+                phase: Phase name (genesis, characters, worldbuilding, etc.)
+                status: Status string - "started", "completed", or "failed"
+                error: Error message if status is "failed"
+                error_type: Type of error (retryable, non_retryable)
+            """
+            if persistence_service and run_id and persistence_service.is_connected and supabase_project_id:
+                status_content = {
+                    "status": status,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                if error:
+                    status_content["error"] = error
+                if error_type:
+                    status_content["error_type"] = error_type
+                await persistence_service.store_run_artifact(
+                    project_id=persistence_project_id,
+                    run_id=run_id,
+                    phase=phase,
+                    artifact_type="phase_status",
+                    content=status_content,
+                )
+                logger.info(f"[run_full_generation] Phase '{phase}' status: {status}")
 
         # Helper function to store individual scene artifact
         async def store_scene(scene_number: int, draft: Dict[str, Any], polished: Optional[Dict[str, Any]] = None) -> None:
@@ -3952,8 +4355,28 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         if not genesis_result:
             await self._check_pause()  # Pause checkpoint
-            genesis_result = await self.run_genesis_phase(project)
-            await store_artifact("genesis", "narrative_possibility", genesis_result.get("narrative_possibility", {}))
+            await store_phase_status("genesis", "started")
+            try:
+                # If research context is provided, create a modified project with enriched target_audience
+                if research_context_section:
+                    # Create a copy of the project with research context appended to target_audience
+                    enriched_project = StoryProject(
+                        seed_idea=project.seed_idea,
+                        moral_compass=project.moral_compass,
+                        target_audience=f"{project.target_audience}\n{research_context_section}" if project.target_audience else research_context_section,
+                        theme_core=project.theme_core,
+                        tone_style_references=project.tone_style_references,
+                        custom_moral_system=project.custom_moral_system,
+                    )
+                    genesis_result = await self.run_genesis_phase(enriched_project)
+                else:
+                    genesis_result = await self.run_genesis_phase(project)
+                await store_artifact("genesis", "narrative_possibility", genesis_result.get("narrative_possibility", {}))
+                await store_phase_status("genesis", "completed")
+            except Exception as e:
+                error_type = "retryable" if self._is_retryable_error(e) else "non_retryable"
+                await store_phase_status("genesis", "failed", error=str(e), error_type=error_type)
+                raise
 
         # Set max_revisions in state AFTER genesis phase creates it
         if self.state:
@@ -3961,6 +4384,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         results["phases"]["genesis"] = genesis_result
 
         if not genesis_result.get("narrative_possibility"):
+            await store_phase_status("genesis", "failed", error="No narrative_possibility returned")
             return {"error": "Genesis phase failed", **results}
 
         # Phase 2: Characters
@@ -3988,13 +4412,20 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         if not characters_result:
             await self._check_pause()  # Pause checkpoint
-            characters_result = await self.run_characters_phase(
-                narrative=genesis_result["narrative_possibility"],
-                moral_compass=project.moral_compass.value,
-                target_audience=project.target_audience,
-                change_request=change_request,
-            )
-            await store_artifact("characters", "characters", {"characters": characters_result.get("characters", [])})
+            await store_phase_status("characters", "started")
+            try:
+                characters_result = await self.run_characters_phase(
+                    narrative=genesis_result["narrative_possibility"],
+                    moral_compass=project.moral_compass.value,
+                    target_audience=project.target_audience,
+                    change_request=change_request,
+                )
+                await store_artifact("characters", "characters", {"characters": characters_result.get("characters", [])})
+                await store_phase_status("characters", "completed")
+            except Exception as e:
+                error_type = "retryable" if self._is_retryable_error(e) else "non_retryable"
+                await store_phase_status("characters", "failed", error=str(e), error_type=error_type)
+                raise
 
         results["phases"]["characters"] = characters_result
 
@@ -4092,25 +4523,38 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         if not outlining_result:
             await self._check_pause()  # Pause checkpoint
-            outlining_result = await self.run_outlining_phase(
-                narrative=genesis_result["narrative_possibility"],
-                characters=characters_result["characters"],
-                moral_compass=project.moral_compass.value,
-                target_word_count=target_word_count,
-                estimated_scenes=estimated_scenes,
-                preferred_structure=preferred_structure,
-                worldbuilding=worldbuilding,
-                change_request=change_request,
-            )
-            await store_artifact("outlining", "outline", outlining_result.get("outline", {}))
+            await store_phase_status("outlining", "started")
+            try:
+                outlining_result = await self.run_outlining_phase(
+                    narrative=genesis_result["narrative_possibility"],
+                    characters=characters_result["characters"],
+                    moral_compass=project.moral_compass.value,
+                    target_word_count=target_word_count,
+                    estimated_scenes=estimated_scenes,
+                    preferred_structure=preferred_structure,
+                    worldbuilding=worldbuilding,
+                    change_request=change_request,
+                )
+                await store_artifact("outlining", "outline", outlining_result.get("outline", {}))
+                await store_phase_status("outlining", "completed")
+            except Exception as e:
+                error_type = "retryable" if self._is_retryable_error(e) else "non_retryable"
+                await store_phase_status("outlining", "failed", error=str(e), error_type=error_type)
+                raise
 
         results["phases"]["outlining"] = outlining_result
 
         if not outlining_result.get("outline"):
+            logger.error("[run_full_generation] Outlining phase failed - no outline returned")
+            await store_phase_status("outlining", "failed", error="No outline returned")
             return {"error": "Outlining phase failed", **results}
 
         outline = outlining_result["outline"]
         scenes = outline.get("scenes", [])
+        logger.info(f"[run_full_generation] Outlining complete. Outline keys: {list(outline.keys()) if isinstance(outline, dict) else 'not a dict'}")
+        logger.info(f"[run_full_generation] Number of scenes extracted: {len(scenes)}")
+        if scenes:
+            logger.info(f"[run_full_generation] First scene: {scenes[0].get('title', 'no title') if isinstance(scenes[0], dict) else scenes[0]}")
 
         # Phase 4.5: Motif Layer Planning (Symbolic/Motif Bible)
         motif_layer_result = None
@@ -4160,16 +4604,23 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         complexity_checklist = advanced_planning_result.get("complexity_checklist", {})
 
         # Phase 6: Drafting (all scenes or selective regeneration)
+        logger.info(f"[run_full_generation] === ENTERING DRAFTING PHASE ===")
+        logger.info(f"[run_full_generation] Total scenes to draft: {len(scenes)}")
+        logger.info(f"[run_full_generation] should_skip_phase('drafting'): {should_skip_phase('drafting')}")
+        logger.info(f"[run_full_generation] scene_regen_mode: {scene_regen_mode}")
+        
         drafts = []
         previous_drafts = None
 
         # Get previous drafts for scene-level regeneration or phase skip
         if should_skip_phase("drafting") or scene_regen_mode:
             previous_drafts = get_previous_artifact("drafting", "drafts")
+            logger.info(f"[run_full_generation] previous_drafts loaded: {previous_drafts is not None}")
             if previous_drafts and should_skip_phase("drafting") and not scene_regen_mode:
                 drafts = previous_drafts.get("scenes", [])
                 results["phases"]["drafting"] = {"scenes": drafts}
                 self._emit_event("phase_skipped", {"phase": "drafting", "reason": "using_previous_artifact"})
+                logger.info(f"[run_full_generation] Drafting phase SKIPPED - using previous artifact")
 
         # Helper to get continuity context from adjacent scenes
         def get_continuity_context(scene_index: int, all_drafts: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -4191,7 +4642,12 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
             return context
 
-        if not (should_skip_phase("drafting") and not scene_regen_mode):
+        drafting_condition = not (should_skip_phase("drafting") and not scene_regen_mode)
+        logger.info(f"[run_full_generation] Will enter drafting loop: {drafting_condition}")
+        logger.info(f"[run_full_generation] Condition breakdown: should_skip_phase('drafting')={should_skip_phase('drafting')}, scene_regen_mode={scene_regen_mode}")
+        
+        if drafting_condition:
+            logger.info(f"[run_full_generation] === STARTING DRAFTING LOOP for {len(scenes)} scenes ===")
             # Initialize drafts list with previous drafts if in scene regen mode
             if scene_regen_mode and previous_drafts:
                 drafts = previous_drafts.get("scenes", [])
@@ -4202,6 +4658,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             previous_summary = "N/A"
             for i, scene in enumerate(scenes):
                 scene_number = i + 1
+                logger.info(f"[run_full_generation] Processing scene {scene_number}/{len(scenes)}: {scene.get('title', 'untitled')}")
 
                 # Check if this scene should be regenerated or kept
                 if scene_regen_mode and scenes_to_regenerate and scene_number not in scenes_to_regenerate:
@@ -4262,7 +4719,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
                 # Generate per-scene Sensory Blueprint
                 # This plans specific sensory details before drafting for richer prose
-                emotional_beat = scene.get("emotional_beat", {})
+                emotional_beat = _normalize_dict(scene.get("emotional_beat"), fallback_key="initial_state")
                 # Try to get emotional beat from the emotional_beat_sheet if available
                 if emotional_beat_sheet and emotional_beat_sheet.get("scene_beats"):
                     scene_beats = emotional_beat_sheet.get("scene_beats", [])
@@ -4306,7 +4763,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 # Quality Gate with retry logic (per scene)
                 quality_enforcement_result = None
                 if draft_result.get("draft"):
-                    emotional_beat = scene.get("emotional_beat", {})
+                    emotional_beat = _normalize_dict(scene.get("emotional_beat"), fallback_key="initial_state")
                     quality_enforcement_result = await self.enforce_quality_for_scene(
                         scene_number=scene_number,
                         draft=draft_result["draft"],
@@ -4342,12 +4799,12 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
                     # Store checkpoint result as artifact
                     if persistence_service and run_id and persistence_service.is_connected:
-                        await persistence_service.store_artifact(
+                        await persistence_service.store_run_artifact(
+                            project_id=supabase_project_id,
                             run_id=run_id,
                             phase=f"checkpoint_{checkpoint_type}",
                             artifact_type="checkpoint_evaluation",
                             content=checkpoint_result,
-                            project_id=supabase_project_id,
                         )
 
                 # Update or append draft result
@@ -4447,4 +4904,9 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         results["phases"]["polish"] = {"scenes": polished_drafts}
 
+        logger.info(f"[run_full_generation] === GENERATION COMPLETE ===")
+        logger.info(f"[run_full_generation] Total drafts: {len(drafts)}")
+        logger.info(f"[run_full_generation] Total polished: {len(polished_drafts)}")
+        logger.info(f"[run_full_generation] Phases completed: {list(results['phases'].keys())}")
+        
         return results

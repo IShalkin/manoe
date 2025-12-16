@@ -63,12 +63,13 @@ flowchart TB
 
 ## Generation Workflow
 
-MANOE implements a **7-phase narrative generation workflow**:
+MANOE implements an **8-phase narrative generation workflow**:
 
 ```mermaid
 flowchart LR
     G[Genesis] --> C[Characters]
-    C --> W[Worldbuilding]
+    C --> N[Narrator Design]
+    N --> W[Worldbuilding]
     W --> O[Outlining]
     O --> AP[Advanced Planning]
     AP --> D[Drafting]
@@ -80,6 +81,9 @@ The Genesis agent accepts a "Seed Idea" from the user (What If? questions, image
 
 ### Phase 2: Characters (Profiler Agent)
 The Profiler assigns archetypes (Hero, Shadow, Trickster) to characters and generates "Core Psychological Wound" and "Inner Trap" for protagonists. Character attributes are stored as vectors in Qdrant for consistency across the narrative.
+
+### Phase 2.5: Narrator Design
+The Narrator Design phase generates the narrative voice configuration including POV type (first person, third person limited/omniscient), tense, voice characteristics, and style guidelines. This artifact is used by the Writer agent during the Drafting phase to maintain consistent narrative voice.
 
 ### Phase 3: Worldbuilding
 The Worldbuilder creates detailed world elements including locations, cultures, rules, and atmosphere. These elements are stored in Qdrant vector memory for retrieval during scene writing.
@@ -117,6 +121,34 @@ The system uses Qdrant vector database to maintain narrative consistency:
 ### Artifact Persistence
 
 All generation artifacts are stored in Supabase for resuming interrupted generations, phase-based selective regeneration, scene-level selective regeneration, and project history/versioning.
+
+### Marketing Research Integration
+
+MANOE includes an optional **Marketing Researcher** feature that uses AI-powered deep research to analyze your target audience before generation begins. This helps create more targeted and resonant narratives.
+
+**Supported Research Providers:**
+- **Perplexity** (sonar-deep-research model) - Fast, comprehensive web research
+- **OpenAI Deep Research** (Responses API with background mode) - In-depth analysis taking 5-15 minutes
+
+**Features:**
+- **BYOK (Bring Your Own Key)** - Add your Perplexity or OpenAI API key in Settings > Research
+- **Eternal Memory** - Research results are stored in Supabase and vectorized in Qdrant for reuse across projects
+- **Semantic Similarity Search** - Before conducting new research, the system checks for similar existing research (>50% similarity threshold) to save costs
+- **Prompt Context Injection** - Research insights are automatically injected into Genesis and Characters agent prompts
+
+**How to Use:**
+1. Add your Perplexity or OpenAI API key in Settings > Research tab
+2. On the project creation page, click the "Research" button next to Target Audience
+3. Select your preferred provider and click "Start Research"
+4. View research history in Settings > Research History
+
+### State Recovery & Retry Mechanism
+
+MANOE includes robust error handling for long-running generations:
+
+- **Automatic Retry** - Transient errors (429 rate limits, 5xx server errors, timeouts) are automatically retried with exponential backoff (up to 3 attempts)
+- **Phase Checkpointing** - Each completed phase is saved to Supabase, allowing resume from the last successful phase
+- **Graceful Interruption Handling** - If the orchestrator restarts during generation, the frontend receives a clear error message with resume information instead of hanging
 
 ### Multi-Provider LLM Support (BYOK)
 
@@ -222,7 +254,9 @@ manoe/
 │   │   ├── supabase_persistence.py  # Artifact storage
 │   │   ├── qdrant_memory.py         # Vector memory
 │   │   ├── redis_streams.py         # SSE event streaming
-│   │   └── model_client.py          # Multi-provider LLM client
+│   │   ├── model_client.py          # Multi-provider LLM client
+│   │   ├── research_service.py      # Perplexity & OpenAI Deep Research integration
+│   │   └── research_memory.py       # Research vector memory for "Eternal Memory"
 │   ├── autogen_orchestrator.py      # Main orchestrator with phase functions
 │   ├── multi_agent_worker.py        # API endpoints and SSE streaming
 │   └── pyproject.toml
@@ -240,6 +274,7 @@ The following tables are used for persistence:
 |-------|-------------|
 | **projects** | User projects with seed_idea, settings, moral_compass |
 | **run_artifacts** | Phase artifacts (project_id UUID FK, run_id, phase, artifact_type, content JSONB) |
+| **research_results** | Marketing research results with prompt_context for AI injection, citations, and Qdrant point_id for semantic search |
 | **characters** | Generated character profiles |
 | **worldbuilding** | World elements and settings |
 | **outlines** | Plot outlines with scene breakdowns |
@@ -256,9 +291,14 @@ The following tables are used for persistence:
 | `/generate` | POST | Start multi-agent generation |
 | `/runs/{run_id}/events` | GET | SSE stream for real-time events |
 | `/runs/{run_id}/messages` | GET | Get all agent messages for a run |
+| `/runs/{run_id}/state` | GET | Get run state for recovery after interruption |
 | `/runs/{run_id}/cancel` | POST | Cancel a running generation |
 | `/runs/{run_id}/pause` | POST | Pause a running generation |
 | `/runs/{run_id}/resume` | POST | Resume a paused generation |
+| `/research` | POST | Conduct market research (Perplexity or OpenAI Deep Research) |
+| `/research/history` | GET | Get user's research history |
+| `/research/{research_id}` | GET | Get specific research result |
+| `/research/similar` | POST | Search for similar existing research |
 
 ### Generate Request Body
 
