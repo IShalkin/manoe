@@ -290,6 +290,11 @@ class MultiAgentWorker:
             }
 
         except Exception as e:
+            # Log full traceback for debugging
+            import traceback
+            error_traceback = traceback.format_exc()
+            print(f"Generation error for run {run_id}:\n{error_traceback}")
+            
             # Publish error event
             await self.redis_streams.publish_event(
                 run_id,
@@ -298,6 +303,7 @@ class MultiAgentWorker:
                     "run_id": run_id,
                     "status": "error",
                     "error": str(e),
+                    "traceback": error_traceback,
                 }
             )
             return {
@@ -423,6 +429,11 @@ class MultiAgentWorker:
             }
 
         except Exception as e:
+            # Log full traceback for debugging
+            import traceback
+            error_traceback = traceback.format_exc()
+            print(f"Narrative possibilities error for run {run_id}:\n{error_traceback}")
+            
             # Publish error event
             await self.redis_streams.publish_event(
                 run_id,
@@ -431,6 +442,7 @@ class MultiAgentWorker:
                     "run_id": run_id,
                     "status": "error",
                     "error": str(e),
+                    "traceback": error_traceback,
                 }
             )
             return {
