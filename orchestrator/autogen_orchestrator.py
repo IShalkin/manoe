@@ -4595,12 +4595,12 @@ Apply these insights naturally without explicitly referencing "market research" 
 
                     # Store checkpoint result as artifact
                     if persistence_service and run_id and persistence_service.is_connected:
-                        await persistence_service.store_artifact(
+                        await persistence_service.store_run_artifact(
+                            project_id=supabase_project_id,
                             run_id=run_id,
                             phase=f"checkpoint_{checkpoint_type}",
                             artifact_type="checkpoint_evaluation",
                             content=checkpoint_result,
-                            project_id=supabase_project_id,
                         )
 
                 # Update or append draft result
