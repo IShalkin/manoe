@@ -149,6 +149,40 @@ def _safe_join(items: List[Any], separator: str = ", ") -> str:
     return separator.join(result)
 
 
+def _normalize_dict(value: Any, fallback_key: str = "description") -> Dict[str, Any]:
+    """
+    Normalize a value to a dict, handling cases where LLM returns a string instead of dict.
+    
+    This is a defensive helper to handle schema drift in LLM outputs.
+    
+    Args:
+        value: The value to normalize (could be dict, str, or None)
+        fallback_key: Key to use when wrapping a string value into a dict
+        
+    Returns:
+        A dict (possibly empty if value was None/invalid)
+    """
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        # Try to parse as JSON first (in case it's a serialized dict)
+        if value.strip().startswith("{"):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        # Wrap string in a dict to preserve information
+        logger.warning(f"[_normalize_dict] Expected dict but got string (len={len(value)}), wrapping with key '{fallback_key}'")
+        return {fallback_key: value}
+    # For other types, return empty dict
+    logger.warning(f"[_normalize_dict] Expected dict but got {type(value).__name__}, returning empty dict")
+    return {}
+
+
 class StorytellerGroupChat:
     """
     AutoGen-based multi-agent group chat for narrative generation.
@@ -1669,7 +1703,7 @@ Output ONLY the JSON, starting with {{ and ending with }}. No other text."""
             for c in present_characters
         ])
 
-        emotional_beat = scene.get("emotional_beat", {})
+        emotional_beat = _normalize_dict(scene.get("emotional_beat"), fallback_key="initial_state")
 
         # Format memory context if available
         memory_context_str = ""
@@ -4674,7 +4708,7 @@ Apply these insights naturally without explicitly referencing "market research" 
 
                 # Generate per-scene Sensory Blueprint
                 # This plans specific sensory details before drafting for richer prose
-                emotional_beat = scene.get("emotional_beat", {})
+                emotional_beat = _normalize_dict(scene.get("emotional_beat"), fallback_key="initial_state")
                 # Try to get emotional beat from the emotional_beat_sheet if available
                 if emotional_beat_sheet and emotional_beat_sheet.get("scene_beats"):
                     scene_beats = emotional_beat_sheet.get("scene_beats", [])
@@ -4718,7 +4752,7 @@ Apply these insights naturally without explicitly referencing "market research" 
                 # Quality Gate with retry logic (per scene)
                 quality_enforcement_result = None
                 if draft_result.get("draft"):
-                    emotional_beat = scene.get("emotional_beat", {})
+                    emotional_beat = _normalize_dict(scene.get("emotional_beat"), fallback_key="initial_state")
                     quality_enforcement_result = await self.enforce_quality_for_scene(
                         scene_number=scene_number,
                         draft=draft_result["draft"],
