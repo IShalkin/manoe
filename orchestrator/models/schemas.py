@@ -545,3 +545,207 @@ class JobPayload(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     retry_count: int = 0
     max_retries: int = 3
+
+
+# ============================================================================
+# Output Format Models (PDF Section 8.2)
+# ============================================================================
+
+class OutputFormat(str, Enum):
+    """Output format options for story generation."""
+    SHORT_STORY = "short_story"
+    NOVEL_CHAPTER = "novel_chapter"
+    SCREENPLAY = "screenplay"
+    NOVELLA = "novella"
+
+
+class OutputFormatConfig(BaseModel):
+    """Configuration for output format."""
+    format: OutputFormat = Field(default=OutputFormat.SHORT_STORY)
+    target_word_count: Optional[int] = Field(
+        default=None,
+        description="Target word count for the output"
+    )
+    scene_count: Optional[int] = Field(
+        default=None,
+        description="Target number of scenes"
+    )
+
+
+# ============================================================================
+# Reader Sensibilities Models (PDF Section 1.3)
+# ============================================================================
+
+class ContentSensitivity(str, Enum):
+    """Content sensitivity levels."""
+    NONE = "none"
+    MILD = "mild"
+    MODERATE = "moderate"
+    EXPLICIT = "explicit"
+
+
+class ReaderSensibilities(BaseModel):
+    """
+    Reader sensibilities and content warnings configuration.
+    Based on Storyteller framework Section 1.3.
+    """
+    violence: ContentSensitivity = Field(
+        default=ContentSensitivity.MODERATE,
+        description="Violence content level"
+    )
+    sexual_content: ContentSensitivity = Field(
+        default=ContentSensitivity.MILD,
+        description="Sexual content level"
+    )
+    profanity: ContentSensitivity = Field(
+        default=ContentSensitivity.MODERATE,
+        description="Profanity/language level"
+    )
+    drug_use: ContentSensitivity = Field(
+        default=ContentSensitivity.MILD,
+        description="Drug/substance use content level"
+    )
+    dark_themes: ContentSensitivity = Field(
+        default=ContentSensitivity.MODERATE,
+        description="Dark themes (death, trauma, etc.) level"
+    )
+    trigger_warnings: List[str] = Field(
+        default_factory=list,
+        description="Specific content warnings to include"
+    )
+
+
+# ============================================================================
+# Character Relationship Models
+# ============================================================================
+
+class RelationshipType(str, Enum):
+    """Types of character relationships."""
+    ALLY = "ally"
+    ENEMY = "enemy"
+    RIVAL = "rival"
+    MENTOR = "mentor"
+    PROTEGE = "protege"
+    LOVER = "lover"
+    FAMILY = "family"
+    NEUTRAL = "neutral"
+    COMPLEX = "complex"
+
+
+class CharacterRelationship(BaseModel):
+    """
+    Relationship between two characters.
+    Used for character relationship mapping visualization.
+    """
+    source_character: str = Field(..., description="Name of the source character")
+    target_character: str = Field(..., description="Name of the target character")
+    relationship_type: RelationshipType = Field(..., description="Type of relationship")
+    description: str = Field(..., description="Description of the relationship")
+    dynamics: Optional[str] = Field(
+        default=None,
+        description="How the relationship evolves or creates tension"
+    )
+    tension_level: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Tension level in the relationship (1-10)"
+    )
+
+
+class CharacterRelationshipMap(BaseModel):
+    """Complete character relationship map for a story."""
+    project_id: str
+    characters: List[str] = Field(..., description="List of character names")
+    relationships: List[CharacterRelationship] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ============================================================================
+# Motif Layer Models (PDF Section 3.5.2)
+# ============================================================================
+
+class SymbolEntry(BaseModel):
+    """A symbolic element in the story."""
+    symbol: str = Field(..., description="The symbol or motif")
+    meaning: str = Field(..., description="What the symbol represents")
+    first_appearance: Optional[str] = Field(
+        default=None,
+        description="Scene or context of first appearance"
+    )
+    evolution: Optional[str] = Field(
+        default=None,
+        description="How the symbol evolves through the story"
+    )
+
+
+class CharacterMotif(BaseModel):
+    """Motif associated with a specific character."""
+    character_name: str
+    motifs: List[str] = Field(default_factory=list)
+    visual_metaphors: List[str] = Field(default_factory=list)
+
+
+class SceneMotifTarget(BaseModel):
+    """Motif targets for a specific scene."""
+    scene_number: int
+    scene_title: Optional[str] = None
+    motifs_to_include: List[str] = Field(default_factory=list)
+    symbolic_actions: List[str] = Field(default_factory=list)
+
+
+class MotifBible(BaseModel):
+    """
+    Complete motif bible for symbolic/thematic consistency.
+    Based on Storyteller framework Section 3.5.2.
+    """
+    project_id: str
+    core_symbols: List[SymbolEntry] = Field(
+        default_factory=list,
+        description="Primary symbols that recur throughout the story"
+    )
+    visual_metaphors: List[str] = Field(
+        default_factory=list,
+        description="Visual metaphors used in the narrative"
+    )
+    character_motifs: List[CharacterMotif] = Field(
+        default_factory=list,
+        description="Motifs associated with each character"
+    )
+    structural_motifs: List[str] = Field(
+        default_factory=list,
+        description="Motifs tied to story structure (beginning, middle, end)"
+    )
+    scene_targets: List[SceneMotifTarget] = Field(
+        default_factory=list,
+        description="Per-scene motif targets for the Writer"
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ============================================================================
+# Deepening Checkpoint Models (PDF Section 6.1)
+# ============================================================================
+
+class CheckpointCriterion(BaseModel):
+    """Individual criterion for a deepening checkpoint."""
+    name: str
+    score: int = Field(..., ge=1, le=10)
+    feedback: str
+
+
+class DeepeningCheckpointResult(BaseModel):
+    """
+    Result of a deepening checkpoint evaluation.
+    Based on Storyteller framework Section 6.1.
+    """
+    checkpoint_type: str = Field(
+        ...,
+        description="Type of checkpoint (inciting_incident, midpoint, climax, resolution)"
+    )
+    scene_number: int
+    overall_score: float = Field(..., ge=1.0, le=10.0)
+    passed: bool
+    criteria: List[CheckpointCriterion] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
+    evaluated_at: datetime = Field(default_factory=datetime.utcnow)

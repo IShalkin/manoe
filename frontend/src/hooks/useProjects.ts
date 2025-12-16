@@ -9,6 +9,8 @@ export interface StoredProject {
   moralCompass: string;
   targetAudience: string;
   themes: string;
+  outputFormat: string | null;
+  readerSensibilities: Record<string, unknown> | null;
   runId: string | null;
   status: 'pending' | 'generating' | 'completed' | 'error';
   result: ProjectResult | null;
@@ -52,6 +54,8 @@ interface DbProject {
   moral_compass: string;
   target_audience: string | null;
   themes: string | null;
+  output_format: string | null;
+  reader_sensibilities: Record<string, unknown> | null;
   run_id: string | null;
   status: string;
   result: ProjectResult | null;
@@ -67,6 +71,8 @@ function dbToStoredProject(db: DbProject): StoredProject {
     moralCompass: db.moral_compass,
     targetAudience: db.target_audience || '',
     themes: db.themes || '',
+    outputFormat: db.output_format,
+    readerSensibilities: db.reader_sensibilities,
     runId: db.run_id,
     status: db.status as StoredProject['status'],
     result: db.result,
@@ -192,6 +198,8 @@ export function useProjects() {
     moralCompass: string;
     targetAudience: string;
     themes: string;
+    outputFormat?: string;
+    readerSensibilities?: Record<string, unknown>;
   }): Promise<StoredProject> => {
     if (!user) {
       throw new Error('User must be logged in to create a project');
@@ -206,6 +214,8 @@ export function useProjects() {
         moral_compass: data.moralCompass,
         target_audience: data.targetAudience || null,
         themes: data.themes || null,
+        output_format: data.outputFormat || null,
+        reader_sensibilities: data.readerSensibilities || null,
         status: 'pending',
       })
       .select()
@@ -235,6 +245,8 @@ export function useProjects() {
     if (updates.moralCompass !== undefined) dbUpdates.moral_compass = updates.moralCompass;
     if (updates.targetAudience !== undefined) dbUpdates.target_audience = updates.targetAudience || null;
     if (updates.themes !== undefined) dbUpdates.themes = updates.themes || null;
+    if (updates.outputFormat !== undefined) dbUpdates.output_format = updates.outputFormat || null;
+    if (updates.readerSensibilities !== undefined) dbUpdates.reader_sensibilities = updates.readerSensibilities || null;
     if (updates.runId !== undefined) dbUpdates.run_id = updates.runId;
     if (updates.status !== undefined) dbUpdates.status = updates.status;
     if (updates.result !== undefined) dbUpdates.result = updates.result;

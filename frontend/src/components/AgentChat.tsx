@@ -451,17 +451,19 @@ const AGENT_DEPENDENCIES: Record<AgentName, AgentName[]> = {
   Critic: ['Writer', 'Critic'],
 };
 
+// Phase taxonomy mapping - aligned with backend orchestrator phases
+// Backend phases: genesis → characters → worldbuilding → outlining → motif_layer → advanced_planning → drafting → polish
 const AGENT_TO_PHASE: Record<string, string> = {
   'Architect': 'Genesis',
   'Profiler': 'Characters',
   'Worldbuilder': 'Worldbuilding',
   'Strategist': 'Outlining',
   'Writer': 'Drafting',
-  'Critic': 'Polish',
-  'Polish': 'Polish',
+  'Critic': 'Drafting', // Critic is part of Writer↔Critic drafting loop, not a separate polish phase
 };
 
-const PHASE_ORDER = ['Genesis', 'Characters', 'Worldbuilding', 'Outlining', 'Advanced Planning', 'Drafting', 'Polish'];
+// Phase order matching backend orchestrator flow
+const PHASE_ORDER = ['Genesis', 'Characters', 'Worldbuilding', 'Outlining', 'Motif Layer', 'Advanced Planning', 'Drafting', 'Polish'];
 
 const getPhasesToRegenerate = (editedAgent: string): string[] => {
   const startPhase = AGENT_TO_PHASE[editedAgent] || 'Genesis';
