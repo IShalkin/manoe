@@ -611,6 +611,36 @@ async def generate(gen_request: GenerateRequest, request: Request):
     # Capitalize moral_compass to match enum values (Ethical, Unethical, Amoral, Ambiguous, UserDefined)
     moral_compass_capitalized = gen_request.moral_compass.capitalize() if gen_request.moral_compass else "Ambiguous"
 
+    # Auto-load research context from Eternal Memory (Qdrant) if not explicitly provided
+    research_context = gen_request.research_context
+    if not research_context:
+        try:
+            _, rms, supa = await get_research_services()
+            
+            # Build query text from project parameters
+            themes_list = [t.strip() for t in gen_request.themes.split(",") if t.strip()] if gen_request.themes else []
+            query_text = f"{gen_request.seed_idea} | {gen_request.target_audience or ''} | {','.join(themes_list)} | {gen_request.moral_compass}"
+            
+            # Search for similar research in Qdrant
+            similar_results = await rms.search_similar_research(
+                query_text=query_text,
+                user_id=user_id,
+                limit=1,
+                score_threshold=0.7,  # Only use highly relevant research
+            )
+            
+            if similar_results:
+                research_id = similar_results[0].get("payload", {}).get("research_id")
+                if research_id:
+                    # Fetch full research content from Supabase
+                    existing = await supa.get_research_result_by_id(research_id)
+                    if existing and existing.get("prompt_context"):
+                        research_context = existing.get("prompt_context")
+                        print(f"[generate] Auto-loaded research context from Eternal Memory (research_id={research_id}, score={similar_results[0].get('score', 0):.2f})")
+        except Exception as e:
+            print(f"[generate] Failed to auto-load research context: {e}")
+            # Continue without research context - this is not a fatal error
+
     project_data = {
         "seed_idea": gen_request.seed_idea,
         "moral_compass": moral_compass_capitalized,
@@ -679,7 +709,7 @@ async def generate(gen_request: GenerateRequest, request: Request):
         scenes_to_regenerate=gen_request.scenes_to_regenerate,
         supabase_project_id=gen_request.supabase_project_id,
         selected_narrative=gen_request.selected_narrative,
-        research_context=gen_request.research_context,
+        research_context=research_context,
     ))
 
     # Track active run for cancellation support
