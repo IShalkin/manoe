@@ -732,3 +732,159 @@ class SupabasePersistenceService:
         except Exception as e:
             print(f"Failed to delete scene artifacts: {e}")
             return False
+
+    async def store_research_result(
+        self,
+        user_id: Optional[str],
+        provider: str,
+        model: Optional[str],
+        seed_idea: str,
+        target_audience: Optional[str],
+        themes: List[str],
+        moral_compass: str,
+        content: str,
+        prompt_context: Optional[str] = None,
+        citations: Optional[List[Dict[str, Any]]] = None,
+        search_results: Optional[List[Dict[str, Any]]] = None,
+        web_searches: Optional[List[Dict[str, Any]]] = None,
+        usage: Optional[Dict[str, Any]] = None,
+        project_id: Optional[str] = None,
+        qdrant_point_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Store a research result for Eternal Memory / reuse.
+        
+        Args:
+            user_id: UUID of the user (optional)
+            provider: Research provider (perplexity, openai_deep_research)
+            model: Model used for research
+            seed_idea: The seed idea that was researched
+            target_audience: Target audience description
+            themes: List of themes
+            moral_compass: Moral compass setting
+            content: Research content/report (full)
+            prompt_context: Distilled summary for prompt injection (~1500 tokens)
+            citations: List of citations from the research
+            search_results: Search results from Perplexity
+            web_searches: Web searches from OpenAI
+            usage: Token usage information
+            project_id: UUID of the associated project (optional)
+            qdrant_point_id: Reference to vector in Qdrant for similarity search
+            
+        Returns:
+            Created research result ID or None
+        """
+        if not self.is_connected:
+            return None
+            
+        try:
+            data = {
+                "provider": provider,
+                "model": model,
+                "seed_idea": seed_idea,
+                "target_audience": target_audience,
+                "themes": themes,
+                "moral_compass": moral_compass,
+                "content": content,
+                "prompt_context": prompt_context,
+                "citations": citations,
+                "search_results": search_results,
+                "web_searches": web_searches,
+                "usage": usage,
+                "qdrant_point_id": qdrant_point_id,
+            }
+            
+            if user_id:
+                data["user_id"] = user_id
+            if project_id:
+                data["project_id"] = project_id
+            
+            result = self.client.table("research_results").insert(data).execute()
+            if result.data:
+                return result.data[0]["id"]
+        except Exception as e:
+            print(f"Failed to store research result: {e}")
+            
+        return None
+
+    async def get_research_results(
+        self,
+        user_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get research results for a user or project.
+        
+        Args:
+            user_id: UUID of the user (optional)
+            project_id: UUID of the project (optional)
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of research result dictionaries
+        """
+        if not self.is_connected:
+            return []
+            
+        try:
+            query = self.client.table("research_results").select("*")
+            
+            if user_id:
+                query = query.eq("user_id", user_id)
+            if project_id:
+                query = query.eq("project_id", project_id)
+            
+            result = query.order("created_at", desc=True).limit(limit).execute()
+            return result.data or []
+        except Exception as e:
+            print(f"Failed to get research results: {e}")
+            return []
+
+    async def get_research_result_by_id(self, research_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a specific research result by ID.
+        
+        Args:
+            research_id: UUID of the research result
+            
+        Returns:
+            Research result dictionary or None
+        """
+        if not self.is_connected:
+            return None
+            
+        try:
+            result = self.client.table("research_results").select("*").eq("id", research_id).single().execute()
+            return result.data
+        except Exception as e:
+            print(f"Failed to get research result: {e}")
+            return None
+
+    async def search_similar_research(
+        self,
+        seed_idea: str,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for similar research results using full-text search.
+        This enables the "Eternal Memory" feature - reusing past research.
+        
+        Args:
+            seed_idea: The seed idea to search for
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of similar research results
+        """
+        if not self.is_connected:
+            return []
+            
+        try:
+            result = self.client.table("research_results").select("*").text_search(
+                "seed_idea", seed_idea, config="english"
+            ).limit(limit).execute()
+            return result.data or []
+        except Exception as e:
+            print(f"Failed to search similar research: {e}")
+            return []

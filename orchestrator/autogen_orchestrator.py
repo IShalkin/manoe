@@ -3749,6 +3749,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         change_request: Optional[str] = None,
         supabase_project_id: Optional[str] = None,
         selected_narrative: Optional[Dict[str, Any]] = None,
+        research_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration
@@ -3774,6 +3775,8 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             previous_run_id: Run ID of the previous generation run (for loading existing scenes)
             selected_narrative: Pre-selected narrative possibility from branching UI
                 If provided, skips Genesis phase and uses this narrative directly
+            research_context: Market research context (prompt_context) to inject into agent prompts
+                This is the distilled summary from Eternal Memory research results
         """
         results = {
             "project": project.model_dump(),
@@ -3782,7 +3785,23 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             "run_id": run_id,
             "regeneration_mode": start_from_phase is not None,
             "scene_regeneration_mode": scenes_to_regenerate is not None and len(scenes_to_regenerate) > 0,
+            "research_context_applied": research_context is not None,
         }
+        
+        # Build research context section for prompt injection
+        # This is injected into relevant phase prompts to guide content creation
+        research_context_section = ""
+        if research_context:
+            research_context_section = f"""
+
+## MARKET RESEARCH GUIDANCE
+
+The following market research has been conducted for this project. Use these insights to guide your creative decisions:
+
+{research_context}
+
+Apply these insights naturally without explicitly referencing "market research" in the narrative.
+"""
 
         # Phase order for determining what to skip/regenerate
         phase_order = ["genesis", "characters", "worldbuilding", "outlining", "advanced_planning", "drafting", "polish"]
@@ -3952,7 +3971,20 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         if not genesis_result:
             await self._check_pause()  # Pause checkpoint
-            genesis_result = await self.run_genesis_phase(project)
+            # If research context is provided, create a modified project with enriched target_audience
+            if research_context_section:
+                # Create a copy of the project with research context appended to target_audience
+                enriched_project = StoryProject(
+                    seed_idea=project.seed_idea,
+                    moral_compass=project.moral_compass,
+                    target_audience=f"{project.target_audience}\n{research_context_section}" if project.target_audience else research_context_section,
+                    theme_core=project.theme_core,
+                    tone_style_references=project.tone_style_references,
+                    custom_moral_system=project.custom_moral_system,
+                )
+                genesis_result = await self.run_genesis_phase(enriched_project)
+            else:
+                genesis_result = await self.run_genesis_phase(project)
             await store_artifact("genesis", "narrative_possibility", genesis_result.get("narrative_possibility", {}))
 
         # Set max_revisions in state AFTER genesis phase creates it

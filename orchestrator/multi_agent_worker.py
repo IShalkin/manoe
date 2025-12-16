@@ -38,6 +38,7 @@ from services.security import (
 )
 from services.supabase_persistence import SupabasePersistenceService
 from services.research_service import ResearchService, ResearchProvider
+from services.research_memory import ResearchMemoryService
 
 load_dotenv()
 
@@ -849,6 +850,9 @@ class ResearchRequest(BaseModel):
     provider: str = Field(..., description="Research provider: openai_deep_research or perplexity")
     api_key: str = Field(..., description="API key for the research provider")
     model: Optional[str] = Field(None, description="Optional model override")
+    project_id: Optional[str] = Field(None, description="Optional project ID to link research to")
+    reuse_policy: str = Field("auto", description="Reuse policy: auto, force_new, force_reuse")
+    similarity_threshold: float = Field(0.8, description="Similarity threshold for reuse (0.0-1.0)")
 
 
 class ResearchResponse(BaseModel):
@@ -857,14 +861,39 @@ class ResearchResponse(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     content: Optional[str] = None
+    prompt_context: Optional[str] = None
     citations: Optional[List[Dict[str, Any]]] = None
     search_results: Optional[List[Dict[str, Any]]] = None
     web_searches: Optional[List[Dict[str, Any]]] = None
     usage: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    research_id: Optional[str] = None
+    reused: bool = False
+    similarity_score: Optional[float] = None
 
 
 research_service: Optional[ResearchService] = None
+research_memory_service: Optional[ResearchMemoryService] = None
+supabase_service: Optional[SupabasePersistenceService] = None
+
+
+async def get_research_services():
+    """Initialize and return research services."""
+    global research_service, research_memory_service, supabase_service
+    
+    if research_service is None:
+        research_service = ResearchService()
+        await research_service.initialize()
+    
+    if research_memory_service is None:
+        research_memory_service = ResearchMemoryService()
+        await research_memory_service.initialize()
+    
+    if supabase_service is None:
+        supabase_service = SupabasePersistenceService()
+        supabase_service.connect()
+    
+    return research_service, research_memory_service, supabase_service
 
 
 @app.post("/research", response_model=ResearchResponse)
@@ -873,29 +902,75 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
     """
     Conduct market research using OpenAI Deep Research or Perplexity APIs.
     
+    Implements "Eternal Memory" - checks for similar past research before conducting new research.
+    
     Supported providers:
     - openai_deep_research: Uses OpenAI's o3-deep-research or o4-mini-deep-research models
     - perplexity: Uses Perplexity's sonar-deep-research model
     
+    Reuse policies:
+    - auto: Check for similar research, reuse if similarity > threshold
+    - force_new: Always conduct new research
+    - force_reuse: Only return existing research (fail if none found)
+    
     Requires authentication.
     """
-    global research_service
+    user_id, _ = await get_current_user(request)
     
-    # Authenticate user
-    await get_current_user(request)
+    rs, rms, supa = await get_research_services()
     
-    # Initialize research service if needed
-    if research_service is None:
-        research_service = ResearchService()
-        await research_service.initialize()
-    
-    # Parse themes
     themes_list = []
     if research_request.themes:
         themes_list = [t.strip() for t in research_request.themes.split(",") if t.strip()]
     
-    # Conduct research
-    result = await research_service.conduct_research(
+    query_text = f"{research_request.seed_idea} | {research_request.target_audience} | {','.join(themes_list)} | {research_request.moral_compass}"
+    
+    if research_request.reuse_policy != "force_new":
+        try:
+            similar_results = await rms.search_similar_research(
+                query_text=query_text,
+                user_id=user_id,
+                limit=1,
+                score_threshold=research_request.similarity_threshold,
+            )
+            
+            if similar_results:
+                best_match = similar_results[0]
+                similarity_score = best_match.get("score", 0)
+                research_id = best_match.get("payload", {}).get("research_id")
+                
+                if research_id:
+                    existing = await supa.get_research_result_by_id(research_id)
+                    if existing:
+                        return ResearchResponse(
+                            success=True,
+                            provider=existing.get("provider"),
+                            model=existing.get("model"),
+                            content=existing.get("content"),
+                            prompt_context=existing.get("prompt_context"),
+                            citations=existing.get("citations"),
+                            search_results=existing.get("search_results"),
+                            web_searches=existing.get("web_searches"),
+                            usage=existing.get("usage"),
+                            research_id=research_id,
+                            reused=True,
+                            similarity_score=similarity_score,
+                        )
+        except Exception as e:
+            print(f"Error searching similar research: {e}")
+            if research_request.reuse_policy == "force_reuse":
+                return ResearchResponse(
+                    success=False,
+                    error=f"No similar research found and force_reuse policy set: {e}",
+                )
+    
+    if research_request.reuse_policy == "force_reuse":
+        return ResearchResponse(
+            success=False,
+            error="No similar research found and force_reuse policy set",
+        )
+    
+    result = await rs.conduct_research(
         provider=research_request.provider,
         api_key=research_request.api_key,
         seed_idea=research_request.seed_idea,
@@ -905,17 +980,187 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
         model=research_request.model,
     )
     
+    if not result.get("success"):
+        return ResearchResponse(
+            success=False,
+            error=result.get("error", "Research failed"),
+        )
+    
+    qdrant_point_id = None
+    try:
+        qdrant_point_id = await rms.store_research(
+            research_id="pending",
+            user_id=user_id,
+            query_text=query_text,
+            seed_idea=research_request.seed_idea,
+            target_audience=research_request.target_audience,
+            themes=themes_list,
+            moral_compass=research_request.moral_compass,
+            provider=result.get("provider", ""),
+            model=result.get("model"),
+        )
+    except Exception as e:
+        print(f"Error storing research in Qdrant: {e}")
+    
+    research_id = None
+    try:
+        research_id = await supa.store_research_result(
+            user_id=user_id,
+            provider=result.get("provider", ""),
+            model=result.get("model"),
+            seed_idea=research_request.seed_idea,
+            target_audience=research_request.target_audience,
+            themes=themes_list,
+            moral_compass=research_request.moral_compass,
+            content=result.get("content", ""),
+            prompt_context=result.get("prompt_context"),
+            citations=result.get("citations"),
+            search_results=result.get("search_results"),
+            web_searches=result.get("web_searches"),
+            usage=result.get("usage"),
+            project_id=research_request.project_id,
+            qdrant_point_id=qdrant_point_id,
+        )
+        
+        if research_id and qdrant_point_id:
+            try:
+                await rms.update_research_id(qdrant_point_id, research_id)
+            except Exception as e:
+                print(f"Error updating Qdrant with research_id: {e}")
+    except Exception as e:
+        print(f"Error storing research in Supabase: {e}")
+    
     return ResearchResponse(
-        success=result.get("success", False),
+        success=True,
         provider=result.get("provider"),
         model=result.get("model"),
         content=result.get("content"),
+        prompt_context=result.get("prompt_context"),
         citations=result.get("citations"),
         search_results=result.get("search_results"),
         web_searches=result.get("web_searches"),
         usage=result.get("usage"),
-        error=result.get("error"),
+        research_id=research_id,
+        reused=False,
     )
+
+
+class ResearchHistoryResponse(BaseModel):
+    """Response model for research history."""
+    success: bool
+    research: List[Dict[str, Any]] = []
+    error: Optional[str] = None
+
+
+class SimilarResearchRequest(BaseModel):
+    """Request model for similar research search."""
+    seed_idea: str = Field(..., max_length=MAX_SEED_IDEA_LENGTH)
+    target_audience: str = Field("", max_length=1000)
+    themes: Optional[str] = Field(None, max_length=MAX_THEMES_LENGTH)
+    moral_compass: str = "ambiguous"
+    similarity_threshold: float = Field(0.5, description="Minimum similarity score (0.0-1.0)")
+    limit: int = Field(5, description="Maximum number of results")
+
+
+class SimilarResearchResponse(BaseModel):
+    """Response model for similar research search."""
+    success: bool
+    similar_research: List[Dict[str, Any]] = []
+    error: Optional[str] = None
+
+
+@app.get("/research/history", response_model=ResearchHistoryResponse)
+@limiter.limit("30/minute")
+async def get_research_history(
+    request: Request,
+    project_id: Optional[str] = None,
+    limit: int = 20,
+):
+    """
+    Get research history for the authenticated user.
+    
+    Optionally filter by project_id.
+    """
+    user_id, _ = await get_current_user(request)
+    
+    _, _, supa = await get_research_services()
+    
+    try:
+        research = await supa.get_research_results(
+            user_id=user_id,
+            project_id=project_id,
+            limit=limit,
+        )
+        return ResearchHistoryResponse(success=True, research=research)
+    except Exception as e:
+        return ResearchHistoryResponse(success=False, error=str(e))
+
+
+@app.get("/research/{research_id}", response_model=ResearchResponse)
+@limiter.limit("30/minute")
+async def get_research_by_id(research_id: str, request: Request):
+    """
+    Get a specific research result by ID.
+    """
+    await get_current_user(request)
+    
+    _, _, supa = await get_research_services()
+    
+    try:
+        research = await supa.get_research_result_by_id(research_id)
+        if not research:
+            return ResearchResponse(success=False, error="Research not found")
+        
+        return ResearchResponse(
+            success=True,
+            provider=research.get("provider"),
+            model=research.get("model"),
+            content=research.get("content"),
+            prompt_context=research.get("prompt_context"),
+            citations=research.get("citations"),
+            search_results=research.get("search_results"),
+            web_searches=research.get("web_searches"),
+            usage=research.get("usage"),
+            research_id=research_id,
+            reused=False,
+        )
+    except Exception as e:
+        return ResearchResponse(success=False, error=str(e))
+
+
+@app.post("/research/similar", response_model=SimilarResearchResponse)
+@limiter.limit("10/minute")
+async def search_similar_research(
+    similar_request: SimilarResearchRequest,
+    request: Request,
+):
+    """
+    Search for similar research results using semantic similarity.
+    
+    This enables the "Eternal Memory" feature - finding past research
+    that matches the current query before conducting new research.
+    """
+    user_id, _ = await get_current_user(request)
+    
+    _, rms, _ = await get_research_services()
+    
+    themes_list = []
+    if similar_request.themes:
+        themes_list = [t.strip() for t in similar_request.themes.split(",") if t.strip()]
+    
+    query_text = f"{similar_request.seed_idea} | {similar_request.target_audience} | {','.join(themes_list)} | {similar_request.moral_compass}"
+    
+    try:
+        similar_results = await rms.search_similar_research(
+            query_text=query_text,
+            user_id=user_id,
+            limit=similar_request.limit,
+            score_threshold=similar_request.similarity_threshold,
+        )
+        
+        return SimilarResearchResponse(success=True, similar_research=similar_results)
+    except Exception as e:
+        return SimilarResearchResponse(success=False, error=str(e))
 
 
 @app.post("/models", response_model=ModelsResponse)
