@@ -580,8 +580,8 @@ async def startup():
     worker = MultiAgentWorker()
     await worker.initialize()
     # Initialize Redis in ownership store for persistence across restarts
-    if worker.redis_streams and worker.redis_streams.redis:
-        run_ownership.set_redis(worker.redis_streams.redis)
+    if worker.redis_streams and worker.redis_streams._client:
+        run_ownership.set_redis(worker.redis_streams._client)
 
 
 @app.on_event("shutdown")
