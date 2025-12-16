@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSettings } from '../hooks/useSettings';
-import { PROVIDERS, AGENTS, LLMProvider } from '../types';
+import { PROVIDERS, AGENTS, LLMProvider, RESEARCH_PROVIDERS } from '../types';
 
 export function SettingsPage() {
   const { 
@@ -12,6 +12,8 @@ export function SettingsPage() {
     fetchModelsForProvider,
     isLoadingModels,
     hasDynamicModels,
+    updateResearchProvider,
+    getResearchProviderKey,
   } = useSettings();
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
@@ -109,9 +111,72 @@ export function SettingsPage() {
         </div>
       </section>
 
+      <section className="mb-12">
+        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+          <span className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 text-sm">2</span>
+          Research Providers
+        </h2>
+        <p className="text-slate-400 text-sm mb-4">
+          Configure research providers for deep market research on your target audience. Keys are stored locally in your browser.
+        </p>
+        
+        <div className="grid gap-4">
+          {RESEARCH_PROVIDERS.map(provider => {
+            const currentKey = getResearchProviderKey(provider.id) || '';
+            const isVisible = showKeys[`research_${provider.id}`];
+            
+            return (
+              <div key={provider.id} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center font-bold text-white">
+                      {provider.icon}
+                    </div>
+                    <div>
+                      <h3 className="font-medium">{provider.name}</h3>
+                      <p className="text-xs text-slate-500">{provider.description}</p>
+                    </div>
+                  </div>
+                  {currentKey && (
+                    <span className="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400">
+                      Configured
+                    </span>
+                  )}
+                </div>
+                
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={isVisible ? 'text' : 'password'}
+                      value={currentKey}
+                      onChange={(e) => updateResearchProvider(provider.id, e.target.value)}
+                      placeholder={`Enter your ${provider.name} API key (${provider.keyPrefix})`}
+                      className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-primary-500 transition-colors"
+                    />
+                  </div>
+                  <button
+                    onClick={() => toggleShowKey(`research_${provider.id}`)}
+                    className="px-3 py-2 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors text-sm"
+                  >
+                    {isVisible ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        
+        <div className="mt-4 p-4 bg-slate-900/30 rounded-xl border border-slate-700/50">
+          <h4 className="text-sm font-medium text-slate-300 mb-2">About Research Providers</h4>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Research providers enable deep market analysis for your storytelling projects. Perplexity uses web search to gather current market data, while OpenAI Deep Research provides comprehensive analysis using advanced reasoning models. Configure at least one provider to enable the research feature when creating projects.
+          </p>
+        </div>
+      </section>
+
       <section>
         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-          <span className="w-8 h-8 rounded-lg bg-accent-500/20 flex items-center justify-center text-accent-400 text-sm">2</span>
+          <span className="w-8 h-8 rounded-lg bg-accent-500/20 flex items-center justify-center text-accent-400 text-sm">3</span>
           Agent Configuration
         </h2>
         <p className="text-slate-400 text-sm mb-4">
