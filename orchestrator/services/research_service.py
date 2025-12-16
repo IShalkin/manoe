@@ -204,13 +204,24 @@ Please include specific data points, statistics, and citations where available. 
 
             prompt_context = self._extract_prompt_context(content) if content else ""
             
+            # Normalize citations - Perplexity returns list of URL strings,
+            # but we need List[Dict] format for consistency with OpenAI
+            raw_citations = data.get("citations", [])
+            normalized_citations = []
+            for citation in raw_citations:
+                if isinstance(citation, str):
+                    # Convert URL string to dict format
+                    normalized_citations.append({"url": citation, "title": ""})
+                elif isinstance(citation, dict):
+                    normalized_citations.append(citation)
+            
             return {
                 "success": True,
                 "provider": ResearchProvider.PERPLEXITY.value,
                 "model": model,
                 "content": content,
                 "prompt_context": prompt_context,
-                "citations": data.get("citations", []),
+                "citations": normalized_citations,
                 "search_results": data.get("search_results", []),
                 "usage": data.get("usage", {}),
             }
