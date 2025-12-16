@@ -494,3 +494,136 @@ Track multiple narrative layers across all scenes to ensure rich, multi-dimensio
 
 This checklist ensures no layer is neglected and all scenes contribute to multiple dimensions of the story.
 """
+
+# =============================================================================
+# Deepening Checkpoints (Storyteller Section 6.1)
+# =============================================================================
+
+DEEPENING_CHECKPOINT_PROMPT = """You are evaluating a scene at a critical structural checkpoint in the narrative.
+
+## Checkpoint Type: {checkpoint_type}
+
+### Checkpoint Definitions:
+
+**Inciting Incident** (typically Scene 2-3):
+- Must disrupt the protagonist's ordinary world
+- Should introduce or hint at the central conflict
+- Must create a clear "point of no return" feeling
+- Should establish stakes that matter to the protagonist
+
+**Midpoint** (typically 50% through):
+- Must represent a major shift in the story's direction
+- Should raise stakes significantly
+- Often includes a revelation or reversal
+- Protagonist should move from reactive to proactive (or vice versa)
+
+**Climax** (typically 80-90% through):
+- Must be the highest point of tension
+- Should force the protagonist to make their defining choice
+- All major conflicts should converge here
+- Thematic questions should reach their peak expression
+
+**Resolution** (final scenes):
+- Must provide emotional closure
+- Should show the consequences of the climax
+- Character arcs should reach completion
+- Thematic statement should be clear (even if ambiguous)
+
+## Scene Being Evaluated
+
+**Scene Number:** {scene_number}
+**Scene Title:** {scene_title}
+**Scene Content:**
+{scene_content}
+
+## Story Context
+
+**Narrative Foundation:**
+{narrative_summary}
+
+**Character Arcs in Progress:**
+{character_arcs}
+
+**Core Themes:**
+{themes}
+
+**Previous Key Events:**
+{previous_events}
+
+## Evaluation Criteria
+
+Rate each criterion from 1-10 and provide specific feedback:
+
+1. **Structural Function** - Does this scene fulfill its checkpoint role?
+2. **Stakes Escalation** - Are stakes appropriate for this point in the story?
+3. **Character Agency** - Do characters drive the action through meaningful choices?
+4. **Thematic Resonance** - Does the scene reinforce or explore core themes?
+5. **Emotional Impact** - Does the scene deliver appropriate emotional weight?
+6. **Causality** - Does the scene flow logically from previous events?
+7. **Setup/Payoff** - Does the scene pay off earlier setups or create new ones?
+
+## Output Format
+
+```json
+{{
+  "checkpoint_type": "{checkpoint_type}",
+  "scene_number": {scene_number},
+  "passed": true/false,
+  "overall_score": 7.5,
+  "criteria_scores": {{
+    "structural_function": {{
+      "score": 8,
+      "feedback": "Specific feedback on how well the scene fulfills its structural role"
+    }},
+    "stakes_escalation": {{
+      "score": 7,
+      "feedback": "Assessment of stakes at this point"
+    }},
+    "character_agency": {{
+      "score": 8,
+      "feedback": "How well characters drive the action"
+    }},
+    "thematic_resonance": {{
+      "score": 7,
+      "feedback": "Connection to core themes"
+    }},
+    "emotional_impact": {{
+      "score": 8,
+      "feedback": "Emotional effectiveness"
+    }},
+    "causality": {{
+      "score": 9,
+      "feedback": "Logical flow from previous events"
+    }},
+    "setup_payoff": {{
+      "score": 7,
+      "feedback": "Use of setups and payoffs"
+    }}
+  }},
+  "strengths": [
+    "What the scene does well at this checkpoint"
+  ],
+  "areas_for_improvement": [
+    "Specific suggestions for strengthening the scene"
+  ],
+  "checkpoint_specific_notes": "Notes specific to this checkpoint type",
+  "revision_priority": "high|medium|low",
+  "suggested_revisions": [
+    {{
+      "issue": "Specific issue identified",
+      "suggestion": "Concrete suggestion for improvement",
+      "priority": "high|medium|low"
+    }}
+  ]
+}}
+```
+
+## Passing Threshold
+
+A scene PASSES the checkpoint if:
+- Overall score >= 7.0
+- No individual criterion scores below 5
+- Structural function score >= 7
+
+Evaluate the scene thoroughly and provide actionable feedback.
+"""

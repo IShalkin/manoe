@@ -6,6 +6,7 @@ System prompts derived from the Storyteller framework.
 from .advanced import (
     COMPLEXITY_CHECKLIST_PROMPT,
     CONTRADICTION_MAPS_PROMPT,
+    DEEPENING_CHECKPOINT_PROMPT,
     EMOTIONAL_BEAT_SHEET_PROMPT,
     NARRATIVE_POSSIBILITIES_PROMPT,
     SENSORY_BLUEPRINT_PROMPT,
@@ -47,4 +48,6 @@ __all__ = [
     "SENSORY_BLUEPRINT_PROMPT",
     "SUBTEXT_DESIGN_PROMPT",
     "COMPLEXITY_CHECKLIST_PROMPT",
+    # Deepening Checkpoints (Priority 2)
+    "DEEPENING_CHECKPOINT_PROMPT",
 ]
