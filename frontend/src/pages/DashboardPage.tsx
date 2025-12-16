@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { useSettings } from '../hooks/useSettings';
 import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
+import { orchestratorFetch } from '../lib/api';
 import { 
   MoralCompass, 
   NarrativePOV, 
@@ -127,9 +128,6 @@ function formatResultAsMarkdown(result: ProjectResult): string {
   return '*No content generated yet*';
 }
 
-// Multi-agent orchestrator URL (separate subdomain)
-const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
-
 type GenerationMode = 'demo' | 'full';
 
 interface ProjectFormData {
@@ -253,29 +251,26 @@ export function DashboardPage() {
     }
     
     try {
-      const response = await fetch(`${ORCHESTRATOR_URL}/generate`, {
+      const response = await orchestratorFetch('/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-                body: JSON.stringify({
-                  provider: architectConfig.provider,
-                  model: architectConfig.model,
-                  api_key: apiKey,
-                  seed_idea: formData.seedIdea,
-                  moral_compass: formData.moralCompass,
-                  custom_moral_system: formData.moralCompass === 'user_defined' ? formData.customMoralSystem : undefined,
-                  target_audience: formData.targetAudience || undefined,
-                  themes: formData.themes || undefined,
-                  tone_style_references: formData.toneStyleReferences || undefined,
-                  generation_mode: formData.generationMode,
-                  max_revisions: formData.maxRevisions,
-                  narrator_config: {
-                    pov: formData.narrativePov,
-                    reliability: formData.narratorReliability,
-                    stance: formData.narratorStance,
-                  },
-                }),
+        body: JSON.stringify({
+          provider: architectConfig.provider,
+          model: architectConfig.model,
+          api_key: apiKey,
+          seed_idea: formData.seedIdea,
+          moral_compass: formData.moralCompass,
+          custom_moral_system: formData.moralCompass === 'user_defined' ? formData.customMoralSystem : undefined,
+          target_audience: formData.targetAudience || undefined,
+          themes: formData.themes || undefined,
+          tone_style_references: formData.toneStyleReferences || undefined,
+          generation_mode: formData.generationMode,
+          max_revisions: formData.maxRevisions,
+          narrator_config: {
+            pov: formData.narrativePov,
+            reliability: formData.narratorReliability,
+            stance: formData.narratorStance,
+          },
+        }),
       });
       
       const data = await response.json();
