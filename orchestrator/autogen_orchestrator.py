@@ -32,6 +32,7 @@ from prompts import (
     SENSORY_BLUEPRINT_PROMPT,
     STRATEGIST_SYSTEM_PROMPT,
     SUBTEXT_DESIGN_PROMPT,
+    SYMBOLIC_MOTIF_LAYER_PROMPT,
     WORLDBUILDER_SYSTEM_PROMPT,
     WRITER_SYSTEM_PROMPT,
 )
@@ -1340,6 +1341,7 @@ Now create the plot outline as valid JSON.
         change_request: Optional[str] = None,
         sensory_blueprint: Optional[Dict[str, Any]] = None,
         subtext_design: Optional[Dict[str, Any]] = None,
+        motif_target: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the Drafting phase with Writer↔Critic loop.
@@ -1360,6 +1362,12 @@ Now create the plot outline as valid JSON.
                 - stance: Narrator stance (objective, judgmental, sympathetic)
             sensory_blueprint: Optional pre-planned sensory details for the scene
             subtext_design: Optional pre-designed subtext layer for the scene
+            motif_target: Optional per-scene motif target from the motif bible with:
+                - primary_motif: Main motif to feature in this scene
+                - secondary_motifs: Supporting motifs to weave in
+                - visual_focus: Key visual to emphasize
+                - color_emphasis: Dominant color if any
+                - symbol_placement: Where/how symbols should appear
         """
         self.state.phase = GenerationPhase.DRAFTING
         scene_number = scene.get("scene_number", 1)
@@ -1540,6 +1548,45 @@ IMPORTANT: Use these pre-designed subtext layers. Remember: show, don't tell. Mo
                         subtext_str += f"- {entry.get('character', 'Character')}: {entry.get('motivation', 'N/A')}\n"
                 subtext_str += "\n"
 
+        # Format motif target if available
+        motif_str = ""
+        if motif_target:
+            motif_str = """
+## Symbolic/Motif Layer (From Motif Bible)
+
+IMPORTANT: Weave these symbolic elements naturally into your scene. Motifs should enhance meaning without being heavy-handed.
+
+"""
+            if motif_target.get("primary_motif"):
+                motif_str += f"**Primary Motif:** {motif_target['primary_motif']}\n"
+                motif_str += "This is the main symbolic element to feature in this scene.\n\n"
+
+            if motif_target.get("secondary_motifs"):
+                secondary = motif_target["secondary_motifs"]
+                if isinstance(secondary, list):
+                    motif_str += f"**Secondary Motifs:** {', '.join(secondary)}\n"
+                else:
+                    motif_str += f"**Secondary Motifs:** {secondary}\n"
+                motif_str += "Weave these supporting motifs subtly throughout the scene.\n\n"
+
+            if motif_target.get("visual_focus"):
+                motif_str += f"**Visual Focus:** {motif_target['visual_focus']}\n"
+                motif_str += "This is the key visual to emphasize in descriptions.\n\n"
+
+            if motif_target.get("color_emphasis"):
+                motif_str += f"**Color Emphasis:** {motif_target['color_emphasis']}\n"
+                motif_str += "Use this color palette to reinforce the scene's mood and symbolism.\n\n"
+
+            if motif_target.get("symbol_placement"):
+                motif_str += f"**Symbol Placement:** {motif_target['symbol_placement']}\n\n"
+
+            if motif_target.get("subtext_layer"):
+                motif_str += f"**Symbolic Subtext:** {motif_target['subtext_layer']}\n"
+                motif_str += "This is what the motifs communicate beneath the surface.\n\n"
+
+            if motif_target.get("connection_to_theme"):
+                motif_str += f"**Thematic Connection:** {motif_target['connection_to_theme']}\n\n"
+
         user_prompt = f"""
 ## Scene Context
 
@@ -1581,6 +1628,7 @@ IMPORTANT: Use these pre-designed subtext layers. Remember: show, don't tell. Mo
 {narrator_str}
 {sensory_str}
 {subtext_str}
+{motif_str}
 ## Style Guidelines
 
 **Moral Compass:** {moral_compass}
@@ -2672,6 +2720,132 @@ Setting: {narrative.get("setting_description", "Not available")}
         return None
 
     # =========================================================================
+    # Priority 1: Symbolic/Motif Layer Planning (Storyteller Section 3.5.2)
+    # =========================================================================
+
+    async def run_motif_layer_planning(
+        self,
+        narrative: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        outline: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate a comprehensive Symbolic/Motif Layer Plan - a "Motif Bible" for the story.
+
+        This creates the symbolic and motif layer that will run throughout the narrative,
+        including visual metaphors, recurring symbols, and per-scene motif targets.
+
+        Args:
+            narrative: Narrative foundation from Genesis phase
+            characters: Character profiles from Profiler
+            outline: Plot outline from Strategist
+
+        Returns:
+            Dict containing the motif bible with core symbols, visual metaphor system,
+            character motifs, structural motifs, and per-scene motif targets
+        """
+        self._emit_event("phase_start", {"phase": "motif_layer_planning"})
+        self._emit_event("motif_planning_start", {
+            "total_scenes": len(outline.get("scenes", [])),
+        })
+
+        # Format narrative summary
+        narrative_summary = f"""
+Plot Summary: {narrative.get("plot_summary", "Not available")}
+Main Conflict: {narrative.get("main_conflict", "Not available")}
+Setting: {narrative.get("setting_description", "Not available")}
+Genre: {narrative.get("genre_approach", "Not specified")}
+Tone: {narrative.get("estimated_tone", "Not specified")}
+"""
+
+        # Format themes
+        themes = narrative.get("thematic_elements", [])
+        if isinstance(themes, list):
+            themes_str = "\n".join([f"- {t}" for t in themes]) if themes else "No themes specified"
+        else:
+            themes_str = str(themes)
+
+        # Format characters
+        characters_str = ""
+        for char in characters:
+            char_info = f"""
+**{char.get('name', 'Unknown')}** ({char.get('role', 'Unknown role')})
+- Arc: {char.get('potential_arc', char.get('arc_type', 'Unknown'))}
+- Psychological Wound: {char.get('psychological_wound', 'Not specified')}
+- Core Desire: {char.get('core_desire', 'Not specified')}
+- Core Fear: {char.get('core_fear', 'Not specified')}
+"""
+            characters_str += char_info
+
+        # Format outline summary
+        scenes = outline.get("scenes", [])
+        outline_summary = f"Total Scenes: {len(scenes)}\n\n"
+        for scene in scenes:
+            scene_num = scene.get("scene_number", "?")
+            scene_title = scene.get("title", scene.get("scene_title", "Untitled"))
+            scene_purpose = scene.get("purpose", scene.get("scene_purpose", ""))
+            outline_summary += f"Scene {scene_num}: {scene_title}\n"
+            if scene_purpose:
+                outline_summary += f"  Purpose: {scene_purpose[:100]}...\n" if len(scene_purpose) > 100 else f"  Purpose: {scene_purpose}\n"
+
+        # Build the prompt
+        user_prompt = SYMBOLIC_MOTIF_LAYER_PROMPT.format(
+            narrative_summary=narrative_summary,
+            themes=themes_str,
+            characters=characters_str,
+            outline_summary=outline_summary,
+        )
+
+        # Use the Architect agent for motif planning (creative, structural work)
+        response = await self._call_agent(self.architect, user_prompt)
+        msg = self._parse_agent_message("Architect", response)
+        self.state.messages.append(msg)
+
+        motif_result = msg.content if isinstance(msg.content, dict) else {}
+
+        # Extract key components for validation
+        motif_bible = motif_result.get("motif_bible", {})
+        scene_motif_targets = motif_result.get("scene_motif_targets", [])
+
+        # Emit completion event with summary
+        self._emit_event("motif_planning_complete", {
+            "core_symbols_count": len(motif_bible.get("core_symbols", [])),
+            "character_motifs_count": len(motif_bible.get("character_motifs", [])),
+            "scene_targets_count": len(scene_motif_targets),
+            "has_structural_motifs": bool(motif_bible.get("structural_motifs")),
+        })
+
+        self._emit_event("phase_complete", {"phase": "motif_layer_planning"})
+
+        return {
+            "motif_bible": motif_bible,
+            "scene_motif_targets": scene_motif_targets,
+            "motif_tracking": motif_result.get("motif_tracking", {}),
+            "integration_guidelines": motif_result.get("integration_guidelines", {}),
+        }
+
+    def get_scene_motif_target(
+        self,
+        scene_number: int,
+        motif_layer: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the motif target for a specific scene.
+
+        Args:
+            scene_number: The scene number to get motif target for
+            motif_layer: The full motif layer planning result
+
+        Returns:
+            The motif target for the scene, or None if not found
+        """
+        scene_targets = motif_layer.get("scene_motif_targets", [])
+        for target in scene_targets:
+            if target.get("scene_number") == scene_number:
+                return target
+        return None
+
+    # =========================================================================
     # Priority 3: Advanced Features
     # =========================================================================
 
@@ -3689,6 +3863,27 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         outline = outlining_result["outline"]
         scenes = outline.get("scenes", [])
 
+        # Phase 4.5: Motif Layer Planning (Symbolic/Motif Bible)
+        motif_layer_result = None
+        if should_skip_phase("advanced_planning"):
+            # Motif layer is part of advanced planning, so skip if advanced planning is skipped
+            motif_layer = get_previous_artifact("motif_layer", "motif_bible")
+            if motif_layer:
+                motif_layer_result = motif_layer
+                results["phases"]["motif_layer"] = motif_layer_result
+                self._emit_event("phase_skipped", {"phase": "motif_layer", "reason": "using_previous_artifact"})
+
+        if not motif_layer_result:
+            await self._check_pause()  # Pause checkpoint
+            motif_layer_result = await self.run_motif_layer_planning(
+                narrative=genesis_result["narrative_possibility"],
+                characters=characters_result["characters"],
+                outline=outline,
+            )
+            await store_artifact("motif_layer", "motif_bible", motif_layer_result)
+
+        results["phases"]["motif_layer"] = motif_layer_result
+
         # Phase 5: Advanced Planning
         advanced_planning_result = None
         if should_skip_phase("advanced_planning"):
@@ -3811,6 +4006,11 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 if scene_regen_mode and continuity["next_scene_summary"] != "N/A":
                     memory_ctx["next_scene_context"] = continuity["next_scene_summary"]
 
+                # Get per-scene motif target from the motif layer planning
+                scene_motif_target = None
+                if motif_layer_result:
+                    scene_motif_target = self.get_scene_motif_target(scene_number, motif_layer_result)
+
                 # Generate per-scene Sensory Blueprint
                 # This plans specific sensory details before drafting for richer prose
                 emotional_beat = scene.get("emotional_beat", {})
@@ -3850,6 +4050,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     change_request=change_request,
                     sensory_blueprint=scene_sensory_blueprint,
                     subtext_design=scene_subtext_design,
+                    motif_target=scene_motif_target,
                 )
 
                 # Quality Gate with retry logic (per scene)
