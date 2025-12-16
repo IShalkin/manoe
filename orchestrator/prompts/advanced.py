@@ -627,3 +627,190 @@ A scene PASSES the checkpoint if:
 
 Evaluate the scene thoroughly and provide actionable feedback.
 """
+
+# =============================================================================
+# Symbolic/Motif Layer Planning (Storyteller Section 3.5.2)
+# =============================================================================
+
+SYMBOLIC_MOTIF_LAYER_PROMPT = """You are creating a comprehensive Symbolic/Motif Layer Plan - a "Motif Bible" for the story.
+
+## Purpose
+Design the symbolic and motif layer that will run throughout the narrative, creating deeper meaning and thematic resonance. This includes visual metaphors, recurring symbols, and per-scene motif targets.
+
+## Story Context
+
+**Narrative Foundation:**
+{narrative_summary}
+
+**Core Themes:**
+{themes}
+
+**Characters:**
+{characters}
+
+**Plot Outline:**
+{outline_summary}
+
+## Create the Motif Bible
+
+### 1. Core Symbols
+Identify 3-5 central symbols that embody the story's themes:
+- What concrete object/image represents each theme?
+- How does the symbol's meaning evolve through the story?
+- What emotional associations does it carry?
+
+### 2. Visual Metaphor System
+Design recurring visual metaphors:
+- Light/darkness patterns and their meaning
+- Color symbolism throughout the narrative
+- Spatial metaphors (height, depth, enclosure, openness)
+- Natural imagery (weather, seasons, animals, plants)
+- Object symbolism (doors, mirrors, water, fire, etc.)
+
+### 3. Character-Linked Motifs
+Assign specific motifs to characters:
+- What image/symbol is associated with each major character?
+- How does their motif reflect their arc?
+- When do character motifs intersect or contrast?
+
+### 4. Structural Motifs
+Plan motifs that mark structural beats:
+- Opening image that establishes the world
+- Midpoint mirror/reversal imagery
+- Climax convergence of motifs
+- Closing image that echoes or transforms the opening
+
+### 5. Per-Scene Motif Targets
+For each scene, specify which motifs should appear and how.
+
+## Output Format
+
+```json
+{{
+  "motif_bible": {{
+    "core_symbols": [
+      {{
+        "symbol": "Name/description of symbol",
+        "represents": "What theme/concept it embodies",
+        "evolution": {{
+          "introduction": "How it first appears",
+          "development": "How meaning deepens",
+          "transformation": "Final form/meaning"
+        }},
+        "emotional_register": "What feelings it evokes",
+        "key_scenes": [1, 5, 10]
+      }}
+    ],
+    "visual_metaphor_system": {{
+      "light_darkness": {{
+        "light_represents": "What light symbolizes",
+        "darkness_represents": "What darkness symbolizes",
+        "transitions": "How light/dark shifts mark story beats"
+      }},
+      "color_palette": [
+        {{
+          "color": "Color name",
+          "association": "What it represents",
+          "character_link": "Which character if any",
+          "usage_notes": "When and how to use"
+        }}
+      ],
+      "spatial_metaphors": {{
+        "height_depth": "What vertical space represents",
+        "enclosure_openness": "What contained vs open spaces mean",
+        "movement_patterns": "What directions of movement signify"
+      }},
+      "natural_imagery": [
+        {{
+          "element": "Weather/season/animal/plant",
+          "meaning": "What it represents",
+          "appearances": "When it appears"
+        }}
+      ],
+      "object_symbols": [
+        {{
+          "object": "Door/mirror/water/etc",
+          "meaning": "Symbolic significance",
+          "key_moments": "Important appearances"
+        }}
+      ]
+    }},
+    "character_motifs": [
+      {{
+        "character": "Character name",
+        "primary_motif": "Their signature symbol/image",
+        "motif_meaning": "What it reveals about them",
+        "arc_reflection": "How motif changes with character",
+        "contrast_with": "Other character's motif it contrasts"
+      }}
+    ],
+    "structural_motifs": {{
+      "opening_image": {{
+        "description": "The visual that opens the story",
+        "establishes": "What it sets up",
+        "echoed_in_closing": true
+      }},
+      "midpoint_mirror": {{
+        "description": "Visual that marks the midpoint",
+        "reversal_element": "What is inverted or transformed"
+      }},
+      "climax_convergence": {{
+        "motifs_present": ["List of motifs that converge"],
+        "synthesis": "How they combine for maximum impact"
+      }},
+      "closing_image": {{
+        "description": "The final visual",
+        "transformation": "How it differs from opening",
+        "thematic_statement": "What it says about the theme"
+      }}
+    }}
+  }},
+  "scene_motif_targets": [
+    {{
+      "scene_number": 1,
+      "scene_title": "Scene title",
+      "primary_motif": "Main motif to feature",
+      "secondary_motifs": ["Supporting motifs"],
+      "visual_focus": "Key visual to emphasize",
+      "color_emphasis": "Dominant color if any",
+      "symbol_placement": "Where/how symbols appear",
+      "subtext_layer": "What the motifs communicate beneath surface",
+      "connection_to_theme": "How this advances thematic meaning"
+    }}
+  ],
+  "motif_tracking": {{
+    "setup_payoff_pairs": [
+      {{
+        "setup_scene": 2,
+        "setup_description": "How motif is introduced",
+        "payoff_scene": 8,
+        "payoff_description": "How it pays off"
+      }}
+    ],
+    "evolution_checkpoints": [
+      {{
+        "motif": "Symbol name",
+        "checkpoint_scenes": [1, 5, 10],
+        "evolution_notes": "How meaning shifts at each point"
+      }}
+    ]
+  }},
+  "integration_guidelines": {{
+    "subtlety_level": "How overt vs subtle motifs should be",
+    "density_recommendation": "How many motifs per scene",
+    "reader_discovery": "What readers should consciously notice vs feel",
+    "avoid_heavy_handedness": ["Specific warnings about overuse"]
+  }}
+}}
+```
+
+## Quality Standards
+
+- Motifs should feel organic, not forced
+- Symbols should have multiple layers of meaning
+- Per-scene targets should be achievable without cluttering prose
+- The system should enhance, not overshadow, the narrative
+- Ensure motifs serve character and theme, not just decoration
+
+Create a comprehensive motif bible that will guide the symbolic layer throughout the story.
+"""

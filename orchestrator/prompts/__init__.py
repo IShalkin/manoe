@@ -11,6 +11,7 @@ from .advanced import (
     NARRATIVE_POSSIBILITIES_PROMPT,
     SENSORY_BLUEPRINT_PROMPT,
     SUBTEXT_DESIGN_PROMPT,
+    SYMBOLIC_MOTIF_LAYER_PROMPT,
 )
 from .architect import ARCHITECT_SYSTEM_PROMPT, ARCHITECT_USER_PROMPT_TEMPLATE
 from .critic import CRITIC_SYSTEM_PROMPT, CRITIC_USER_PROMPT_TEMPLATE
@@ -50,4 +51,6 @@ __all__ = [
     "COMPLEXITY_CHECKLIST_PROMPT",
     # Deepening Checkpoints (Priority 2)
     "DEEPENING_CHECKPOINT_PROMPT",
+    # Symbolic/Motif Layer Planning (Priority 1)
+    "SYMBOLIC_MOTIF_LAYER_PROMPT",
 ]
