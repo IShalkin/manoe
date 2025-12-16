@@ -579,6 +579,9 @@ async def startup():
     global worker
     worker = MultiAgentWorker()
     await worker.initialize()
+    # Initialize Redis in ownership store for persistence across restarts
+    if worker.redis_streams and worker.redis_streams.redis:
+        run_ownership.set_redis(worker.redis_streams.redis)
 
 
 @app.on_event("shutdown")
@@ -605,8 +608,8 @@ async def generate(gen_request: GenerateRequest, request: Request):
 
     run_id = str(uuid.uuid4())
 
-    # Register run ownership
-    run_ownership.register_run(run_id, user_id)
+    # Register run ownership (persists to Redis for recovery after redeploy)
+    await run_ownership.register_run_async(run_id, user_id)
 
     # Capitalize moral_compass to match enum values (Ethical, Unethical, Amoral, Ambiguous, UserDefined)
     moral_compass_capitalized = gen_request.moral_compass.capitalize() if gen_request.moral_compass else "Ambiguous"
@@ -731,15 +734,80 @@ async def stream_events(run_id: str, request: Request):
     # Authenticate user
     user_id, _ = await get_current_user(request)
     
-    # Check if run is in memory (active)
+    # Check if run is in memory (active) - use sync check first for speed
     owner = run_ownership.get_owner(run_id)
+    
     if owner is None:
-        # Run not in memory - check if it exists in Supabase (interrupted run)
-        # Return a generation_error event that the frontend already handles
+        # Run not in memory - check Redis for persisted ownership (survives redeploy)
+        owner = await run_ownership.get_owner_async(run_id)
+    
+    if owner is None:
+        # No ownership found in memory or Redis - check if Redis stream exists
+        # This handles the case where ownership wasn't persisted but events were
+        try:
+            stream_info = await worker.redis_streams.get_stream_info(run_id)
+            stream_length = stream_info.get("length", 0)
+        except Exception:
+            stream_length = 0
+        
+        if stream_length > 0:
+            # Redis stream exists - replay events (run was interrupted but events are preserved)
+            # Verify ownership via Supabase artifacts if possible
+            can_access = False
+            if worker.persistence_service and worker.persistence_service.is_connected:
+                try:
+                    artifacts = await worker.persistence_service.get_run_artifacts(run_id)
+                    # If artifacts exist, allow access (legacy runs before ownership persistence)
+                    can_access = len(artifacts) > 0
+                except Exception:
+                    pass
+            
+            if not can_access:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Run not found or access denied",
+                )
+            
+            # Replay events from Redis stream
+            async def replay_event_generator():
+                import datetime
+                existing = await worker.redis_streams.get_events(run_id, start_id="0", count=10000)
+                has_terminal_event = False
+                
+                for event in existing:
+                    yield f"data: {json.dumps(event)}\n\n"
+                    if event.get("type") in ["generation_complete", "generation_error"]:
+                        has_terminal_event = True
+                
+                # If no terminal event, add an interrupted event
+                if not has_terminal_event:
+                    interrupted_event = {
+                        "type": "generation_error",
+                        "id": f"interrupted-{run_id}",
+                        "timestamp": datetime.datetime.utcnow().isoformat(),
+                        "data": {
+                            "error": "Run interrupted by orchestrator redeploy. Events have been recovered.",
+                            "status": "interrupted",
+                            "can_resume": True,
+                            "events_recovered": len(existing),
+                        }
+                    }
+                    yield f"data: {json.dumps(interrupted_event)}\n\n"
+            
+            return StreamingResponse(
+                replay_event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                }
+            )
+        
+        # No Redis stream - check Supabase for artifacts (fallback)
         async def interrupted_event_generator():
             import datetime
-            # Build error info from Supabase artifacts
-            error_msg = "Run interrupted by orchestrator redeploy"
+            error_msg = "Run not found"
             can_resume = False
             resume_from_phase = None
             artifacts_count = 0
@@ -748,28 +816,22 @@ async def stream_events(run_id: str, request: Request):
                 try:
                     artifacts = await worker.persistence_service.get_run_artifacts(run_id)
                     if artifacts:
-                        # Run exists in database - it was interrupted
                         can_resume = True
                         artifacts_count = len(artifacts)
-                        # Determine resume phase from artifacts
                         completed_phases = set()
                         for artifact in artifacts:
                             phase = artifact.get("phase")
                             if phase:
                                 completed_phases.add(phase)
-                        # Determine next phase
                         phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", "outlining", "advanced_planning", "drafting", "polish"]
                         for phase in phase_order:
                             if phase not in completed_phases:
                                 resume_from_phase = phase
                                 break
                         error_msg = f"Run interrupted. Completed {len(completed_phases)} phases. Can resume from {resume_from_phase}."
-                    else:
-                        error_msg = "Run not found"
                 except Exception as e:
                     error_msg = f"Error checking run state: {str(e)}"
             
-            # Emit generation_error event with proper data structure that frontend expects
             event = {
                 "type": "generation_error",
                 "id": f"interrupted-{run_id}",
@@ -794,7 +856,7 @@ async def stream_events(run_id: str, request: Request):
             }
         )
     
-    # Verify ownership for active runs
+    # Verify ownership for runs with known owner
     if owner != user_id:
         raise HTTPException(
             status_code=403,

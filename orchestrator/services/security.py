@@ -152,27 +152,74 @@ async def get_current_user(
 
 class RunOwnershipStore:
     """
-    In-memory store for tracking run ownership.
+    Hybrid store for tracking run ownership.
+    Uses in-memory cache + Redis for persistence across restarts.
     Maps run_id -> user_id for authorization checks.
     """
     
+    REDIS_KEY_PREFIX = "manoe:run_owner:"
+    OWNERSHIP_TTL = 60 * 60 * 24 * 7  # 7 days
+    
     def __init__(self):
         self._ownership: Dict[str, str] = {}
+        self._redis = None
+    
+    def set_redis(self, redis_client) -> None:
+        """Set the Redis client for persistent storage."""
+        self._redis = redis_client
+    
+    async def register_run_async(self, run_id: str, user_id: str) -> None:
+        """Register a run as owned by a user (async, persists to Redis)."""
+        self._ownership[run_id] = user_id
+        if self._redis:
+            try:
+                await self._redis.setex(
+                    f"{self.REDIS_KEY_PREFIX}{run_id}",
+                    self.OWNERSHIP_TTL,
+                    user_id
+                )
+            except Exception:
+                pass  # Fail silently, in-memory still works
     
     def register_run(self, run_id: str, user_id: str) -> None:
-        """Register a run as owned by a user."""
+        """Register a run as owned by a user (sync, in-memory only)."""
         self._ownership[run_id] = user_id
     
+    async def get_owner_async(self, run_id: str) -> Optional[str]:
+        """Get the owner of a run (async, checks Redis if not in memory)."""
+        # Check in-memory first
+        owner = self._ownership.get(run_id)
+        if owner:
+            return owner
+        
+        # Check Redis for persisted ownership
+        if self._redis:
+            try:
+                owner = await self._redis.get(f"{self.REDIS_KEY_PREFIX}{run_id}")
+                if owner:
+                    # Cache in memory
+                    self._ownership[run_id] = owner
+                    return owner
+            except Exception:
+                pass
+        
+        return None
+    
     def get_owner(self, run_id: str) -> Optional[str]:
-        """Get the owner of a run."""
+        """Get the owner of a run (sync, in-memory only)."""
         return self._ownership.get(run_id)
     
+    async def verify_ownership_async(self, run_id: str, user_id: str) -> bool:
+        """Verify that a user owns a run (async, checks Redis)."""
+        owner = await self.get_owner_async(run_id)
+        if owner is None:
+            return False
+        return owner == user_id
+    
     def verify_ownership(self, run_id: str, user_id: str) -> bool:
-        """Verify that a user owns a run."""
+        """Verify that a user owns a run (sync, in-memory only)."""
         owner = self._ownership.get(run_id)
         if owner is None:
-            # Run not found - could be from before auth was implemented
-            # or from a different server instance
             return False
         return owner == user_id
     
