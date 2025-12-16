@@ -238,6 +238,32 @@ CREATE TRIGGER update_users_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- =============================================================================
+-- Research Results Table (for Eternal Memory / reusable research)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS research_results (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(50) NOT NULL,
+    model VARCHAR(100),
+    seed_idea TEXT NOT NULL,
+    target_audience TEXT,
+    themes TEXT[],
+    moral_compass VARCHAR(50),
+    content TEXT NOT NULL,
+    citations JSONB,
+    search_results JSONB,
+    web_searches JSONB,
+    usage JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_research_results_project ON research_results(project_id);
+CREATE INDEX idx_research_results_user ON research_results(user_id);
+CREATE INDEX idx_research_results_created ON research_results(created_at DESC);
+CREATE INDEX idx_research_results_seed_idea ON research_results USING gin(to_tsvector('english', seed_idea));
+
+-- =============================================================================
 -- Initial Data (optional)
 -- =============================================================================
 
