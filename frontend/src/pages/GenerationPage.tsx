@@ -53,14 +53,15 @@ export function GenerationPage() {
   }, [project, runId, isStarting]);
 
   // Map agent names to phases for phase-based regeneration
+  // Phase taxonomy aligned with backend orchestrator phases
+  // Backend phases: genesis → characters → worldbuilding → outlining → motif_layer → advanced_planning → drafting → polish
   const AGENT_TO_PHASE: Record<string, string> = {
     'Architect': 'genesis',
     'Profiler': 'characters',
     'Worldbuilder': 'worldbuilding',
     'Strategist': 'outlining',
     'Writer': 'drafting',
-    'Critic': 'polish',
-    'Polish': 'polish',
+    'Critic': 'drafting', // Critic is part of Writer↔Critic drafting loop, not a separate polish phase
   };
 
   // Handle regeneration with constraints from AgentChat

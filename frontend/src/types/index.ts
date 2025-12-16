@@ -30,6 +30,44 @@ export interface UserSettings {
 
 export type MoralCompass = 'ethical' | 'unethical' | 'amoral' | 'ambiguous' | 'user_defined';
 
+// Output Format Types (based on Storyteller Framework Section 8.2)
+export type OutputFormat = 'short_story' | 'novel_chapter' | 'screenplay' | 'novella';
+
+export const OUTPUT_FORMAT_OPTIONS: { value: OutputFormat; label: string; desc: string; wordCount: string }[] = [
+  { value: 'short_story', label: 'Short Story', desc: 'Complete narrative in condensed form', wordCount: '1,000-7,500 words' },
+  { value: 'novel_chapter', label: 'Novel Chapter', desc: 'Single chapter of a larger work', wordCount: '3,000-5,000 words' },
+  { value: 'novella', label: 'Novella', desc: 'Extended narrative with multiple scenes', wordCount: '17,500-40,000 words' },
+  { value: 'screenplay', label: 'Screenplay', desc: 'Script format with dialogue and action', wordCount: '90-120 pages' },
+];
+
+// Reader Sensibilities/Triggers Types (based on Storyteller Framework Section 1.3)
+export type ContentSensitivity = 'none' | 'mild' | 'moderate' | 'explicit';
+
+export interface ReaderSensibilities {
+  violence: ContentSensitivity;
+  sexualContent: ContentSensitivity;
+  profanity: ContentSensitivity;
+  drugUse: ContentSensitivity;
+  darkThemes: ContentSensitivity;
+  triggerWarnings: string[];
+}
+
+export const CONTENT_SENSITIVITY_OPTIONS: { value: ContentSensitivity; label: string; desc: string }[] = [
+  { value: 'none', label: 'None', desc: 'No content of this type' },
+  { value: 'mild', label: 'Mild', desc: 'Implied or minimal' },
+  { value: 'moderate', label: 'Moderate', desc: 'Present but not graphic' },
+  { value: 'explicit', label: 'Explicit', desc: 'Detailed and graphic' },
+];
+
+export const DEFAULT_READER_SENSIBILITIES: ReaderSensibilities = {
+  violence: 'moderate',
+  sexualContent: 'mild',
+  profanity: 'moderate',
+  drugUse: 'mild',
+  darkThemes: 'moderate',
+  triggerWarnings: [],
+};
+
 // Narrator Design Types (based on Storyteller Framework Section 3.2)
 export type NarrativePOV = 'first_person' | 'third_person_limited' | 'third_person_omniscient' | 'second_person';
 export type NarratorReliability = 'reliable' | 'unreliable';
@@ -96,6 +134,8 @@ export interface Project {
   moralCompass: MoralCompass;
   targetAudience: string;
   themes: string[];
+  outputFormat?: OutputFormat;
+  readerSensibilities?: ReaderSensibilities;
   status: 'draft' | 'in_progress' | 'completed';
   createdAt: string;
   updatedAt: string;
@@ -111,6 +151,30 @@ export interface Character {
   copingMechanism: string;
   visualSignature: string;
 }
+
+export type RelationshipType = 'ally' | 'enemy' | 'rival' | 'mentor' | 'protege' | 'lover' | 'family' | 'neutral' | 'complex';
+
+export interface CharacterRelationship {
+  id: string;
+  sourceCharacterId: string;
+  targetCharacterId: string;
+  relationshipType: RelationshipType;
+  description: string;
+  dynamics: string;
+  tension: number;
+}
+
+export const RELATIONSHIP_TYPE_OPTIONS: { value: RelationshipType; label: string; color: string }[] = [
+  { value: 'ally', label: 'Ally', color: '#22c55e' },
+  { value: 'enemy', label: 'Enemy', color: '#ef4444' },
+  { value: 'rival', label: 'Rival', color: '#f97316' },
+  { value: 'mentor', label: 'Mentor', color: '#3b82f6' },
+  { value: 'protege', label: 'Protege', color: '#8b5cf6' },
+  { value: 'lover', label: 'Lover', color: '#ec4899' },
+  { value: 'family', label: 'Family', color: '#14b8a6' },
+  { value: 'neutral', label: 'Neutral', color: '#6b7280' },
+  { value: 'complex', label: 'Complex', color: '#eab308' },
+];
 
 export const PROVIDERS: { id: LLMProvider; name: string; icon: string }[] = [
   { id: 'openai', name: 'OpenAI', icon: 'O' },
