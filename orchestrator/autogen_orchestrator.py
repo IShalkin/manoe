@@ -606,20 +606,73 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
             "to_agent": to_agent,
         })
 
+    def _is_retryable_error(self, error: Exception) -> bool:
+        """Check if an error is retryable (transient network/API errors).
+        
+        Retryable errors include:
+        - Network timeouts and connection errors
+        - HTTP 429 (rate limit), 500, 502, 503, 504 (server errors)
+        - Provider-specific overload/rate limit exceptions
+        
+        Non-retryable errors include:
+        - HTTP 400 (bad request), 401 (auth), 403 (forbidden)
+        - Invalid API key or model errors
+        """
+        error_str = str(error).lower()
+        error_type = type(error).__name__
+        
+        # Check for retryable HTTP status codes in error message
+        retryable_patterns = [
+            "429", "rate limit", "rate_limit", "ratelimit",
+            "500", "502", "503", "504",
+            "timeout", "timed out", "connection",
+            "overloaded", "overload", "capacity",
+            "temporarily unavailable", "service unavailable",
+            "internal server error", "bad gateway", "gateway timeout",
+        ]
+        
+        # Check for non-retryable patterns
+        non_retryable_patterns = [
+            "401", "403", "400",
+            "invalid api key", "invalid_api_key", "authentication",
+            "unauthorized", "forbidden", "invalid model",
+            "model not found", "does not exist",
+        ]
+        
+        # First check if it's explicitly non-retryable
+        for pattern in non_retryable_patterns:
+            if pattern in error_str:
+                return False
+        
+        # Then check if it matches retryable patterns
+        for pattern in retryable_patterns:
+            if pattern in error_str:
+                return True
+        
+        # Check for common exception types
+        retryable_types = ["timeout", "connection", "network", "http"]
+        for rtype in retryable_types:
+            if rtype in error_type.lower():
+                return True
+        
+        return False
+
     async def _call_agent(
         self,
         agent: Dict[str, Any],
         user_message: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         max_tokens: Optional[int] = None,
+        max_retries: int = 3,
     ) -> str:
-        """Call an agent and get its response.
+        """Call an agent and get its response with automatic retry for transient errors.
         
         Args:
             agent: Agent configuration dict
             user_message: The user message to send
             conversation_history: Optional conversation history
             max_tokens: Maximum tokens for response. If None, uses phase-based dynamic limit.
+            max_retries: Maximum number of retry attempts for transient errors (default: 3)
         """
         # Check pause before every agent call for responsive pause behavior
         await self._check_pause()
@@ -651,34 +704,84 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
             "phase": self.state.phase.value if self.state else "unknown",
         })
 
-        response = await self.model_client.create_chat_completion(
-            messages=messages,
-            model=model,
-            provider=provider,
-            temperature=0.7,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"} if "json" in user_message.lower() else None,
-        )
+        # Retry loop with exponential backoff
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    # Exponential backoff: 1s, 3s, 9s (with jitter)
+                    import random
+                    base_delay = 3 ** attempt  # 1, 3, 9
+                    jitter = random.uniform(0, 1)
+                    delay = base_delay + jitter
+                    logger.info(f"[_call_agent] Retry attempt {attempt + 1}/{max_retries} for {agent['name']} after {delay:.1f}s delay")
+                    self._emit_event("agent_retry", {
+                        "agent": agent["name"],
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                        "delay": delay,
+                        "error": str(last_error) if last_error else None,
+                    })
+                    await asyncio.sleep(delay)
+                
+                response = await self.model_client.create_chat_completion(
+                    messages=messages,
+                    model=model,
+                    provider=provider,
+                    temperature=0.7,
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"} if "json" in user_message.lower() else None,
+                )
 
-        # Log finish_reason to detect truncation
-        logger.info(f"[_call_agent] Agent: {agent['name']}, finish_reason: {response.finish_reason}, usage: {response.usage}")
-        if response.finish_reason in ("length", "max_tokens"):
-            logger.warning(f"[_call_agent] Agent {agent['name']} response was TRUNCATED (finish_reason={response.finish_reason})")
+                # Log finish_reason to detect truncation
+                logger.info(f"[_call_agent] Agent: {agent['name']}, finish_reason: {response.finish_reason}, usage: {response.usage}")
+                if response.finish_reason in ("length", "max_tokens"):
+                    logger.warning(f"[_call_agent] Agent {agent['name']} response was TRUNCATED (finish_reason={response.finish_reason})")
 
-        self._emit_event("agent_complete", {
-            "agent": agent["name"],
-            "usage": response.usage,
-            "finish_reason": response.finish_reason,
-        })
+                self._emit_event("agent_complete", {
+                    "agent": agent["name"],
+                    "usage": response.usage,
+                    "finish_reason": response.finish_reason,
+                    "attempts": attempt + 1,
+                })
 
-        # Emit the agent's message for chat visualization
-        self._emit_agent_message(
-            agent_name=agent["name"],
-            message_type="response",
-            content=response.content,
-        )
+                # Emit the agent's message for chat visualization
+                self._emit_agent_message(
+                    agent_name=agent["name"],
+                    message_type="response",
+                    content=response.content,
+                )
 
-        return response.content
+                return response.content
+                
+            except Exception as e:
+                last_error = e
+                logger.warning(f"[_call_agent] Agent {agent['name']} attempt {attempt + 1}/{max_retries} failed: {e}")
+                
+                # Check if error is retryable
+                if not self._is_retryable_error(e):
+                    logger.error(f"[_call_agent] Non-retryable error for {agent['name']}: {e}")
+                    self._emit_event("agent_failed", {
+                        "agent": agent["name"],
+                        "error": str(e),
+                        "retryable": False,
+                        "attempts": attempt + 1,
+                    })
+                    raise
+                
+                # If this was the last attempt, raise the error
+                if attempt == max_retries - 1:
+                    logger.error(f"[_call_agent] All {max_retries} retry attempts exhausted for {agent['name']}")
+                    self._emit_event("agent_failed", {
+                        "agent": agent["name"],
+                        "error": str(e),
+                        "retryable": True,
+                        "attempts": max_retries,
+                    })
+                    raise
+        
+        # This should never be reached, but just in case
+        raise last_error if last_error else RuntimeError("Unexpected error in _call_agent")
 
     def _get_provider_from_config(self, llm_config: Dict[str, Any]) -> LLMProvider:
         """Determine provider from LLM config."""
@@ -4087,6 +4190,39 @@ Apply these insights naturally without explicitly referencing "market research" 
                     content=content,
                 )
 
+        # Helper function to store phase status for resume capability
+        async def store_phase_status(
+            phase: str,
+            status: str,
+            error: Optional[str] = None,
+            error_type: Optional[str] = None,
+        ) -> None:
+            """Store phase status artifact for tracking progress and enabling resume.
+            
+            Args:
+                phase: Phase name (genesis, characters, worldbuilding, etc.)
+                status: Status string - "started", "completed", or "failed"
+                error: Error message if status is "failed"
+                error_type: Type of error (retryable, non_retryable)
+            """
+            if persistence_service and run_id and persistence_service.is_connected and supabase_project_id:
+                status_content = {
+                    "status": status,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                if error:
+                    status_content["error"] = error
+                if error_type:
+                    status_content["error_type"] = error_type
+                await persistence_service.store_run_artifact(
+                    project_id=persistence_project_id,
+                    run_id=run_id,
+                    phase=phase,
+                    artifact_type="phase_status",
+                    content=status_content,
+                )
+                logger.info(f"[run_full_generation] Phase '{phase}' status: {status}")
+
         # Helper function to store individual scene artifact
         async def store_scene(scene_number: int, draft: Dict[str, Any], polished: Optional[Dict[str, Any]] = None) -> None:
             if persistence_service and run_id and persistence_service.is_connected and supabase_project_id:
@@ -4174,21 +4310,28 @@ Apply these insights naturally without explicitly referencing "market research" 
 
         if not genesis_result:
             await self._check_pause()  # Pause checkpoint
-            # If research context is provided, create a modified project with enriched target_audience
-            if research_context_section:
-                # Create a copy of the project with research context appended to target_audience
-                enriched_project = StoryProject(
-                    seed_idea=project.seed_idea,
-                    moral_compass=project.moral_compass,
-                    target_audience=f"{project.target_audience}\n{research_context_section}" if project.target_audience else research_context_section,
-                    theme_core=project.theme_core,
-                    tone_style_references=project.tone_style_references,
-                    custom_moral_system=project.custom_moral_system,
-                )
-                genesis_result = await self.run_genesis_phase(enriched_project)
-            else:
-                genesis_result = await self.run_genesis_phase(project)
-            await store_artifact("genesis", "narrative_possibility", genesis_result.get("narrative_possibility", {}))
+            await store_phase_status("genesis", "started")
+            try:
+                # If research context is provided, create a modified project with enriched target_audience
+                if research_context_section:
+                    # Create a copy of the project with research context appended to target_audience
+                    enriched_project = StoryProject(
+                        seed_idea=project.seed_idea,
+                        moral_compass=project.moral_compass,
+                        target_audience=f"{project.target_audience}\n{research_context_section}" if project.target_audience else research_context_section,
+                        theme_core=project.theme_core,
+                        tone_style_references=project.tone_style_references,
+                        custom_moral_system=project.custom_moral_system,
+                    )
+                    genesis_result = await self.run_genesis_phase(enriched_project)
+                else:
+                    genesis_result = await self.run_genesis_phase(project)
+                await store_artifact("genesis", "narrative_possibility", genesis_result.get("narrative_possibility", {}))
+                await store_phase_status("genesis", "completed")
+            except Exception as e:
+                error_type = "retryable" if self._is_retryable_error(e) else "non_retryable"
+                await store_phase_status("genesis", "failed", error=str(e), error_type=error_type)
+                raise
 
         # Set max_revisions in state AFTER genesis phase creates it
         if self.state:
@@ -4196,6 +4339,7 @@ Apply these insights naturally without explicitly referencing "market research" 
         results["phases"]["genesis"] = genesis_result
 
         if not genesis_result.get("narrative_possibility"):
+            await store_phase_status("genesis", "failed", error="No narrative_possibility returned")
             return {"error": "Genesis phase failed", **results}
 
         # Phase 2: Characters
@@ -4223,13 +4367,20 @@ Apply these insights naturally without explicitly referencing "market research" 
 
         if not characters_result:
             await self._check_pause()  # Pause checkpoint
-            characters_result = await self.run_characters_phase(
-                narrative=genesis_result["narrative_possibility"],
-                moral_compass=project.moral_compass.value,
-                target_audience=project.target_audience,
-                change_request=change_request,
-            )
-            await store_artifact("characters", "characters", {"characters": characters_result.get("characters", [])})
+            await store_phase_status("characters", "started")
+            try:
+                characters_result = await self.run_characters_phase(
+                    narrative=genesis_result["narrative_possibility"],
+                    moral_compass=project.moral_compass.value,
+                    target_audience=project.target_audience,
+                    change_request=change_request,
+                )
+                await store_artifact("characters", "characters", {"characters": characters_result.get("characters", [])})
+                await store_phase_status("characters", "completed")
+            except Exception as e:
+                error_type = "retryable" if self._is_retryable_error(e) else "non_retryable"
+                await store_phase_status("characters", "failed", error=str(e), error_type=error_type)
+                raise
 
         results["phases"]["characters"] = characters_result
 
@@ -4327,22 +4478,30 @@ Apply these insights naturally without explicitly referencing "market research" 
 
         if not outlining_result:
             await self._check_pause()  # Pause checkpoint
-            outlining_result = await self.run_outlining_phase(
-                narrative=genesis_result["narrative_possibility"],
-                characters=characters_result["characters"],
-                moral_compass=project.moral_compass.value,
-                target_word_count=target_word_count,
-                estimated_scenes=estimated_scenes,
-                preferred_structure=preferred_structure,
-                worldbuilding=worldbuilding,
-                change_request=change_request,
-            )
-            await store_artifact("outlining", "outline", outlining_result.get("outline", {}))
+            await store_phase_status("outlining", "started")
+            try:
+                outlining_result = await self.run_outlining_phase(
+                    narrative=genesis_result["narrative_possibility"],
+                    characters=characters_result["characters"],
+                    moral_compass=project.moral_compass.value,
+                    target_word_count=target_word_count,
+                    estimated_scenes=estimated_scenes,
+                    preferred_structure=preferred_structure,
+                    worldbuilding=worldbuilding,
+                    change_request=change_request,
+                )
+                await store_artifact("outlining", "outline", outlining_result.get("outline", {}))
+                await store_phase_status("outlining", "completed")
+            except Exception as e:
+                error_type = "retryable" if self._is_retryable_error(e) else "non_retryable"
+                await store_phase_status("outlining", "failed", error=str(e), error_type=error_type)
+                raise
 
         results["phases"]["outlining"] = outlining_result
 
         if not outlining_result.get("outline"):
             logger.error("[run_full_generation] Outlining phase failed - no outline returned")
+            await store_phase_status("outlining", "failed", error="No outline returned")
             return {"error": "Outlining phase failed", **results}
 
         outline = outlining_result["outline"]
