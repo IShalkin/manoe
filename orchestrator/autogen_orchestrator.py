@@ -25,6 +25,7 @@ from prompts import (
     DEEPENING_CHECKPOINT_PROMPT,
     EMOTIONAL_BEAT_SHEET_PROMPT,
     IMPACT_ASSESSMENT_SYSTEM_PROMPT,
+    NARRATOR_DESIGN_PROMPT,
     NARRATIVE_POSSIBILITIES_PROMPT,
     ORIGINALITY_CHECK_SYSTEM_PROMPT,
     POLISH_SYSTEM_PROMPT,
@@ -1338,6 +1339,7 @@ Now create the plot outline as valid JSON.
         previous_scene_summary: str = "N/A",
         memory_context: Optional[Dict[str, Any]] = None,
         narrator_config: Optional[Dict[str, Any]] = None,
+        narrator_design: Optional[Dict[str, Any]] = None,
         change_request: Optional[str] = None,
         sensory_blueprint: Optional[Dict[str, Any]] = None,
         subtext_design: Optional[Dict[str, Any]] = None,
@@ -1356,10 +1358,15 @@ Now create the plot outline as valid JSON.
             memory_context: Optional context from Qdrant memory with:
                 - relevant_characters: Characters retrieved by semantic search
                 - relevant_scenes: Previous scenes retrieved for continuity
-            narrator_config: Optional narrator design settings with:
-                - pov: Point of view (first_person, third_person_limited, etc.)
-                - reliability: Narrator reliability (reliable, unreliable)
-                - stance: Narrator stance (objective, judgmental, sympathetic)
+            narrator_config: Optional basic narrator settings (POV, reliability, stance)
+            narrator_design: Optional comprehensive narrator design artifact with:
+                - pov: Point of view details with rationale
+                - reliability: Reliability level and unreliability details
+                - stance: Emotional stance and moral position
+                - voice_characteristics: Vocabulary, sentence structure, verbal tics
+                - narrative_techniques: Tense, direct address, time handling
+                - character_relationship: Protagonist distance, interiority access
+                - sample_voice: Example of the narrator's voice
             sensory_blueprint: Optional pre-planned sensory details for the scene
             subtext_design: Optional pre-designed subtext layer for the scene
             motif_target: Optional per-scene motif target from the motif bible with:
@@ -1436,9 +1443,120 @@ Now create the plot outline as valid JSON.
                         memory_context_str += f"- Content Preview: {scene_mem.get('narrative_content', '')[:300]}...\n"
                     memory_context_str += "\n"
 
-        # Format narrator config for the prompt
+        # Format narrator design for the prompt (prefer comprehensive narrator_design over basic narrator_config)
         narrator_str = ""
-        if narrator_config:
+        if narrator_design:
+            # Use comprehensive narrator design artifact
+            pov = narrator_design.get("pov", {})
+            reliability = narrator_design.get("reliability", {})
+            stance = narrator_design.get("stance", {})
+            voice = narrator_design.get("voice_characteristics", {})
+            techniques = narrator_design.get("narrative_techniques", {})
+            char_rel = narrator_design.get("character_relationship", {})
+            sample_voice = narrator_design.get("sample_voice", "")
+
+            narrator_str = """
+## Narrator Design (Comprehensive)
+
+"""
+            # POV section
+            pov_type = pov.get("type", "third_person_limited")
+            pov_focal = pov.get("focal_character", "")
+            pov_rationale = pov.get("rationale", "")
+            narrator_str += f"**Point of View:** {pov_type}\n"
+            if pov_focal:
+                narrator_str += f"- Focal Character: {pov_focal}\n"
+            if pov_rationale:
+                narrator_str += f"- Rationale: {pov_rationale}\n"
+            narrator_str += "\n"
+
+            # Reliability section
+            rel_level = reliability.get("level", "reliable")
+            narrator_str += f"**Narrator Reliability:** {rel_level}\n"
+            if rel_level == "unreliable" and reliability.get("if_unreliable"):
+                unreliable_info = reliability["if_unreliable"]
+                narrator_str += f"- Type: {unreliable_info.get('type', 'N/A')}\n"
+                blind_spots = unreliable_info.get("blind_spots", [])
+                if blind_spots:
+                    narrator_str += f"- Blind Spots: {', '.join(blind_spots) if isinstance(blind_spots, list) else blind_spots}\n"
+                hidden_truths = unreliable_info.get("hidden_truths", [])
+                if hidden_truths:
+                    narrator_str += f"- Hidden Truths: {', '.join(hidden_truths) if isinstance(hidden_truths, list) else hidden_truths}\n"
+            narrator_str += "\n"
+
+            # Stance section
+            stance_primary = stance.get("primary", "objective")
+            narrator_str += f"**Emotional Stance:** {stance_primary}\n"
+            if stance.get("emotional_investment"):
+                narrator_str += f"- Emotional Investment: {stance['emotional_investment']}\n"
+            if stance.get("moral_position"):
+                narrator_str += f"- Moral Position: {stance['moral_position']}\n"
+            narrator_str += "\n"
+
+            # Voice Characteristics section (CRITICAL for distinctive voice)
+            if voice:
+                narrator_str += "**Voice Characteristics:**\n"
+                vocab = voice.get("vocabulary", {})
+                if vocab:
+                    narrator_str += f"- Vocabulary Level: {vocab.get('level', 'moderate')}, Style: {vocab.get('style', 'N/A')}\n"
+                    distinctive_words = vocab.get("distinctive_words", [])
+                    if distinctive_words:
+                        narrator_str += f"- Distinctive Words/Phrases: {', '.join(distinctive_words) if isinstance(distinctive_words, list) else distinctive_words}\n"
+
+                sentence = voice.get("sentence_structure", {})
+                if sentence:
+                    narrator_str += f"- Sentence Rhythm: {sentence.get('rhythm', 'N/A')}\n"
+                    narrator_str += f"- Average Length: {sentence.get('average_length', 'varied')}\n"
+                    patterns = sentence.get("signature_patterns", [])
+                    if patterns:
+                        narrator_str += f"- Signature Patterns: {', '.join(patterns) if isinstance(patterns, list) else patterns}\n"
+
+                verbal_tics = voice.get("verbal_tics", [])
+                if verbal_tics:
+                    narrator_str += f"- Verbal Tics: {', '.join(verbal_tics) if isinstance(verbal_tics, list) else verbal_tics}\n"
+
+                cultural = voice.get("cultural_markers", [])
+                if cultural:
+                    narrator_str += f"- Cultural Markers: {', '.join(cultural) if isinstance(cultural, list) else cultural}\n"
+
+                if voice.get("emotional_temperature"):
+                    narrator_str += f"- Emotional Temperature: {voice['emotional_temperature']}\n"
+                narrator_str += "\n"
+
+            # Narrative Techniques section
+            if techniques:
+                narrator_str += "**Narrative Techniques:**\n"
+                if techniques.get("tense"):
+                    narrator_str += f"- Tense: {techniques['tense']}\n"
+                if techniques.get("direct_address"):
+                    narrator_str += f"- Direct Address: {techniques['direct_address']}\n"
+                if techniques.get("time_handling"):
+                    narrator_str += f"- Time Handling: {techniques['time_handling']}\n"
+                if techniques.get("interior_monologue"):
+                    narrator_str += f"- Interior Monologue: {techniques['interior_monologue']}\n"
+                if techniques.get("dialogue_style"):
+                    narrator_str += f"- Dialogue Style: {techniques['dialogue_style']}\n"
+                narrator_str += "\n"
+
+            # Character Relationship section
+            if char_rel:
+                narrator_str += "**Narrator-Character Relationship:**\n"
+                if char_rel.get("protagonist_distance"):
+                    narrator_str += f"- Distance from Protagonist: {char_rel['protagonist_distance']}\n"
+                if char_rel.get("interiority_access"):
+                    narrator_str += f"- Interiority Access: {char_rel['interiority_access']}\n"
+                if char_rel.get("revelation_style"):
+                    narrator_str += f"- Revelation Style: {char_rel['revelation_style']}\n"
+                narrator_str += "\n"
+
+            # Sample Voice (for reference)
+            if sample_voice:
+                narrator_str += f"**Sample Voice (for reference):**\n\"{sample_voice}\"\n\n"
+
+            narrator_str += """IMPORTANT: Write the entire scene strictly adhering to this narrator design. Maintain the distinctive voice characteristics throughout. The POV determines whose thoughts we can access. The voice characteristics define HOW the narrator speaks - vocabulary, rhythm, verbal tics. This is what makes your narrator unique and memorable.
+"""
+        elif narrator_config:
+            # Fallback to basic narrator config if no comprehensive design available
             pov_map = {
                 "first_person": "First Person (I/We) - intimate, limited to narrator's knowledge",
                 "third_person_limited": "Third Person Limited (He/She) - follows one character's perspective",
@@ -2541,6 +2659,92 @@ Output your revised scene as valid JSON with the same structure as the original 
         }
 
     # =========================================================================
+    # Narrator Design (Storyteller Section 3.2)
+    # =========================================================================
+
+    async def run_narrator_design(
+        self,
+        narrative: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        narrator_preferences: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a comprehensive Narrator Design artifact based on story context.
+
+        This creates a first-class artifact that goes beyond basic POV selection
+        to establish a distinctive narrative voice with detailed voice characteristics.
+
+        Args:
+            narrative: Narrative context from Genesis phase
+            characters: Character profiles from Profiler
+            narrator_preferences: Optional user preferences for POV, reliability, stance
+        """
+        self._emit_event("phase_start", {"phase": "narrator_design"})
+
+        # Extract user preferences or use defaults
+        pov_pref = "not specified (choose based on story)"
+        reliability_pref = "not specified (choose based on story)"
+        stance_pref = "not specified (choose based on story)"
+
+        if narrator_preferences:
+            pov_map = {
+                "first_person": "First Person (I/We)",
+                "third_person_limited": "Third Person Limited",
+                "third_person_omniscient": "Third Person Omniscient",
+                "second_person": "Second Person (You)",
+            }
+            reliability_map = {
+                "reliable": "Reliable",
+                "unreliable": "Unreliable",
+            }
+            stance_map = {
+                "objective": "Objective",
+                "judgmental": "Judgmental",
+                "sympathetic": "Sympathetic",
+            }
+            pov_pref = pov_map.get(narrator_preferences.get("pov", ""), pov_pref)
+            reliability_pref = reliability_map.get(narrator_preferences.get("reliability", ""), reliability_pref)
+            stance_pref = stance_map.get(narrator_preferences.get("stance", ""), stance_pref)
+
+        # Get protagonist for focal character consideration
+        protagonist = characters[0] if characters else {}
+        protagonist_name = protagonist.get("name", "Unknown")
+
+        # Format the prompt with user preferences
+        formatted_prompt = NARRATOR_DESIGN_PROMPT.format(
+            pov_preference=pov_pref,
+            reliability_preference=reliability_pref,
+            stance_preference=stance_pref,
+        )
+
+        user_prompt = f"""
+## Story Context
+
+**Seed Idea:** {narrative.get("seed_idea", "")}
+**Plot Summary:** {narrative.get("plot_summary", "")}
+**Main Conflict:** {narrative.get("main_conflict", "")}
+**Thematic Elements:** {_safe_join(narrative.get("thematic_elements", []))}
+**Tone:** {narrative.get("tone", "")}
+**Target Audience:** {narrative.get("target_audience", "")}
+
+## Protagonist
+
+**Name:** {protagonist_name}
+**Archetype:** {protagonist.get("archetype", "")}
+**Core Motivation:** {protagonist.get("core_motivation", "")}
+**Psychological Wound:** {protagonist.get("psychological_wound", "")}
+
+## All Characters
+
+{json.dumps([{{"name": c.get("name"), "archetype": c.get("archetype"), "role": c.get("role", "supporting")}} for c in characters], indent=2)}
+
+---
+
+{formatted_prompt}
+
+Design the narrator for this story as valid JSON.
+"""
+
     # Priority 2: Deepening Checkpoints (Storyteller Section 6.1)
     # =========================================================================
 
@@ -2800,6 +3004,27 @@ Tone: {narrative.get("estimated_tone", "Not specified")}
         response = await self._call_agent(self.architect, user_prompt)
         msg = self._parse_agent_message("Architect", response)
         self.state.messages.append(msg)
+
+        narrator_design = msg.content if isinstance(msg.content, dict) else {}
+
+        # Extract key info for the event
+        pov_type = narrator_design.get("pov", {}).get("type", "unknown")
+        reliability_level = narrator_design.get("reliability", {}).get("level", "unknown")
+        stance_primary = narrator_design.get("stance", {}).get("primary", "unknown")
+
+        self._emit_event("phase_complete", {
+            "phase": "narrator_design",
+            "pov": pov_type,
+            "reliability": reliability_level,
+            "stance": stance_primary,
+        })
+
+        return {
+            "narrator_design": narrator_design,
+            "pov": pov_type,
+            "reliability": reliability_level,
+            "stance": stance_primary,
+        }
 
         motif_result = msg.content if isinstance(msg.content, dict) else {}
 
@@ -3781,6 +4006,30 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         if isinstance(characters, list):
             await self._store_characters_in_memory(memory_project_id, characters)
 
+        # Phase 2.5: Narrator Design (generates comprehensive narrator artifact)
+        # This runs after characters because it needs character context
+        narrator_design_result = None
+        narrator_design = None
+        if should_skip_phase("characters"):
+            # If characters phase was skipped, narrator design was also generated previously
+            narrator_design = get_previous_artifact("narrator_design", "narrator_design")
+            if narrator_design:
+                narrator_design_result = {"narrator_design": narrator_design}
+                results["phases"]["narrator_design"] = narrator_design_result
+                self._emit_event("phase_skipped", {"phase": "narrator_design", "reason": "using_previous_artifact"})
+
+        if not narrator_design_result:
+            await self._check_pause()  # Pause checkpoint
+            narrator_design_result = await self.run_narrator_design(
+                narrative=genesis_result["narrative_possibility"],
+                characters=characters_result["characters"],
+                narrator_preferences=narrator_config,
+            )
+            narrator_design = narrator_design_result.get("narrator_design", {})
+            await store_artifact("narrator_design", "narrator_design", narrator_design)
+
+        results["phases"]["narrator_design"] = narrator_design_result
+
         # Phase 3: Worldbuilding
         worldbuilding_result = None
         if should_skip_phase("worldbuilding"):
@@ -4047,6 +4296,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     previous_scene_summary=continuity["previous_scene_summary"] if scene_regen_mode else previous_summary,
                     memory_context=memory_ctx if memory_ctx else None,
                     narrator_config=narrator_config,
+                    narrator_design=narrator_design,
                     change_request=change_request,
                     sensory_blueprint=scene_sensory_blueprint,
                     subtext_design=scene_subtext_design,
