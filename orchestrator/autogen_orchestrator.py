@@ -67,6 +67,40 @@ class GenerationPhase(str, Enum):
     POLISH = "polish"
 
 
+# Dynamic max_tokens limits based on phase/task type
+# These are tuned for the expected output size of each phase
+PHASE_MAX_TOKENS = {
+    # High token phases - complex JSON structures or long prose
+    GenerationPhase.OUTLINING: 16384,      # 20+ scenes with detailed info
+    GenerationPhase.DRAFTING: 16384,       # Long prose scenes (2000-3000 words)
+    GenerationPhase.REVISION: 16384,       # Revised scenes can be long
+    GenerationPhase.POLISH: 12288,         # Polished prose
+    
+    # Medium token phases - structured JSON responses
+    GenerationPhase.WORLDBUILDING: 12288,  # Detailed world info
+    GenerationPhase.CHARACTERS: 10240,     # Multiple character profiles
+    GenerationPhase.GENESIS: 8192,         # Narrative possibilities
+    GenerationPhase.IMPACT_ASSESSMENT: 8192,
+    
+    # Lower token phases - shorter responses
+    GenerationPhase.CRITIQUE: 6144,        # Feedback and suggestions
+    GenerationPhase.ORIGINALITY_CHECK: 4096,
+}
+
+DEFAULT_MAX_TOKENS = 8192  # Fallback for unknown phases
+
+
+def get_max_tokens_for_phase(phase: Optional[GenerationPhase]) -> int:
+    """Get appropriate max_tokens limit based on current phase.
+    
+    This provides dynamic token limits based on the expected output size
+    of each phase, rather than hardcoding per-agent limits.
+    """
+    if phase is None:
+        return DEFAULT_MAX_TOKENS
+    return PHASE_MAX_TOKENS.get(phase, DEFAULT_MAX_TOKENS)
+
+
 @dataclass
 class AgentMessage:
     """Structured message between agents."""
@@ -585,7 +619,7 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
             agent: Agent configuration dict
             user_message: The user message to send
             conversation_history: Optional conversation history
-            max_tokens: Maximum tokens for response (default: 8192 for most agents, 16384 for Strategist)
+            max_tokens: Maximum tokens for response. If None, uses phase-based dynamic limit.
         """
         # Check pause before every agent call for responsive pause behavior
         await self._check_pause()
@@ -601,15 +635,15 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         provider = self._get_provider_from_config(llm_config)
         model = llm_config.get("model", "")
         
-        # Default max_tokens based on agent type - Strategist needs more for outlines
+        # Dynamic max_tokens based on current phase (not agent)
+        # This allows different models to be used for different tasks
         if max_tokens is None:
-            if agent["name"] == "Strategist":
-                max_tokens = 16384  # Outlines can be very long (20+ scenes)
-            else:
-                max_tokens = 8192  # Default for other agents
+            current_phase = self.state.phase if self.state else None
+            max_tokens = get_max_tokens_for_phase(current_phase)
         
         # Log without exposing API key
-        logger.info(f"[_call_agent] Agent: {agent['name']}, Provider: {provider}, Model: '{model}', max_tokens: {max_tokens}")
+        phase_name = self.state.phase.value if self.state and self.state.phase else "unknown"
+        logger.info(f"[_call_agent] Agent: {agent['name']}, Phase: {phase_name}, Provider: {provider}, Model: '{model}', max_tokens: {max_tokens}")
         logger.info(f"[_call_agent] api_key_present: {'api_key' in llm_config and bool(llm_config.get('api_key'))}")
 
         self._emit_event("agent_start", {
