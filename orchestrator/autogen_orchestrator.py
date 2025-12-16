@@ -22,6 +22,7 @@ from prompts import (
     COMPLEXITY_CHECKLIST_PROMPT,
     CONTRADICTION_MAPS_PROMPT,
     CRITIC_SYSTEM_PROMPT,
+    DEEPENING_CHECKPOINT_PROMPT,
     EMOTIONAL_BEAT_SHEET_PROMPT,
     IMPACT_ASSESSMENT_SYSTEM_PROMPT,
     NARRATIVE_POSSIBILITIES_PROMPT,
@@ -2492,6 +2493,185 @@ Output your revised scene as valid JSON with the same structure as the original 
         }
 
     # =========================================================================
+    # Priority 2: Deepening Checkpoints (Storyteller Section 6.1)
+    # =========================================================================
+
+    async def run_deepening_checkpoint(
+        self,
+        scene_number: int,
+        scene_draft: Dict[str, Any],
+        checkpoint_type: str,
+        narrative: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        outline: Dict[str, Any],
+        previous_scenes: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run a deepening checkpoint evaluation for a key structural scene.
+
+        Deepening checkpoints are quality gates at critical narrative points:
+        - inciting_incident: Scene that disrupts the protagonist's ordinary world
+        - midpoint: Major shift in story direction, stakes escalation
+        - climax: Highest tension point, protagonist's defining choice
+        - resolution: Emotional closure, arc completion
+
+        Args:
+            scene_number: The scene number being evaluated
+            scene_draft: The drafted scene content
+            checkpoint_type: Type of checkpoint (inciting_incident, midpoint, climax, resolution)
+            narrative: Narrative foundation from Genesis phase
+            characters: Character profiles from Profiler
+            outline: Plot outline from Strategist
+            previous_scenes: Optional list of previous scene drafts for context
+
+        Returns:
+            Dict with checkpoint evaluation results including pass/fail and feedback
+        """
+        valid_checkpoints = ["inciting_incident", "midpoint", "climax", "resolution"]
+        if checkpoint_type not in valid_checkpoints:
+            raise ValueError(f"Invalid checkpoint_type: {checkpoint_type}. Must be one of {valid_checkpoints}")
+
+        self._emit_event("checkpoint_start", {
+            "scene_number": scene_number,
+            "checkpoint_type": checkpoint_type,
+        })
+
+        # Format scene content for evaluation
+        scene_content = scene_draft.get("narrative_content", "")
+        if isinstance(scene_content, list):
+            scene_content = "\n\n".join(scene_content)
+        elif isinstance(scene_content, dict):
+            scene_content = json.dumps(scene_content, indent=2)
+
+        scene_title = scene_draft.get("scene_title", f"Scene {scene_number}")
+
+        # Format character arcs
+        character_arcs = []
+        for char in characters:
+            arc_info = f"- {char.get('name', 'Unknown')}: {char.get('potential_arc', char.get('arc_type', 'Unknown arc'))}"
+            if char.get('psychological_wound'):
+                arc_info += f" (wound: {char.get('psychological_wound')})"
+            character_arcs.append(arc_info)
+        character_arcs_str = "\n".join(character_arcs) if character_arcs else "No character arc information available"
+
+        # Format themes
+        themes = narrative.get("thematic_elements", [])
+        if isinstance(themes, list):
+            themes_str = ", ".join(themes) if themes else "No themes specified"
+        else:
+            themes_str = str(themes)
+
+        # Format previous events
+        previous_events = []
+        if previous_scenes:
+            for prev_scene in previous_scenes[-3:]:
+                prev_title = prev_scene.get("scene_title", "Untitled")
+                prev_summary = prev_scene.get("scene_summary", prev_scene.get("plot_advancement", ""))
+                if prev_summary:
+                    previous_events.append(f"- {prev_title}: {prev_summary[:200]}")
+        previous_events_str = "\n".join(previous_events) if previous_events else "This is an early scene with no significant previous events"
+
+        # Format narrative summary
+        narrative_summary = f"""
+Plot Summary: {narrative.get("plot_summary", "Not available")}
+Main Conflict: {narrative.get("main_conflict", "Not available")}
+Setting: {narrative.get("setting_description", "Not available")}
+"""
+
+        # Build the evaluation prompt
+        user_prompt = DEEPENING_CHECKPOINT_PROMPT.format(
+            checkpoint_type=checkpoint_type.replace("_", " ").title(),
+            scene_number=scene_number,
+            scene_title=scene_title,
+            scene_content=scene_content[:5000],
+            narrative_summary=narrative_summary,
+            character_arcs=character_arcs_str,
+            themes=themes_str,
+            previous_events=previous_events_str,
+        )
+
+        # Use the Critic agent for checkpoint evaluation
+        response = await self._call_agent(self.critic, user_prompt)
+        checkpoint_msg = self._parse_agent_message("Critic", response)
+        self.state.messages.append(checkpoint_msg)
+
+        # Parse the checkpoint result
+        checkpoint_result = checkpoint_msg.content if isinstance(checkpoint_msg.content, dict) else {}
+
+        # Determine if checkpoint passed
+        passed = checkpoint_result.get("passed", False)
+        overall_score = checkpoint_result.get("overall_score", 0)
+
+        # Check passing criteria
+        criteria_scores = checkpoint_result.get("criteria_scores", {})
+        structural_score = criteria_scores.get("structural_function", {}).get("score", 0)
+        min_score = min(
+            [c.get("score", 10) for c in criteria_scores.values() if isinstance(c, dict)],
+            default=10
+        )
+
+        # Apply passing threshold logic
+        if overall_score >= 7.0 and min_score >= 5 and structural_score >= 7:
+            passed = True
+        else:
+            passed = False
+
+        checkpoint_result["passed"] = passed
+
+        self._emit_event("checkpoint_complete", {
+            "scene_number": scene_number,
+            "checkpoint_type": checkpoint_type,
+            "passed": passed,
+            "overall_score": overall_score,
+            "structural_score": structural_score,
+            "revision_priority": checkpoint_result.get("revision_priority", "medium"),
+        })
+
+        return {
+            "checkpoint_type": checkpoint_type,
+            "scene_number": scene_number,
+            "passed": passed,
+            "overall_score": overall_score,
+            "criteria_scores": criteria_scores,
+            "strengths": checkpoint_result.get("strengths", []),
+            "areas_for_improvement": checkpoint_result.get("areas_for_improvement", []),
+            "checkpoint_specific_notes": checkpoint_result.get("checkpoint_specific_notes", ""),
+            "revision_priority": checkpoint_result.get("revision_priority", "medium"),
+            "suggested_revisions": checkpoint_result.get("suggested_revisions", []),
+        }
+
+    def get_checkpoint_scenes(self, outline: Dict[str, Any]) -> Dict[str, int]:
+        """
+        Extract the checkpoint scene numbers from the outline.
+
+        Returns:
+            Dict mapping checkpoint type to scene number
+        """
+        return {
+            "inciting_incident": outline.get("inciting_incident_scene", 2),
+            "midpoint": outline.get("midpoint_scene", outline.get("total_scenes", 10) // 2),
+            "climax": outline.get("climax_scene", int(outline.get("total_scenes", 10) * 0.8)),
+            "resolution": outline.get("resolution_scene", outline.get("total_scenes", 10)),
+        }
+
+    def is_checkpoint_scene(self, scene_number: int, outline: Dict[str, Any]) -> Optional[str]:
+        """
+        Check if a scene number is a checkpoint scene.
+
+        Args:
+            scene_number: The scene number to check
+            outline: The plot outline containing checkpoint markers
+
+        Returns:
+            The checkpoint type if this is a checkpoint scene, None otherwise
+        """
+        checkpoint_scenes = self.get_checkpoint_scenes(outline)
+        for checkpoint_type, checkpoint_scene in checkpoint_scenes.items():
+            if scene_number == checkpoint_scene:
+                return checkpoint_type
+        return None
+
+    # =========================================================================
     # Priority 3: Advanced Features
     # =========================================================================
 
@@ -3691,6 +3871,34 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     draft_result["draft"] = quality_enforcement_result["final_draft"]
                     draft_result["quality_enforcement"] = quality_enforcement_result
 
+                # Deepening Checkpoint evaluation for key structural scenes
+                checkpoint_type = self.is_checkpoint_scene(scene_number, outline)
+                if checkpoint_type and draft_result.get("draft"):
+                    # Collect previous scene drafts for context
+                    previous_scene_drafts = [
+                        d.get("draft", {}) for d in drafts[:i] if d.get("draft")
+                    ]
+                    checkpoint_result = await self.run_deepening_checkpoint(
+                        scene_number=scene_number,
+                        scene_draft=draft_result["draft"],
+                        checkpoint_type=checkpoint_type,
+                        narrative=genesis_result["narrative_possibility"],
+                        characters=characters_result["characters"],
+                        outline=outline,
+                        previous_scenes=previous_scene_drafts,
+                    )
+                    draft_result["checkpoint"] = checkpoint_result
+
+                    # Store checkpoint result as artifact
+                    if persistence_service and run_id and persistence_service.is_connected:
+                        await persistence_service.store_artifact(
+                            run_id=run_id,
+                            phase=f"checkpoint_{checkpoint_type}",
+                            artifact_type="checkpoint_evaluation",
+                            content=checkpoint_result,
+                            project_id=supabase_project_id,
+                        )
+
                 # Update or append draft result
                 if scene_regen_mode and i < len(drafts):
                     drafts[i] = draft_result
@@ -3718,6 +3926,14 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             for d in drafts if d.get("quality_enforcement")
         ]
         results["phases"]["quality_gate"] = {"scenes": quality_results}
+
+        # Collect deepening checkpoint results from drafts
+        checkpoint_results = {
+            d.get("checkpoint", {}).get("checkpoint_type"): d.get("checkpoint", {})
+            for d in drafts if d.get("checkpoint")
+        }
+        if checkpoint_results:
+            results["phases"]["checkpoints"] = checkpoint_results
 
         # Phase 7: Polish (all scenes or selective regeneration)
         polished_drafts = []
