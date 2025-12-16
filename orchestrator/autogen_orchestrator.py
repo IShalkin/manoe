@@ -577,8 +577,16 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         agent: Dict[str, Any],
         user_message: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
+        max_tokens: Optional[int] = None,
     ) -> str:
-        """Call an agent and get its response."""
+        """Call an agent and get its response.
+        
+        Args:
+            agent: Agent configuration dict
+            user_message: The user message to send
+            conversation_history: Optional conversation history
+            max_tokens: Maximum tokens for response (default: 8192 for most agents, 16384 for Strategist)
+        """
         # Check pause before every agent call for responsive pause behavior
         await self._check_pause()
 
@@ -593,8 +601,15 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         provider = self._get_provider_from_config(llm_config)
         model = llm_config.get("model", "")
         
+        # Default max_tokens based on agent type - Strategist needs more for outlines
+        if max_tokens is None:
+            if agent["name"] == "Strategist":
+                max_tokens = 16384  # Outlines can be very long (20+ scenes)
+            else:
+                max_tokens = 8192  # Default for other agents
+        
         # Log without exposing API key
-        logger.info(f"[_call_agent] Agent: {agent['name']}, Provider: {provider}, Model: '{model}'")
+        logger.info(f"[_call_agent] Agent: {agent['name']}, Provider: {provider}, Model: '{model}', max_tokens: {max_tokens}")
         logger.info(f"[_call_agent] api_key_present: {'api_key' in llm_config and bool(llm_config.get('api_key'))}")
 
         self._emit_event("agent_start", {
@@ -607,12 +622,19 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
             model=model,
             provider=provider,
             temperature=0.7,
+            max_tokens=max_tokens,
             response_format={"type": "json_object"} if "json" in user_message.lower() else None,
         )
+
+        # Log finish_reason to detect truncation
+        logger.info(f"[_call_agent] Agent: {agent['name']}, finish_reason: {response.finish_reason}, usage: {response.usage}")
+        if response.finish_reason in ("length", "max_tokens"):
+            logger.warning(f"[_call_agent] Agent {agent['name']} response was TRUNCATED (finish_reason={response.finish_reason})")
 
         self._emit_event("agent_complete", {
             "agent": agent["name"],
             "usage": response.usage,
+            "finish_reason": response.finish_reason,
         })
 
         # Emit the agent's message for chat visualization
