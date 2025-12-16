@@ -26,6 +26,8 @@ from config import (
 )
 from models import StoryProject
 from services.redis_streams import RedisStreamsService
+from services.research_memory import ResearchMemoryService
+from services.research_service import ResearchService
 from services.security import (
     ALLOWED_ORIGINS,
     MAX_CUSTOM_MORAL_LENGTH,
@@ -37,8 +39,6 @@ from services.security import (
     run_ownership,
 )
 from services.supabase_persistence import SupabasePersistenceService
-from services.research_service import ResearchService, ResearchProvider
-from services.research_memory import ResearchMemoryService
 
 load_dotenv()
 
@@ -142,20 +142,22 @@ class MultiAgentWorker:
         logger.info(f"[run_generation] Starting with run_id={run_id}")
         logger.info(f"[run_generation] provider='{provider}', model='{model}'")
         logger.info(f"[run_generation] api_key provided: {bool(api_key)}, api_key length: {len(api_key) if api_key else 0}")
-        
+
         # Default model fallback if empty string is provided
+        # Models based on README.md Model Tiers (December 2025)
         if not model or model.strip() == "":
             default_models = {
-                "openai": "gpt-4o",
-                "anthropic": "claude-3-5-sonnet-20241022",
-                "claude": "claude-3-5-sonnet-20241022",
-                "gemini": "gemini-1.5-pro",
-                "openrouter": "openai/gpt-4o",
-                "deepseek": "deepseek-chat",
+                "openai": "gpt-5.2",
+                "anthropic": "claude-opus-4.5",
+                "claude": "claude-opus-4.5",
+                "gemini": "gemini-3-pro",
+                "openrouter": "google/gemini-3-pro",
+                "deepseek": "deepseek-v3",
+                "venice": "dolphin-mistral-24b",
             }
-            model = default_models.get(provider.lower(), "gpt-4o")
+            model = default_models.get(provider.lower(), "gpt-5.2")
             logger.info(f"[run_generation] Empty model provided, using default: '{model}'")
-        
+
         # Publish start event
         is_regeneration = start_from_phase is not None
         await self.redis_streams.publish_event(
@@ -314,7 +316,7 @@ class MultiAgentWorker:
             import traceback
             error_traceback = traceback.format_exc()
             print(f"Generation error for run {run_id}:\n{error_traceback}")
-            
+
             # Publish error event
             await self.redis_streams.publish_event(
                 run_id,
@@ -363,20 +365,22 @@ class MultiAgentWorker:
         logger = logging.getLogger("orchestrator")
         logger.info(f"[run_narrative_possibilities] Starting with run_id={run_id}")
         logger.info(f"[run_narrative_possibilities] provider='{provider}', model='{model}'")
-        
+
         # Default model fallback if empty string is provided
+        # Models based on README.md Model Tiers (December 2025)
         if not model or model.strip() == "":
             default_models = {
-                "openai": "gpt-4o",
-                "anthropic": "claude-3-5-sonnet-20241022",
-                "claude": "claude-3-5-sonnet-20241022",
-                "gemini": "gemini-1.5-pro",
-                "openrouter": "openai/gpt-4o",
-                "deepseek": "deepseek-chat",
+                "openai": "gpt-5.2",
+                "anthropic": "claude-opus-4.5",
+                "claude": "claude-opus-4.5",
+                "gemini": "gemini-3-pro",
+                "openrouter": "google/gemini-3-pro",
+                "deepseek": "deepseek-v3",
+                "venice": "dolphin-mistral-24b",
             }
-            model = default_models.get(provider.lower(), "gpt-4o")
+            model = default_models.get(provider.lower(), "gpt-5.2")
             logger.info(f"[run_narrative_possibilities] Empty model provided, using default: '{model}'")
-        
+
         # Publish start event
         await self.redis_streams.publish_event(
             run_id,
@@ -472,7 +476,7 @@ class MultiAgentWorker:
             import traceback
             error_traceback = traceback.format_exc()
             print(f"Narrative possibilities error for run {run_id}:\n{error_traceback}")
-            
+
             # Publish error event
             await self.redis_streams.publish_event(
                 run_id,
@@ -931,19 +935,19 @@ supabase_service: Optional[SupabasePersistenceService] = None
 async def get_research_services():
     """Initialize and return research services."""
     global research_service, research_memory_service, supabase_service
-    
+
     if research_service is None:
         research_service = ResearchService()
         await research_service.initialize()
-    
+
     if research_memory_service is None:
         research_memory_service = ResearchMemoryService()
         await research_memory_service.initialize()
-    
+
     if supabase_service is None:
         supabase_service = SupabasePersistenceService()
         supabase_service.connect()
-    
+
     return research_service, research_memory_service, supabase_service
 
 
@@ -952,30 +956,30 @@ async def get_research_services():
 async def conduct_research(research_request: ResearchRequest, request: Request):
     """
     Conduct market research using OpenAI Deep Research or Perplexity APIs.
-    
+
     Implements "Eternal Memory" - checks for similar past research before conducting new research.
-    
+
     Supported providers:
     - openai_deep_research: Uses OpenAI's o3-deep-research or o4-mini-deep-research models
     - perplexity: Uses Perplexity's sonar-deep-research model
-    
+
     Reuse policies:
     - auto: Check for similar research, reuse if similarity > threshold
     - force_new: Always conduct new research
     - force_reuse: Only return existing research (fail if none found)
-    
+
     Requires authentication.
     """
     user_id, _ = await get_current_user(request)
-    
+
     rs, rms, supa = await get_research_services()
-    
+
     themes_list = []
     if research_request.themes:
         themes_list = [t.strip() for t in research_request.themes.split(",") if t.strip()]
-    
+
     query_text = f"{research_request.seed_idea} | {research_request.target_audience} | {','.join(themes_list)} | {research_request.moral_compass}"
-    
+
     if research_request.reuse_policy != "force_new":
         try:
             similar_results = await rms.search_similar_research(
@@ -984,12 +988,12 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
                 limit=1,
                 score_threshold=research_request.similarity_threshold,
             )
-            
+
             if similar_results:
                 best_match = similar_results[0]
                 similarity_score = best_match.get("score", 0)
                 research_id = best_match.get("payload", {}).get("research_id")
-                
+
                 if research_id:
                     existing = await supa.get_research_result_by_id(research_id)
                     if existing:
@@ -1014,13 +1018,13 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
                     success=False,
                     error=f"No similar research found and force_reuse policy set: {e}",
                 )
-    
+
     if research_request.reuse_policy == "force_reuse":
         return ResearchResponse(
             success=False,
             error="No similar research found and force_reuse policy set",
         )
-    
+
     result = await rs.conduct_research(
         provider=research_request.provider,
         api_key=research_request.api_key,
@@ -1030,13 +1034,13 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
         moral_compass=research_request.moral_compass,
         model=research_request.model,
     )
-    
+
     if not result.get("success"):
         return ResearchResponse(
             success=False,
             error=result.get("error", "Research failed"),
         )
-    
+
     qdrant_point_id = None
     try:
         qdrant_point_id = await rms.store_research(
@@ -1052,7 +1056,7 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
         )
     except Exception as e:
         print(f"Error storing research in Qdrant: {e}")
-    
+
     research_id = None
     try:
         research_id = await supa.store_research_result(
@@ -1072,7 +1076,7 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
             project_id=research_request.project_id,
             qdrant_point_id=qdrant_point_id,
         )
-        
+
         if research_id and qdrant_point_id:
             try:
                 await rms.update_research_id(qdrant_point_id, research_id)
@@ -1080,7 +1084,7 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
                 print(f"Error updating Qdrant with research_id: {e}")
     except Exception as e:
         print(f"Error storing research in Supabase: {e}")
-    
+
     return ResearchResponse(
         success=True,
         provider=result.get("provider"),
@@ -1129,13 +1133,13 @@ async def get_research_history(
 ):
     """
     Get research history for the authenticated user.
-    
+
     Optionally filter by project_id.
     """
     user_id, _ = await get_current_user(request)
-    
+
     _, _, supa = await get_research_services()
-    
+
     try:
         research = await supa.get_research_results(
             user_id=user_id,
@@ -1154,14 +1158,14 @@ async def get_research_by_id(research_id: str, request: Request):
     Get a specific research result by ID.
     """
     await get_current_user(request)
-    
+
     _, _, supa = await get_research_services()
-    
+
     try:
         research = await supa.get_research_result_by_id(research_id)
         if not research:
             return ResearchResponse(success=False, error="Research not found")
-        
+
         return ResearchResponse(
             success=True,
             provider=research.get("provider"),
@@ -1187,20 +1191,20 @@ async def search_similar_research(
 ):
     """
     Search for similar research results using semantic similarity.
-    
+
     This enables the "Eternal Memory" feature - finding past research
     that matches the current query before conducting new research.
     """
     user_id, _ = await get_current_user(request)
-    
+
     _, rms, _ = await get_research_services()
-    
+
     themes_list = []
     if similar_request.themes:
         themes_list = [t.strip() for t in similar_request.themes.split(",") if t.strip()]
-    
+
     query_text = f"{similar_request.seed_idea} | {similar_request.target_audience} | {','.join(themes_list)} | {similar_request.moral_compass}"
-    
+
     try:
         similar_results = await rms.search_similar_research(
             query_text=query_text,
@@ -1208,7 +1212,7 @@ async def search_similar_research(
             limit=similar_request.limit,
             score_threshold=similar_request.similarity_threshold,
         )
-        
+
         return SimilarResearchResponse(success=True, similar_research=similar_results)
     except Exception as e:
         return SimilarResearchResponse(success=False, error=str(e))
