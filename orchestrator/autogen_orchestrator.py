@@ -2120,57 +2120,194 @@ Make sure your output reflects these requirements.
         draft = writer_msg.content if isinstance(writer_msg.content, dict) else None
 
         # =======================================================================
-        # BUG FIX #1: Mandatory First Revision Pass (Anti "Critic-Agreeer")
-        # First drafts should NEVER pass without at least one refinement cycle.
-        # This forces the Writer to tighten subtext, remove didactic elements,
-        # and subvert at least one cliché before Critic even reviews.
+        # INTELLIGENT DIAGNOSTIC PASS (Two-Pass Critic Analysis)
+        # Instead of blind "first draft always rejected", we do intelligent analysis:
+        # Pass A: Critic evaluates against strict rubric (JSON only, no APPROVED/REVISION)
+        # Pass B: Critic identifies weakest link and provides targeted revision brief
+        # This gives Writer specific, actionable feedback based on actual weaknesses.
         # =======================================================================
-        if self.state.revision_count[scene_number] == 0:
-            logger.info(f"[run_drafting_phase] Scene {scene_number}: Mandatory first revision pass (first draft never passes)")
-            self._emit_event("mandatory_revision", {
+        if self.state.revision_count.get(scene_number, 0) == 0:
+            logger.info(f"[run_drafting_phase] Scene {scene_number}: Starting two-pass Critic diagnostic")
+            self._emit_event("diagnostic_pass_start", {
                 "scene_number": scene_number,
-                "reason": "First draft always requires refinement",
+                "reason": "First draft diagnostic analysis",
             })
             
-            mandatory_revision_prompt = f"""
-## MANDATORY REFINEMENT PASS
+            # ===== PASS A: Rubric Scan (JSON only, no APPROVED/REVISION_REQUEST) =====
+            rubric_prompt = f"""
+## DIAGNOSTIC RUBRIC SCAN - Scene {scene_number}
 
-Your first draft has been automatically flagged for refinement. This is a standard quality control step - first drafts ALWAYS require at least one revision pass.
+You are performing a diagnostic evaluation of this first draft. Output ONLY a JSON rubric - do NOT use the words "APPROVED" or "REVISION_REQUEST" in this response.
 
-**Scene Number:** {scene_number}
 **Scene Title:** {scene.get("title", "Untitled")}
+
+**Target Emotional Beat:**
+- Initial: {emotional_beat.get("initial_state", "")}
+- Climax: {emotional_beat.get("climax", "")}
+- Final: {emotional_beat.get("final_state", "")}
+
+**Required Subtext:** {scene.get("subtext_layer", "")}
+
+## Scene Content
+
+{json.dumps(draft, indent=2) if draft else writer_response}
+
+## Character Profiles
+
+{character_profiles_str}
+
+---
+
+## OUTPUT FORMAT (JSON ONLY)
+
+Evaluate the draft and output ONLY this JSON structure:
+
+{{
+  "overall_score": <float 1-10>,
+  "dimensions": {{
+    "subtext_show_dont_tell": <int 1-10>,
+    "didacticism_level": <int 1-10, where 1=very preachy, 10=no moralizing>,
+    "originality": <int 1-10>,
+    "emotional_impact": <int 1-10>,
+    "sensory_specificity": <int 1-10>,
+    "character_voice_authenticity": <int 1-10>,
+    "dialogue_naturalness": <int 1-10>
+  }},
+  "didacticism_detected": <boolean>,
+  "cliches_found": [<list of specific clichés/tropes identified>],
+  "evidence_quotes": [<list of 2-3 problematic quotes from the text>],
+  "weakness_candidates": [
+    {{"dimension": "<weakest dimension name>", "score": <score>, "reason": "<why this is weak>"}},
+    {{"dimension": "<second weakest>", "score": <score>, "reason": "<why>"}}
+  ]
+}}
+
+Be strict. First drafts rarely score above 7.0. Output ONLY valid JSON, no other text.
+"""
+            
+            rubric_response = await self._call_agent(self.critic, rubric_prompt)
+            rubric_json = self._extract_json(rubric_response)
+            
+            if rubric_json:
+                logger.info(f"[run_drafting_phase] Scene {scene_number}: Rubric scan complete - overall_score={rubric_json.get('overall_score')}, weaknesses={[w.get('dimension') for w in rubric_json.get('weakness_candidates', [])]}")
+                self._emit_event("diagnostic_rubric_complete", {
+                    "scene_number": scene_number,
+                    "overall_score": rubric_json.get("overall_score"),
+                    "dimensions": rubric_json.get("dimensions", {}),
+                    "didacticism_detected": rubric_json.get("didacticism_detected", False),
+                })
+            else:
+                logger.warning(f"[run_drafting_phase] Scene {scene_number}: Rubric scan failed to parse, using fallback")
+                rubric_json = {"overall_score": 5.0, "weakness_candidates": [{"dimension": "general_quality", "reason": "Unable to parse rubric"}]}
+            
+            # ===== PASS B: Weakest Link Brief (targeted revision instructions) =====
+            weakest_link_prompt = f"""
+## WEAKEST LINK ANALYSIS - Scene {scene_number}
+
+Based on the diagnostic rubric below, identify the SINGLE most critical weakness and provide a targeted revision brief.
+
+## Diagnostic Rubric Results
+
+{json.dumps(rubric_json, indent=2)}
+
+## Scene Content (for reference)
+
+{json.dumps(draft, indent=2) if draft else writer_response}
+
+---
+
+## YOUR TASK
+
+1. Identify the WEAKEST LINK - the single most impactful issue to fix
+2. Provide a SPECIFIC, ACTIONABLE revision brief
+
+Output in this EXACT format:
+
+WEAKEST_LINK: [name of the weakest dimension]
+SEVERITY: [critical/major/moderate]
+EVIDENCE: [quote the specific problematic text from the draft]
+REVISION_REQUEST: [describe the specific problem in 1-2 sentences]
+INSTRUCTIONS: [provide concrete, actionable steps to fix this ONE issue - be specific about what to change, add, or remove]
+
+Focus on ONE thing. The Writer should know exactly what to fix and how.
+"""
+            
+            weakest_link_response = await self._call_agent(self.critic, weakest_link_prompt)
+            logger.info(f"[run_drafting_phase] Scene {scene_number}: Weakest link analysis complete")
+            
+            # Parse the weakest link response
+            weakest_link = "general_quality"
+            severity = "major"
+            evidence = ""
+            revision_issues = ""
+            revision_instructions = ""
+            
+            for line in weakest_link_response.split("\n"):
+                line_upper = line.upper().strip()
+                if line_upper.startswith("WEAKEST_LINK:"):
+                    weakest_link = line.split(":", 1)[1].strip() if ":" in line else weakest_link
+                elif line_upper.startswith("SEVERITY:"):
+                    severity = line.split(":", 1)[1].strip().lower() if ":" in line else severity
+                elif line_upper.startswith("EVIDENCE:"):
+                    evidence = line.split(":", 1)[1].strip() if ":" in line else evidence
+                elif line_upper.startswith("REVISION_REQUEST:"):
+                    revision_issues = line.split(":", 1)[1].strip() if ":" in line else revision_issues
+                elif line_upper.startswith("INSTRUCTIONS:"):
+                    revision_instructions = line.split(":", 1)[1].strip() if ":" in line else revision_instructions
+            
+            self._emit_event("diagnostic_weakest_link", {
+                "scene_number": scene_number,
+                "weakest_link": weakest_link,
+                "severity": severity,
+                "revision_issues": revision_issues,
+            })
+            
+            # ===== Send targeted revision to Writer =====
+            diagnostic_revision_prompt = f"""
+## TARGETED REVISION - Scene {scene_number}
+
+The Critic has analyzed your first draft and identified a specific area for improvement.
+
+**Scene Title:** {scene.get("title", "Untitled")}
+
+## DIAGNOSTIC RESULTS
+
+**Overall Score:** {rubric_json.get('overall_score', 'N/A')}/10
+**Weakest Link:** {weakest_link}
+**Severity:** {severity}
+
+## SPECIFIC ISSUE
+
+{revision_issues}
+
+**Evidence from your draft:**
+> {evidence}
+
+## REVISION INSTRUCTIONS
+
+{revision_instructions}
 
 ## Your Current Draft
 
 {json.dumps(draft, indent=2) if draft else writer_response}
 
-## REQUIRED REFINEMENTS (You MUST address ALL of these):
-
-1. **Tighten Subtext**: Review all dialogue and narration. Remove any lines where characters directly state their emotions or the moral of the scene. Show through action and implication, never tell.
-
-2. **Eliminate Didacticism**: Remove any passages that feel preachy, moralistic, or that explain the theme directly to the reader. Trust the reader to understand.
-
-3. **Subvert One Cliché**: Identify the most obvious trope or cliché in your draft and subvert it. Take the expected and twist it into something fresh.
-
-4. **Reduce Exposition**: Cut any "as you know" dialogue or narrator explanations that could be shown through action instead.
-
-5. **Strengthen Sensory Details**: Replace any generic descriptions with specific, concrete sensory details unique to this scene.
-
 ---
 
-Output your REVISED scene as valid JSON. This revision does NOT count against your revision limit - it's a mandatory quality step.
+Focus on fixing THIS ONE ISSUE. Make targeted changes to address the weakest link identified above.
+Output your REVISED scene as valid JSON. This diagnostic revision does NOT count against your revision limit.
 """
+            
             writer_response = await self._call_agent(
                 self.writer,
-                mandatory_revision_prompt,
+                diagnostic_revision_prompt,
                 [{"role": "assistant", "content": writer_response}],
             )
             writer_msg = self._parse_agent_message("Writer", writer_response)
             self.state.messages.append(writer_msg)
             draft = writer_msg.content if isinstance(writer_msg.content, dict) else draft
-            logger.info(f"[run_drafting_phase] Scene {scene_number}: Mandatory revision complete, proceeding to Critic review")
+            logger.info(f"[run_drafting_phase] Scene {scene_number}: Diagnostic revision complete (fixed: {weakest_link}), proceeding to Critic review")
 
-        # Critic reviews the draft (now reviewing the refined version)
+        # Critic reviews the draft (now reviewing the diagnostically-improved version)
         approved = False
         while not approved and self.state.revision_count[scene_number] < self.state.max_revisions:
             critique_prompt = f"""
