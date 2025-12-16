@@ -2752,6 +2752,29 @@ Output your revised scene as valid JSON with the same structure as the original 
 Design the narrator for this story as valid JSON.
 """
 
+        # Call the architect agent to design the narrator
+        narrator_response = await self._call_agent(self.architect, user_prompt)
+        narrator_msg = self._parse_agent_message("Architect", narrator_response)
+        self.state.messages.append(narrator_msg)
+
+        # Parse narrator design
+        narrator_design = {}
+        if isinstance(narrator_msg.content, dict):
+            narrator_design = narrator_msg.content
+
+        self._emit_event("phase_complete", {
+            "phase": "narrator_design",
+            "pov": narrator_design.get("pov", "unknown"),
+        })
+
+        return {
+            "narrator_design": narrator_design,
+            "messages": [
+                {"agent": m.from_agent, "type": m.type}
+                for m in self.state.messages if m.type in ["question", "response"]
+            ],
+        }
+
     # Priority 2: Deepening Checkpoints (Storyteller Section 6.1)
     # =========================================================================
 
