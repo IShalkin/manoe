@@ -1,9 +1,10 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { UserSettings, ProviderConfig, AgentConfig, LLMProvider, AGENTS, MODELS, LLMModel } from '../types';
+import { UserSettings, ProviderConfig, AgentConfig, LLMProvider, AGENTS, MODELS, LLMModel, ResearchProvider, ResearchProviderConfig } from '../types';
 import { orchestratorFetch } from '../lib/api';
 
 const STORAGE_KEY = 'manoe_settings';
 const MODELS_CACHE_KEY = 'manoe_models_cache';
+const RESEARCH_KEYS_STORAGE_KEY = 'manoe_research_keys';
 const SETTINGS_VERSION = 3;
 
 const OLD_DEFAULT_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
@@ -57,6 +58,9 @@ interface SettingsContextType {
   fetchModelsForProvider: (provider: LLMProvider) => Promise<{ success: boolean; error?: string }>;
   isLoadingModels: (provider: LLMProvider) => boolean;
   hasDynamicModels: (provider: LLMProvider) => boolean;
+  researchProviders: ResearchProviderConfig[];
+  updateResearchProvider: (provider: ResearchProvider, apiKey: string) => void;
+  getResearchProviderKey: (provider: ResearchProvider) => string | undefined;
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
@@ -69,6 +73,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [dynamicModels, setDynamicModels] = useState<ModelsCache>({});
   const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
+  const [researchProviders, setResearchProviders] = useState<ResearchProviderConfig[]>([]);
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -93,6 +98,17 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         setDynamicModels(JSON.parse(cachedModels));
       } catch (e) {
         console.error('[SettingsContext] Failed to parse models cache:', e);
+      }
+    }
+    
+    // Load research provider keys
+    const storedResearchKeys = localStorage.getItem(RESEARCH_KEYS_STORAGE_KEY);
+    if (storedResearchKeys) {
+      try {
+        setResearchProviders(JSON.parse(storedResearchKeys));
+        console.log('[SettingsContext] Loaded research providers');
+      } catch (e) {
+        console.error('[SettingsContext] Failed to parse research keys:', e);
       }
     }
     
@@ -211,6 +227,29 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return !!dynamicModels[provider]?.models?.length;
   }, [dynamicModels]);
 
+  const updateResearchProvider = useCallback((provider: ResearchProvider, apiKey: string) => {
+    setResearchProviders(prev => {
+      const existing = prev.find(p => p.provider === provider);
+      let newProviders: ResearchProviderConfig[];
+      
+      if (existing) {
+        newProviders = prev.map(p => 
+          p.provider === provider ? { ...p, apiKey } : p
+        );
+      } else {
+        newProviders = [...prev, { provider, apiKey }];
+      }
+      
+      localStorage.setItem(RESEARCH_KEYS_STORAGE_KEY, JSON.stringify(newProviders));
+      console.log('[SettingsContext] Updated research provider:', provider, 'key length:', apiKey.length);
+      return newProviders;
+    });
+  }, []);
+
+  const getResearchProviderKey = useCallback((provider: ResearchProvider): string | undefined => {
+    return researchProviders.find(p => p.provider === provider)?.apiKey;
+  }, [researchProviders]);
+
   return (
     <SettingsContext.Provider value={{
       settings,
@@ -224,6 +263,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       fetchModelsForProvider,
       isLoadingModels,
       hasDynamicModels,
+      researchProviders,
+      updateResearchProvider,
+      getResearchProviderKey,
     }}>
       {children}
     </SettingsContext.Provider>

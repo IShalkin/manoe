@@ -185,6 +185,30 @@ export const PROVIDERS: { id: LLMProvider; name: string; icon: string }[] = [
   { id: 'venice', name: 'Venice AI', icon: 'V' },
 ];
 
+export type ResearchProvider = 'openai_deep_research' | 'perplexity';
+
+export interface ResearchProviderConfig {
+  provider: ResearchProvider;
+  apiKey: string;
+}
+
+export const RESEARCH_PROVIDERS: { id: ResearchProvider; name: string; icon: string; description: string; keyPrefix: string }[] = [
+  { id: 'perplexity', name: 'Perplexity', icon: 'P', description: 'Sonar Deep Research - exhaustive web research', keyPrefix: 'pplx-...' },
+  { id: 'openai_deep_research', name: 'OpenAI Deep Research', icon: 'O', description: 'o3/o4-mini Deep Research models', keyPrefix: 'sk-...' },
+];
+
+export interface ResearchResult {
+  success: boolean;
+  provider?: string;
+  model?: string;
+  content?: string;
+  citations?: Array<{ url: string; title?: string }>;
+  searchResults?: Array<{ title: string; url: string; snippet?: string }>;
+  webSearches?: Array<{ action: string; query: string }>;
+  usage?: Record<string, number>;
+  error?: string;
+}
+
 export const AGENTS = [
   { id: 'architect', name: 'Architect', description: 'Designs narrative structure and plot' },
   { id: 'profiler', name: 'Profiler', description: 'Creates deep character profiles' },
