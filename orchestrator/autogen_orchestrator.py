@@ -2717,6 +2717,13 @@ Output your revised scene as valid JSON with the same structure as the original 
             stance_preference=stance_pref,
         )
 
+        # Build character summary list outside f-string to avoid set literal issue
+        character_summary = [
+            {"name": c.get("name"), "archetype": c.get("archetype"), "role": c.get("role", "supporting")}
+            for c in characters
+        ]
+        character_summary_json = json.dumps(character_summary, indent=2)
+
         user_prompt = f"""
 ## Story Context
 
@@ -2736,7 +2743,7 @@ Output your revised scene as valid JSON with the same structure as the original 
 
 ## All Characters
 
-{json.dumps([{{"name": c.get("name"), "archetype": c.get("archetype"), "role": c.get("role", "supporting")}} for c in characters], indent=2)}
+{character_summary_json}
 
 ---
 
