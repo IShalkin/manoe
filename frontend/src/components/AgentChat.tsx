@@ -440,12 +440,13 @@ interface EditState {
   originalContent: string;
 }
 
-const AGENTS = ['Architect', 'Profiler', 'Strategist', 'Writer', 'Critic'] as const;
+const AGENTS = ['Architect', 'Profiler', 'Narrator', 'Strategist', 'Writer', 'Critic'] as const;
 type AgentName = typeof AGENTS[number];
 
 const AGENT_DEPENDENCIES: Record<AgentName, AgentName[]> = {
-  Architect: ['Profiler', 'Strategist', 'Writer', 'Critic'],
-  Profiler: ['Strategist', 'Writer', 'Critic'],
+  Architect: ['Profiler', 'Narrator', 'Strategist', 'Writer', 'Critic'],
+  Profiler: ['Narrator', 'Strategist', 'Writer', 'Critic'],
+  Narrator: ['Strategist', 'Writer', 'Critic'],
   Strategist: ['Writer', 'Critic'],
   Writer: ['Critic'],
   Critic: ['Writer', 'Critic'],
@@ -456,6 +457,7 @@ const AGENT_DEPENDENCIES: Record<AgentName, AgentName[]> = {
 const AGENT_TO_PHASE: Record<string, string> = {
   'Architect': 'Genesis',
   'Profiler': 'Characters',
+  'Narrator': 'Narrator Design',
   'Worldbuilder': 'Worldbuilding',
   'Strategist': 'Outlining',
   'Writer': 'Drafting',
@@ -463,7 +465,7 @@ const AGENT_TO_PHASE: Record<string, string> = {
 };
 
 // Phase order matching backend orchestrator flow
-const PHASE_ORDER = ['Genesis', 'Characters', 'Worldbuilding', 'Outlining', 'Motif Layer', 'Advanced Planning', 'Drafting', 'Polish'];
+const PHASE_ORDER = ['Genesis', 'Characters', 'Narrator Design', 'Worldbuilding', 'Outlining', 'Motif Layer', 'Advanced Planning', 'Drafting', 'Polish'];
 
 const getPhasesToRegenerate = (editedAgent: string): string[] => {
   const startPhase = AGENT_TO_PHASE[editedAgent] || 'Genesis';
@@ -475,6 +477,7 @@ const getPhasesToRegenerate = (editedAgent: string): string[] => {
 const AGENT_COLORS: Record<string, string> = {
   Architect: 'bg-blue-500',
   Profiler: 'bg-cyan-500',
+  Narrator: 'bg-indigo-500',
   Strategist: 'bg-green-500',
   Writer: 'bg-amber-500',
   Critic: 'bg-red-500',
@@ -484,6 +487,7 @@ const AGENT_COLORS: Record<string, string> = {
 const AGENT_BORDER_COLORS: Record<string, string> = {
   Architect: 'border-blue-500/50',
   Profiler: 'border-cyan-500/50',
+  Narrator: 'border-indigo-500/50',
   Strategist: 'border-green-500/50',
   Writer: 'border-amber-500/50',
   Critic: 'border-red-500/50',
@@ -493,6 +497,7 @@ const AGENT_BORDER_COLORS: Record<string, string> = {
 const AGENT_GLOW_COLORS: Record<string, string> = {
   Architect: 'shadow-blue-500/20',
   Profiler: 'shadow-cyan-500/20',
+  Narrator: 'shadow-indigo-500/20',
   Strategist: 'shadow-green-500/20',
   Writer: 'shadow-amber-500/20',
   Critic: 'shadow-red-500/20',
@@ -502,6 +507,7 @@ const AGENT_GLOW_COLORS: Record<string, string> = {
 const AGENT_DESCRIPTIONS: Record<string, string> = {
   Architect: 'Narrative Designer',
   Profiler: 'Character Psychologist',
+  Narrator: 'Voice Designer',
   Strategist: 'Plot Engineer',
   Writer: 'Scene Composer',
   Critic: 'Quality Analyst',
@@ -510,6 +516,7 @@ const AGENT_DESCRIPTIONS: Record<string, string> = {
 const AGENT_TEXT_COLORS: Record<string, string> = {
   Architect: 'text-blue-400',
   Profiler: 'text-cyan-400',
+  Narrator: 'text-indigo-400',
   Strategist: 'text-green-400',
   Writer: 'text-amber-400',
   Critic: 'text-red-400',
@@ -519,6 +526,7 @@ const AGENT_TEXT_COLORS: Record<string, string> = {
 const AGENT_ICONS: Record<string, string> = {
   Architect: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4',
   Profiler: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
+  Narrator: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z',
   Strategist: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
   Writer: 'M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z',
   Critic: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
