@@ -136,6 +136,13 @@ class MultiAgentWorker:
         Returns:
             Generation results including all agent messages
         """
+        # Log incoming parameters
+        import logging
+        logger = logging.getLogger("orchestrator")
+        logger.info(f"[run_generation] Starting with run_id={run_id}")
+        logger.info(f"[run_generation] provider='{provider}', model='{model}'")
+        logger.info(f"[run_generation] api_key provided: {bool(api_key)}, api_key length: {len(api_key) if api_key else 0}")
+        
         # Publish start event
         is_regeneration = start_from_phase is not None
         await self.redis_streams.publish_event(
