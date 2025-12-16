@@ -283,6 +283,58 @@ export function DashboardPage() {
       
       const data = await response.json();
       
+      // Handle async job response - poll for results
+      if (data.success && data.job_id && (data.status === 'pending' || data.status === 'running')) {
+        console.log('[DashboardPage] Research job started:', data.job_id);
+        
+        // Poll for results every 5 seconds
+        const pollInterval = 5000;
+        const maxPolls = 120; // 10 minutes max
+        let polls = 0;
+        
+        const pollForResults = async (): Promise<void> => {
+          polls++;
+          if (polls > maxPolls) {
+            setResearchError('Research timed out. Please try again.');
+            setIsResearching(false);
+            return;
+          }
+          
+          try {
+            const pollResponse = await orchestratorFetch(`/research/job/${data.job_id}`, {
+              method: 'GET',
+            });
+            const pollData = await pollResponse.json();
+            
+            if (pollData.status === 'completed' && pollData.content) {
+              setResearchResult(pollData.content);
+              if (pollData.content.length > 0) {
+                const audienceMatch = pollData.content.match(/(?:target audience|audience analysis|primary audience)[:\s]*([^\n]+)/i);
+                if (audienceMatch) {
+                  setFormData(prev => ({ ...prev, targetAudience: audienceMatch[1].trim() }));
+                }
+              }
+              setIsResearching(false);
+            } else if (pollData.status === 'failed') {
+              setResearchError(pollData.error || 'Research failed. Please try again.');
+              setIsResearching(false);
+            } else {
+              // Still pending or running - poll again
+              setTimeout(pollForResults, pollInterval);
+            }
+          } catch (pollErr) {
+            console.error('[DashboardPage] Poll error:', pollErr);
+            setResearchError('Failed to check research status. Please try again.');
+            setIsResearching(false);
+          }
+        };
+        
+        // Start polling after initial delay
+        setTimeout(pollForResults, pollInterval);
+        return;
+      }
+      
+      // Handle immediate response (cached result or error)
       if (data.success && data.content) {
         setResearchResult(data.content);
         if (data.content.length > 0) {
@@ -291,13 +343,14 @@ export function DashboardPage() {
             setFormData(prev => ({ ...prev, targetAudience: audienceMatch[1].trim() }));
           }
         }
+        setIsResearching(false);
       } else {
         setResearchError(data.error || 'Research failed. Please try again.');
+        setIsResearching(false);
       }
     } catch (err) {
       console.error('[DashboardPage] Research error:', err);
       setResearchError(err instanceof Error ? err.message : 'Network error');
-    } finally {
       setIsResearching(false);
     }
   };
