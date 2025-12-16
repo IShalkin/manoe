@@ -694,9 +694,62 @@ async def stream_events(run_id: str, request: Request):
     if not worker or not worker.redis_streams:
         raise HTTPException(status_code=503, detail="Worker not initialized")
 
-    # Authenticate user and verify ownership
+    # Authenticate user
     user_id, _ = await get_current_user(request)
-    check_run_ownership(run_id, user_id)
+    
+    # Check if run is in memory (active)
+    owner = run_ownership.get_owner(run_id)
+    if owner is None:
+        # Run not in memory - check if it exists in Supabase (interrupted run)
+        # Return a special SSE response indicating the run was interrupted
+        async def interrupted_event_generator():
+            # Try to get state from Supabase
+            state_info = {"status": "interrupted", "can_resume": False, "resume_from_phase": None}
+            if worker.persistence_service and worker.persistence_service.is_connected:
+                try:
+                    artifacts = await worker.persistence_service.get_run_artifacts(run_id)
+                    if artifacts:
+                        # Run exists in database - it was interrupted
+                        state_info["can_resume"] = True
+                        # Determine resume phase from artifacts
+                        completed_phases = set()
+                        for artifact in artifacts:
+                            phase = artifact.get("phase")
+                            if phase:
+                                completed_phases.add(phase)
+                        # Determine next phase
+                        phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", "outlining", "advanced_planning", "drafting", "polish"]
+                        for phase in phase_order:
+                            if phase not in completed_phases:
+                                state_info["resume_from_phase"] = phase
+                                break
+                        state_info["status"] = "interrupted"
+                        state_info["artifacts_count"] = len(artifacts)
+                    else:
+                        state_info["status"] = "not_found"
+                except Exception as e:
+                    state_info["status"] = "error"
+                    state_info["error"] = str(e)
+            
+            # Emit the status event and close
+            yield f"data: {json.dumps({'type': 'run_status', **state_info})}\n\n"
+        
+        return StreamingResponse(
+            interrupted_event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+    
+    # Verify ownership for active runs
+    if owner != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this run",
+        )
 
     async def event_generator():
         # First, get any existing events
