@@ -494,7 +494,7 @@ class GenerateRequest(BaseModel):
     model: str = "gpt-4o"
     api_key: str
     constraints: Optional[RegenerationConstraints] = None  # For partial regeneration
-    generation_mode: str = "demo"  # "demo" for quick preview, "full" for complete pipeline, "branching" for narrative possibilities
+    generation_mode: str = "full"  # "full" for complete pipeline, "branching" for narrative possibilities
     target_word_count: int = Field(50000, ge=1000, le=500000)  # For full mode
     estimated_scenes: int = Field(20, ge=1, le=200)  # For full mode
     preferred_structure: str = "ThreeAct"  # For full mode

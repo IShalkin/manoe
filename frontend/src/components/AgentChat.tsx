@@ -280,6 +280,111 @@ function formatAgentContent(content: string): string {
   return content;
 }
 
+// Strategist-specific formatter for outline data
+function formatStrategistContent(content: string): string {
+  if (!content || typeof content !== 'string') {
+    return '';
+  }
+  
+  const trimmed = content.trim();
+  let parsed: unknown = null;
+  
+  // Try to parse JSON
+  if (trimmed.includes('```json')) {
+    const jsonMatch = trimmed.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      parsed = tolerantJsonParse(jsonMatch[1]);
+    }
+  }
+  if (parsed === null) {
+    parsed = tolerantJsonParse(trimmed);
+  }
+  if (parsed === null && trimmed.includes('{')) {
+    const extracted = extractJsonFromString(trimmed);
+    if (extracted) {
+      parsed = tolerantJsonParse(extracted);
+    }
+  }
+  
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return formatAgentContent(content);
+  }
+  
+  const obj = parsed as Record<string, unknown>;
+  const lines: string[] = [];
+  
+  // Structure overview
+  if (obj.structure_type) {
+    const structureNames: Record<string, string> = {
+      'ThreeAct': 'Three Act Structure',
+      'HeroJourney': "Hero's Journey",
+      'FiveAct': 'Five Act Structure',
+      'SevenPoint': 'Seven Point Story Structure',
+      'SaveTheCat': 'Save the Cat Beat Sheet',
+    };
+    lines.push(`**Structure:** ${structureNames[obj.structure_type as string] || obj.structure_type}`);
+  }
+  
+  if (obj.total_scenes) {
+    lines.push(`**Total Scenes:** ${obj.total_scenes}`);
+  }
+  
+  // Key structural points
+  const keyPoints: string[] = [];
+  if (obj.inciting_incident_scene) keyPoints.push(`Inciting Incident: Scene ${obj.inciting_incident_scene}`);
+  if (obj.midpoint_scene) keyPoints.push(`Midpoint: Scene ${obj.midpoint_scene}`);
+  if (obj.climax_scene) keyPoints.push(`Climax: Scene ${obj.climax_scene}`);
+  if (obj.resolution_scene) keyPoints.push(`Resolution: Scene ${obj.resolution_scene}`);
+  
+  if (keyPoints.length > 0) {
+    lines.push('');
+    lines.push('**Key Story Beats:**');
+    keyPoints.forEach(point => lines.push(`- ${point}`));
+  }
+  
+  // Scenes summary (compact view)
+  if (Array.isArray(obj.scenes) && obj.scenes.length > 0) {
+    lines.push('');
+    lines.push('**Scene Outline:**');
+    const scenesToShow = obj.scenes.slice(0, 10) as Array<Record<string, unknown>>;
+    scenesToShow.forEach((scene, idx) => {
+      const sceneNum = scene.scene_number || idx + 1;
+      const title = scene.title || `Scene ${sceneNum}`;
+      const conflict = scene.conflict_type ? ` (${scene.conflict_type})` : '';
+      lines.push(`${sceneNum}. **${title}**${conflict}`);
+      if (scene.setting && typeof scene.setting === 'string' && scene.setting.length < 80) {
+        lines.push(`   *${scene.setting}*`);
+      }
+    });
+    if (obj.scenes.length > 10) {
+      lines.push(`... and ${obj.scenes.length - 10} more scenes`);
+    }
+  }
+  
+  // Demo mode fields (opening_hook, turning_points, etc.)
+  if (obj.opening_hook) {
+    lines.push('');
+    lines.push(`**Opening Hook:** ${obj.opening_hook}`);
+  }
+  if (Array.isArray(obj.turning_points) && obj.turning_points.length > 0) {
+    lines.push('');
+    lines.push('**Turning Points:**');
+    obj.turning_points.forEach((point, idx) => {
+      lines.push(`${idx + 1}. ${point}`);
+    });
+  }
+  if (obj.climax && typeof obj.climax === 'string') {
+    lines.push('');
+    lines.push(`**Climax:** ${obj.climax}`);
+  }
+  if (obj.resolution && typeof obj.resolution === 'string') {
+    lines.push('');
+    lines.push(`**Resolution:** ${obj.resolution}`);
+  }
+  
+  return lines.length > 0 ? lines.join('\n') : formatAgentContent(content);
+}
+
 function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
   const lines: string[] = [];
   const indent = '  '.repeat(depth);
@@ -1701,7 +1806,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                       </div>
                     ) : (
                       <MarkdownContent 
-                        content={formattedContent || formatAgentContent(getAgentContent(agent))} 
+                        content={formattedContent || (agent === 'Strategist' ? formatStrategistContent(getAgentContent(agent)) : formatAgentContent(getAgentContent(agent)))} 
                         className="text-sm" 
                       />
                     )}
