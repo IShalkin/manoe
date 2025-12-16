@@ -133,7 +133,7 @@ function formatResultAsMarkdown(result: ProjectResult): string {
   return '*No content generated yet*';
 }
 
-type GenerationMode = 'demo' | 'full';
+type GenerationMode = 'full';
 
 interface ProjectFormData {
   name: string;
@@ -175,7 +175,7 @@ export function DashboardPage() {
       toneStyleReferences: '',
       outputFormat: 'short_story',
       readerSensibilities: { ...DEFAULT_READER_SENSIBILITIES },
-      generationMode: 'demo',
+      generationMode: 'full',
       maxRevisions: 2,
       narrativePov: 'third_person_limited',
       narratorReliability: 'reliable',
@@ -194,7 +194,7 @@ export function DashboardPage() {
         toneStyleReferences: '',
         outputFormat: 'short_story',
         readerSensibilities: { ...DEFAULT_READER_SENSIBILITIES },
-        generationMode: 'demo',
+        generationMode: 'full',
         maxRevisions: 2,
         narrativePov: 'third_person_limited',
         narratorReliability: 'reliable',
@@ -216,7 +216,7 @@ export function DashboardPage() {
         toneStyleReferences: '',
         outputFormat: (project.outputFormat as OutputFormat) || 'short_story',
         readerSensibilities: (project.readerSensibilities as unknown as ReaderSensibilities) || { ...DEFAULT_READER_SENSIBILITIES },
-        generationMode: 'demo',
+        generationMode: 'full',
         maxRevisions: 2,
         narrativePov: 'third_person_limited',
         narratorReliability: 'reliable',
@@ -684,57 +684,25 @@ export function DashboardPage() {
                             </div>
 
                             <div>
-                              <label className="block text-sm font-medium mb-2">Generation Mode</label>
-                              <div className="grid grid-cols-2 gap-3">
-                                <button
-                                  type="button"
-                                  onClick={() => setFormData({ ...formData, generationMode: 'demo' })}
-                                  className={`p-4 rounded-xl border text-left transition-all ${
-                                    formData.generationMode === 'demo'
-                                      ? 'border-blue-500 bg-blue-500/10'
-                                      : 'border-slate-600 hover:border-slate-500'
-                                  }`}
-                                >
-                                  <div className="font-medium">Demo</div>
-                                  <div className="text-xs text-slate-500">Quick preview with all 5 agents</div>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setFormData({ ...formData, generationMode: 'full' })}
-                                  className={`p-4 rounded-xl border text-left transition-all ${
-                                    formData.generationMode === 'full'
-                                      ? 'border-blue-500 bg-blue-500/10'
-                                      : 'border-slate-600 hover:border-slate-500'
-                                  }`}
-                                >
-                                  <div className="font-medium">Full Pipeline</div>
-                                  <div className="text-xs text-slate-500">Complete story generation with multiple scenes</div>
-                                </button>
+                              <label className="block text-sm font-medium mb-2">
+                                Max Revisions per Scene: {formData.maxRevisions}
+                              </label>
+                              <input
+                                type="range"
+                                min="1"
+                                max="5"
+                                value={formData.maxRevisions}
+                                onChange={(e) => setFormData({ ...formData, maxRevisions: parseInt(e.target.value) })}
+                                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                              />
+                              <div className="flex justify-between text-xs text-slate-500 mt-1">
+                                <span>1 (faster)</span>
+                                <span>5 (more refined)</span>
                               </div>
+                              <p className="text-xs text-slate-500 mt-2">
+                                Controls how many times the Writer and Critic can revise each scene before moving on.
+                              </p>
                             </div>
-
-                            {formData.generationMode === 'full' && (
-                              <div>
-                                <label className="block text-sm font-medium mb-2">
-                                  Max Revisions per Scene: {formData.maxRevisions}
-                                </label>
-                                <input
-                                  type="range"
-                                  min="1"
-                                  max="5"
-                                  value={formData.maxRevisions}
-                                  onChange={(e) => setFormData({ ...formData, maxRevisions: parseInt(e.target.value) })}
-                                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                                />
-                                <div className="flex justify-between text-xs text-slate-500 mt-1">
-                                  <span>1 (faster)</span>
-                                  <span>5 (more refined)</span>
-                                </div>
-                                <p className="text-xs text-slate-500 mt-2">
-                                  Controls how many times the Writer and Critic can revise each scene before moving on.
-                                </p>
-                              </div>
-                            )}
 
                             <div className="flex gap-3 pt-4">
                 <button
