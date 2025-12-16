@@ -11,12 +11,14 @@ import {
   NarratorStance,
   OutputFormat,
   ReaderSensibilities,
+  ResearchProvider,
   NARRATIVE_POV_OPTIONS,
   NARRATOR_RELIABILITY_OPTIONS,
   NARRATOR_STANCE_OPTIONS,
   OUTPUT_FORMAT_OPTIONS,
   CONTENT_SENSITIVITY_OPTIONS,
   DEFAULT_READER_SENSIBILITIES,
+  RESEARCH_PROVIDERS,
 } from '../types';
 
 // Helper to format date as dd/mm/yyyy
@@ -154,7 +156,7 @@ interface ProjectFormData {
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { hasAnyApiKey, getAgentConfig, getProviderKey } = useSettings();
+  const { hasAnyApiKey, getAgentConfig, getProviderKey, getResearchProviderKey } = useSettings();
   const { 
     projects, 
     createProject, 
@@ -234,6 +236,71 @@ export function DashboardPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewingProject, setViewingProject] = useState<StoredProject | null>(null);
+  
+  const [showResearchModal, setShowResearchModal] = useState(false);
+  const [selectedResearchProvider, setSelectedResearchProvider] = useState<ResearchProvider | null>(null);
+  const [isResearching, setIsResearching] = useState(false);
+  const [researchResult, setResearchResult] = useState<string | null>(null);
+  const [researchError, setResearchError] = useState<string | null>(null);
+
+  const hasAnyResearchKey = () => {
+    return RESEARCH_PROVIDERS.some(p => getResearchProviderKey(p.id));
+  };
+
+  const handleResearch = async () => {
+    if (!selectedResearchProvider) {
+      setResearchError('Please select a research provider');
+      return;
+    }
+    
+    const apiKey = getResearchProviderKey(selectedResearchProvider);
+    if (!apiKey) {
+      setResearchError(`No API key configured for ${selectedResearchProvider}. Please add it in Settings.`);
+      return;
+    }
+    
+    if (!formData.seedIdea.trim()) {
+      setResearchError('Please enter a seed idea first');
+      return;
+    }
+    
+    setIsResearching(true);
+    setResearchError(null);
+    setResearchResult(null);
+    
+    try {
+      const response = await orchestratorFetch('/research', {
+        method: 'POST',
+        body: JSON.stringify({
+          seed_idea: formData.seedIdea,
+          target_audience: formData.targetAudience || '',
+          themes: formData.themes || '',
+          moral_compass: formData.moralCompass,
+          provider: selectedResearchProvider,
+          api_key: apiKey,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success && data.content) {
+        setResearchResult(data.content);
+        if (data.content.length > 0) {
+          const audienceMatch = data.content.match(/(?:target audience|audience analysis|primary audience)[:\s]*([^\n]+)/i);
+          if (audienceMatch) {
+            setFormData(prev => ({ ...prev, targetAudience: audienceMatch[1].trim() }));
+          }
+        }
+      } else {
+        setResearchError(data.error || 'Research failed. Please try again.');
+      }
+    } catch (err) {
+      console.error('[DashboardPage] Research error:', err);
+      setResearchError(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setIsResearching(false);
+    }
+  };
 
   // Continue an in-progress generation - navigate to generation page
   const continueGeneration = (project: StoredProject) => {
@@ -493,13 +560,41 @@ export function DashboardPage() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">Target Audience</label>
-                <input
-                  type="text"
-                  value={formData.targetAudience}
-                  onChange={(e) => setFormData({ ...formData, targetAudience: e.target.value })}
-                  placeholder="Young adults, fans of psychological thrillers"
-                  className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-primary-500 transition-colors"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={formData.targetAudience}
+                    onChange={(e) => setFormData({ ...formData, targetAudience: e.target.value })}
+                    placeholder="Young adults, fans of psychological thrillers"
+                    className="flex-1 bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-primary-500 transition-colors"
+                  />
+                  {hasAnyResearchKey() && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowResearchModal(true);
+                        setResearchResult(null);
+                        setResearchError(null);
+                        const firstAvailable = RESEARCH_PROVIDERS.find(p => getResearchProviderKey(p.id));
+                        if (firstAvailable) {
+                          setSelectedResearchProvider(firstAvailable.id);
+                        }
+                      }}
+                      className="px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 transition-colors flex items-center gap-2 whitespace-nowrap"
+                      title="Deep Research"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                      Research
+                    </button>
+                  )}
+                </div>
+                {!hasAnyResearchKey() && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Add Perplexity or OpenAI Deep Research API keys in Settings to enable market research
+                  </p>
+                )}
               </div>
 
                             <div>
@@ -1021,6 +1116,134 @@ export function DashboardPage() {
           <p className="text-sm text-slate-500 mt-1">Start with a "What If?" idea</p>
         </div>
       </div>
+
+      {showResearchModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto border border-slate-700">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold">Market Research</h2>
+                  <p className="text-xs text-slate-400">Deep research on your target audience</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowResearchModal(false)}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Research Provider</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {RESEARCH_PROVIDERS.map(provider => {
+                    const hasKey = !!getResearchProviderKey(provider.id);
+                    return (
+                      <button
+                        key={provider.id}
+                        type="button"
+                        onClick={() => hasKey && setSelectedResearchProvider(provider.id)}
+                        disabled={!hasKey}
+                        className={`p-4 rounded-xl border text-left transition-all ${
+                          selectedResearchProvider === provider.id
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : hasKey
+                              ? 'border-slate-600 hover:border-slate-500'
+                              : 'border-slate-700 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-white ${hasKey ? 'bg-emerald-600' : 'bg-slate-600'}`}>
+                            {provider.icon}
+                          </div>
+                          <div>
+                            <div className="font-medium">{provider.name}</div>
+                            <div className="text-xs text-slate-500">{provider.description}</div>
+                          </div>
+                        </div>
+                        {!hasKey && (
+                          <p className="text-xs text-amber-400 mt-2">API key not configured</p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700">
+                <h4 className="text-sm font-medium mb-2">Research Context</h4>
+                <div className="text-xs text-slate-400 space-y-1">
+                  <p><span className="text-slate-500">Seed Idea:</span> {formData.seedIdea || 'Not set'}</p>
+                  <p><span className="text-slate-500">Current Audience:</span> {formData.targetAudience || 'Not set'}</p>
+                  <p><span className="text-slate-500">Themes:</span> {formData.themes || 'Not set'}</p>
+                </div>
+              </div>
+
+              {researchError && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <p className="text-sm text-red-400">{researchError}</p>
+                </div>
+              )}
+
+              {researchResult && (
+                <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700 max-h-96 overflow-y-auto">
+                  <h4 className="text-sm font-medium mb-3 text-emerald-400">Research Results</h4>
+                  <div className="prose prose-sm prose-invert max-w-none">
+                    <ReactMarkdown>{researchResult}</ReactMarkdown>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowResearchModal(false)}
+                  className="flex-1 px-4 py-3 bg-slate-700 text-white rounded-xl font-medium hover:bg-slate-600 transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResearch}
+                  disabled={isResearching || !selectedResearchProvider}
+                  className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isResearching ? (
+                    <>
+                      <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Researching...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                      Start Research
+                    </>
+                  )}
+                </button>
+              </div>
+              
+              <p className="text-xs text-slate-500 text-center">
+                Research may take 1-10 minutes depending on the provider. Results will help refine your target audience.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
