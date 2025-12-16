@@ -1140,7 +1140,7 @@ async def get_research_services():
 
     if supabase_service is None:
         supabase_service = SupabasePersistenceService()
-        supabase_service.connect()
+        await supabase_service.connect()
 
     return research_service, research_memory_service, supabase_service
 
