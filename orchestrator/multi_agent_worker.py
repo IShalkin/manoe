@@ -878,6 +878,131 @@ async def get_run_status(run_id: str, request: Request):
     return {"run_id": run_id, "status": status}
 
 
+@app.get("/runs/{run_id}/state")
+async def get_run_state(run_id: str, request: Request):
+    """
+    Get the current state of a generation run from Supabase artifacts.
+    
+    This endpoint is used for state recovery after SSE reconnection or page refresh.
+    It returns all stored artifacts and phase statuses for the run, allowing the
+    frontend to reconstruct the UI state without replaying all events.
+    
+    Returns:
+        - run_id: The run identifier
+        - status: Current run status (running, completed, interrupted, not_found)
+        - artifacts: Dict of phase -> artifact_type -> content
+        - phase_statuses: Dict of phase -> status info (started/completed/failed)
+        - last_completed_phase: The last phase that completed successfully
+        - can_resume: Whether the run can be resumed from the last completed phase
+    """
+    if not worker:
+        raise HTTPException(status_code=503, detail="Worker not initialized")
+
+    # Authenticate user and verify ownership
+    user_id, _ = await get_current_user(request)
+    check_run_ownership(run_id, user_id)
+
+    # Determine in-memory status
+    in_memory_status = "unknown"
+    if run_id in worker._cancelled_runs:
+        in_memory_status = "cancelled"
+    elif run_id in worker._paused_runs:
+        in_memory_status = "paused"
+    elif run_id in worker._active_runs:
+        task = worker._active_runs[run_id]
+        if task.done():
+            in_memory_status = "completed"
+        else:
+            in_memory_status = "running"
+    else:
+        in_memory_status = "not_in_memory"
+
+    # Get artifacts from Supabase
+    artifacts = {}
+    phase_statuses = {}
+    last_completed_phase = None
+    
+    if worker.persistence_service and worker.persistence_service.is_connected:
+        # Get all artifacts for this run
+        artifacts = await worker.persistence_service.get_run_artifacts(run_id)
+        
+        # Extract phase statuses from artifacts
+        phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", 
+                       "outlining", "motif_layer", "advanced_planning", "drafting", "polish"]
+        
+        for phase in phase_order:
+            if phase in artifacts:
+                phase_artifacts = artifacts[phase]
+                # Check for phase_status artifact
+                if "phase_status" in phase_artifacts:
+                    phase_statuses[phase] = phase_artifacts["phase_status"]
+                    if phase_artifacts["phase_status"].get("status") == "completed":
+                        last_completed_phase = phase
+                else:
+                    # Infer completed if we have the main artifact
+                    main_artifact_types = {
+                        "genesis": "narrative_possibility",
+                        "characters": "characters",
+                        "narrator_design": "narrator_design",
+                        "worldbuilding": "worldbuilding",
+                        "outlining": "outline",
+                        "motif_layer": "motif_bible",
+                        "advanced_planning": "advanced_planning",
+                        "drafting": "drafts",
+                        "polish": "polished",
+                    }
+                    if main_artifact_types.get(phase) in phase_artifacts:
+                        phase_statuses[phase] = {"status": "completed", "inferred": True}
+                        last_completed_phase = phase
+
+    # Determine overall status
+    has_artifacts = bool(artifacts)
+    if in_memory_status == "running":
+        status = "running"
+    elif in_memory_status == "completed":
+        status = "completed"
+    elif in_memory_status == "cancelled":
+        status = "cancelled"
+    elif in_memory_status == "paused":
+        status = "paused"
+    elif has_artifacts:
+        # Has artifacts but not in memory - likely interrupted by redeploy
+        # Check if we have a completed generation
+        if "polish" in phase_statuses and phase_statuses["polish"].get("status") == "completed":
+            status = "completed"
+        else:
+            status = "interrupted"
+    else:
+        status = "not_found"
+
+    # Determine if resume is possible
+    can_resume = status == "interrupted" and last_completed_phase is not None
+
+    return {
+        "run_id": run_id,
+        "status": status,
+        "in_memory_status": in_memory_status,
+        "artifacts": artifacts,
+        "phase_statuses": phase_statuses,
+        "last_completed_phase": last_completed_phase,
+        "can_resume": can_resume,
+        "resume_from_phase": _get_next_phase(last_completed_phase) if can_resume else None,
+    }
+
+
+def _get_next_phase(current_phase: str) -> str:
+    """Get the next phase after the current one."""
+    phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", 
+                   "outlining", "motif_layer", "advanced_planning", "drafting", "polish"]
+    try:
+        idx = phase_order.index(current_phase)
+        if idx < len(phase_order) - 1:
+            return phase_order[idx + 1]
+    except ValueError:
+        pass
+    return None
+
+
 class ModelsRequest(BaseModel):
     provider: str
     api_key: str
