@@ -118,6 +118,7 @@ class MultiAgentWorker:
         scenes_to_regenerate: Optional[List[int]] = None,
         supabase_project_id: Optional[str] = None,
         selected_narrative: Optional[Dict[str, Any]] = None,
+        research_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run multi-agent generation for a project.
@@ -284,6 +285,7 @@ class MultiAgentWorker:
                     change_request=change_request,
                     supabase_project_id=supabase_project_id,
                     selected_narrative=selected_narrative,
+                    research_context=research_context,
                 )
             else:
                 # Demo mode: Quick preview with all 5 agents in simplified flow
@@ -556,6 +558,7 @@ class GenerateRequest(BaseModel):
     estimated_scenes: int = Field(20, ge=1, le=200)  # For full mode
     preferred_structure: str = "ThreeAct"  # For full mode
     max_revisions: int = Field(2, ge=1, le=10)  # Maximum Writer↔Critic revision cycles per scene
+    research_context: Optional[str] = Field(None, max_length=50000, description="Market research context from Eternal Memory to inject into agent prompts")
     narrator_config: Optional[NarratorConfig] = None  # Narrator design settings
     start_from_phase: Optional[str] = None  # Phase to start from (for phase-based regeneration)
     previous_run_id: Optional[str] = None  # Run ID to load previous artifacts from
@@ -676,6 +679,7 @@ async def generate(gen_request: GenerateRequest, request: Request):
         scenes_to_regenerate=gen_request.scenes_to_regenerate,
         supabase_project_id=gen_request.supabase_project_id,
         selected_narrative=gen_request.selected_narrative,
+        research_context=gen_request.research_context,
     ))
 
     # Track active run for cancellation support

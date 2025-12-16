@@ -898,6 +898,43 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         except json.JSONDecodeError as e:
             logger.debug(f"[_extract_json] Balanced brace extraction failed: {e}")
 
+        # Method 5: Try prepending { if text looks like truncated JSON (starts with "key":)
+        # This handles cases where LLM output is truncated and missing the opening brace
+        stripped = text.strip()
+        if stripped.startswith('"') and '":' in stripped[:50]:
+            try:
+                # Try wrapping in braces
+                wrapped = "{" + stripped
+                # Find the last } to close it properly
+                if wrapped.count("{") > wrapped.count("}"):
+                    wrapped = wrapped + "}"
+                result = json.loads(wrapped)
+                logger.debug("[_extract_json] Truncated JSON recovery succeeded (prepended {)")
+                return result
+            except json.JSONDecodeError as e:
+                logger.debug(f"[_extract_json] Truncated JSON recovery failed: {e}")
+
+        # Method 6: Try to extract array if text starts with [ but raw_decode failed
+        if stripped.startswith("["):
+            try:
+                # Find matching ]
+                bracket_count = 0
+                end = 0
+                for i, char in enumerate(stripped):
+                    if char == "[":
+                        bracket_count += 1
+                    elif char == "]":
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end = i + 1
+                            break
+                if end > 0:
+                    result = json.loads(stripped[:end])
+                    logger.debug("[_extract_json] Array extraction succeeded")
+                    return result
+            except json.JSONDecodeError as e:
+                logger.debug(f"[_extract_json] Array extraction failed: {e}")
+
         logger.warning(f"[_extract_json] All extraction methods failed for text (len={len(text)})")
         return None
 
