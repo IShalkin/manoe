@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { ProjectResult } from '../hooks/useProjects';
 import { orchestratorFetch, getAuthenticatedSSEUrl } from '../lib/api';
+import type { NarrativePossibility, NarrativePossibilitiesRecommendation } from '../types';
+import { NarrativePossibilitiesSelector } from './NarrativePossibilitiesSelector';
 
 // Tolerant JSON parser that handles common LLM output issues
 function tolerantJsonParse(str: string): unknown | null {
@@ -246,15 +248,9 @@ function formatAgentContent(content: string): string {
   
   const trimmed = content.trim();
   
-  // First, try tolerant JSON parse (handles common LLM issues)
-  const parsed = tolerantJsonParse(trimmed);
-  if (parsed !== null) {
-    return formatAnyAsMarkdown(parsed);
-  }
-  
-  // Check for ```json code blocks
-  if (content.includes('```json')) {
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+  // Check for ```json code blocks first
+  if (content.includes('```json') || content.includes('```')) {
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
       const blockParsed = tolerantJsonParse(jsonMatch[1]);
       if (blockParsed !== null) {
@@ -263,12 +259,18 @@ function formatAgentContent(content: string): string {
     }
   }
   
+  // Try tolerant JSON parse (handles common LLM issues)
+  const parsed = tolerantJsonParse(trimmed);
+  if (parsed !== null && typeof parsed === 'object') {
+    return formatAnyAsMarkdown(parsed);
+  }
+  
   // Try to extract JSON from string (handles prefix/suffix text)
   if (trimmed.includes('{') || trimmed.includes('[')) {
     const extracted = extractJsonFromString(trimmed);
     if (extracted) {
       const extractedParsed = tolerantJsonParse(extracted);
-      if (extractedParsed !== null) {
+      if (extractedParsed !== null && typeof extractedParsed === 'object') {
         return formatAnyAsMarkdown(extractedParsed);
       }
     }
@@ -299,9 +301,16 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
         lines.push('');  // Add blank line before list for proper markdown
         filteredItems.forEach((item, i) => {
           if (typeof item === 'object' && item !== null) {
-            const inlineText = formatObjectInline(item as Record<string, unknown>);
-            if (inlineText.trim()) {
-              lines.push(`${indent}${i + 1}. ${inlineText}`);
+            // Format each field on its own line for better readability
+            const itemLines: string[] = [];
+            for (const [itemKey, itemValue] of Object.entries(item as Record<string, unknown>)) {
+              const formattedItemKey = itemKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              if (itemValue !== null && itemValue !== undefined && itemValue !== '') {
+                itemLines.push(`**${formattedItemKey}**: ${itemValue}`);
+              }
+            }
+            if (itemLines.length > 0) {
+              lines.push(`${indent}${i + 1}. ${itemLines.join(', ')}`);
             }
           } else {
             const itemText = String(item).trim();
@@ -328,7 +337,8 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
     }
   }
   
-  return lines.join('\n');
+  // Use double newlines for proper markdown paragraph breaks
+  return lines.join('\n\n');
 }
 
 function formatObjectInline(obj: Record<string, unknown>): string {
@@ -342,7 +352,8 @@ function formatObjectInline(obj: Record<string, unknown>): string {
       parts.push(`**${formattedKey}**: ${value}`);
     }
   }
-  return parts.slice(0, 4).join(', ');
+  // Join with line breaks for better readability
+  return parts.join(', ');
 }
 
 function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
@@ -363,6 +374,9 @@ function MarkdownContent({ content, className = '' }: { content: string; classNa
           ),
           code: ({ children }) => (
             <code className="bg-slate-800 px-1.5 py-0.5 rounded text-xs text-cyan-400">{children}</code>
+          ),
+          pre: ({ children }) => (
+            <pre className="bg-slate-800/50 p-3 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap break-words">{children}</pre>
           ),
           h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
           h2: ({ children }) => <h2 className="text-base font-semibold text-white mb-2">{children}</h2>,
@@ -408,6 +422,7 @@ interface AgentChatProps {
   projectResult?: ProjectResult | null;
   onUpdateResult?: (result: ProjectResult) => void;
   onRegenerate?: (constraints: RegenerationConstraints) => void;
+  onNarrativePossibilitySelected?: (possibility: NarrativePossibility) => void;
 }
 
 export interface RegenerationConstraints {
@@ -522,7 +537,7 @@ interface AgentState {
   lastUpdate: string;
 }
 
-export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate }: AgentChatProps) {
+export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate, onNarrativePossibilitySelected }: AgentChatProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -533,6 +548,9 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const [isResuming, setIsResuming] = useState(false);
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [narrativePossibilities, setNarrativePossibilities] = useState<NarrativePossibility[] | null>(null);
+  const [narrativeRecommendation, setNarrativeRecommendation] = useState<NarrativePossibilitiesRecommendation | null>(null);
+  const [isSelectingNarrative, setIsSelectingNarrative] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const currentRoundRef = useRef(1);
@@ -548,6 +566,25 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const [showSceneModal, setShowSceneModal] = useState(false);
   const [selectedScenes, setSelectedScenes] = useState<number[]>([]);
   const [sceneCount, setSceneCount] = useState(0);
+  
+  // Deepening Checkpoint state
+  const [checkpointResults, setCheckpointResults] = useState<Record<string, {
+    checkpoint_type: string;
+    scene_number: number;
+    passed: boolean;
+    overall_score: number;
+    criteria_scores?: Record<string, { score: number; feedback: string }>;
+  }>>({});
+  const [activeCheckpoint, setActiveCheckpoint] = useState<string | null>(null);
+
+  // Motif Layer Planning state
+  const [motifLayerResult, setMotifLayerResult] = useState<{
+    core_symbols_count: number;
+    character_motifs_count: number;
+    scene_targets_count: number;
+    has_structural_motifs: boolean;
+  } | null>(null);
+  const [isMotifPlanningActive, setIsMotifPlanningActive] = useState(false);
 
   useEffect(() => {
     if (projectResult?.locks) {
@@ -585,6 +622,12 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       setShowSceneModal(false);
       setSelectedScenes([]);
       setSceneCount(0);
+      // Reset checkpoint state
+      setCheckpointResults({});
+      setActiveCheckpoint(null);
+      // Reset motif layer state
+      setMotifLayerResult(null);
+      setIsMotifPlanningActive(false);
     }
   }, [runId]);
 
@@ -848,6 +891,69 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
             currentRoundRef.current += 1;
             hasMessageInCurrentRoundRef.current = false;
           }
+        }
+
+        // Handle narrative possibilities generated event (branching mode)
+        if (data.type === 'narrative_possibilities_generated') {
+          const possibilities = (data.data as unknown as { possibilities: NarrativePossibility[] }).possibilities || [];
+          const recommendation = (data.data as unknown as { recommendation: NarrativePossibilitiesRecommendation }).recommendation || null;
+          setNarrativePossibilities(possibilities);
+          setNarrativeRecommendation(recommendation);
+          setCurrentPhase('Select Narrative');
+          setIsComplete(true);
+          if (eventSource) eventSource.close();
+          setIsConnected(false);
+          return;
+        }
+
+        // Handle deepening checkpoint events
+        if (data.type === 'checkpoint_start') {
+          const checkpointType = (data.data as unknown as { checkpoint_type: string }).checkpoint_type;
+          const sceneNumber = (data.data as unknown as { scene_number: number }).scene_number;
+          setActiveCheckpoint(checkpointType);
+          setCurrentPhase(`Checkpoint: ${checkpointType.replace(/_/g, ' ')}`);
+          // Initialize checkpoint result as pending
+          setCheckpointResults(prev => ({
+            ...prev,
+            [checkpointType]: {
+              checkpoint_type: checkpointType,
+              scene_number: sceneNumber,
+              passed: false,
+              overall_score: 0,
+            }
+          }));
+        }
+
+        if (data.type === 'checkpoint_complete') {
+          const result = data.data as unknown as {
+            checkpoint_type: string;
+            scene_number: number;
+            passed: boolean;
+            overall_score: number;
+            criteria_scores?: Record<string, { score: number; feedback: string }>;
+          };
+          setActiveCheckpoint(null);
+          setCheckpointResults(prev => ({
+            ...prev,
+            [result.checkpoint_type]: result
+          }));
+        }
+
+        // Handle motif layer planning events
+        if (data.type === 'motif_planning_start') {
+          setIsMotifPlanningActive(true);
+          setCurrentPhase('Motif Layer Planning');
+        }
+
+        if (data.type === 'motif_planning_complete') {
+          const result = data.data as unknown as {
+            core_symbols_count: number;
+            character_motifs_count: number;
+            scene_targets_count: number;
+            has_structural_motifs: boolean;
+          };
+          setIsMotifPlanningActive(false);
+          setMotifLayerResult(result);
         }
         
         setMessages((prev) => [...prev, data]);
@@ -1299,6 +1405,113 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         </div>
       )}
 
+      {/* Motif Layer Planning Status */}
+      {(isMotifPlanningActive || motifLayerResult) && (
+        <div className="bg-slate-800/50 border-b border-slate-700 px-3 sm:px-4 py-2 sm:py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+            </svg>
+            <span className="text-xs font-medium text-slate-300">Motif Bible</span>
+            {isMotifPlanningActive && (
+              <svg className="w-3 h-3 animate-spin text-rose-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
+          {motifLayerResult ? (
+            <div className="flex flex-wrap gap-2">
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                </svg>
+                <span>{motifLayerResult.core_symbols_count} Core Symbols</span>
+              </div>
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                <span>{motifLayerResult.character_motifs_count} Character Motifs</span>
+              </div>
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium bg-teal-500/20 text-teal-400 border border-teal-500/30">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                <span>{motifLayerResult.scene_targets_count} Scene Targets</span>
+              </div>
+              {motifLayerResult.has_structural_motifs && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  </svg>
+                  <span>Structural Motifs</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-xs text-slate-400">Planning symbolic layer...</div>
+          )}
+        </div>
+      )}
+
+      {/* Deepening Checkpoints Status */}
+      {Object.keys(checkpointResults).length > 0 && (
+        <div className="bg-slate-800/50 border-b border-slate-700 px-3 sm:px-4 py-2 sm:py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-xs font-medium text-slate-300">Structural Checkpoints</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {['inciting_incident', 'midpoint', 'climax', 'resolution'].map(checkpointType => {
+              const result = checkpointResults[checkpointType];
+              const isActive = activeCheckpoint === checkpointType;
+              const isPending = result && result.overall_score === 0;
+              const passed = result?.passed;
+              const score = result?.overall_score;
+              
+              return (
+                <div
+                  key={checkpointType}
+                  className={`
+                    flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium transition-all
+                    ${isActive ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 animate-pulse' : ''}
+                    ${!isActive && result && passed ? 'bg-green-500/20 text-green-400 border border-green-500/30' : ''}
+                    ${!isActive && result && !passed && !isPending ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : ''}
+                    ${!result ? 'bg-slate-700/50 text-slate-500 border border-slate-600/30' : ''}
+                    ${isPending && !isActive ? 'bg-slate-700/50 text-slate-400 border border-slate-600/30' : ''}
+                  `}
+                  title={result ? `Scene ${result.scene_number}: ${passed ? 'Passed' : 'Needs Revision'} (${score?.toFixed(1)}/10)` : 'Not yet evaluated'}
+                >
+                  {isActive && (
+                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  )}
+                  {!isActive && result && passed && (
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  {!isActive && result && !passed && !isPending && (
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  )}
+                  <span className="capitalize">{checkpointType.replace(/_/g, ' ')}</span>
+                  {result && !isPending && (
+                    <span className="text-[10px] opacity-75">({score?.toFixed(1)})</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Error Display */}
       {(error || generationError) && (
         <div className="bg-red-500/10 border-b border-red-500/30 px-4 py-3">
@@ -1306,8 +1519,25 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         </div>
       )}
 
+      {/* Narrative Possibilities Selector (Branching Mode) */}
+      {narrativePossibilities && narrativePossibilities.length > 0 && (
+        <div className="p-4">
+          <NarrativePossibilitiesSelector
+            possibilities={narrativePossibilities}
+            recommendation={narrativeRecommendation || undefined}
+            onSelect={(possibility) => {
+              setIsSelectingNarrative(true);
+              if (onNarrativePossibilitySelected) {
+                onNarrativePossibilitySelected(possibility);
+              }
+            }}
+            isLoading={isSelectingNarrative}
+          />
+        </div>
+      )}
+
       {/* Agent Grid */}
-      <div className="p-2 sm:p-4">
+      <div className="p-2 sm:p-4" style={{ display: narrativePossibilities && narrativePossibilities.length > 0 ? 'none' : 'block' }}>
         {messages.length === 0 ? (
           <div className="flex items-center justify-center py-16">
             <div className="text-center">

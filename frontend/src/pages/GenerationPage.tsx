@@ -4,6 +4,7 @@ import { useSettings } from '../hooks/useSettings';
 import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
 import { AgentChat, RegenerationConstraints } from '../components/AgentChat';
 import { orchestratorFetch, getOrchestratorUrl } from '../lib/api';
+import type { NarrativePossibility } from '../types';
 
 // Multi-agent orchestrator URL (separate subdomain)
 const ORCHESTRATOR_URL = getOrchestratorUrl();
@@ -27,6 +28,8 @@ export function GenerationPage() {
   const [isStarting, setIsStarting] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useBranchingMode, setUseBranchingMode] = useState(true);
+  const [selectedNarrative, setSelectedNarrative] = useState<NarrativePossibility | null>(null);
 
   // Load project data
   useEffect(() => {
@@ -182,6 +185,8 @@ export function GenerationPage() {
       }
 
       // Call orchestrator to start generation
+      // Use branching mode if enabled and no narrative is pre-selected
+      const generationMode = useBranchingMode && !selectedNarrative ? 'branching' : 'full';
       const response = await orchestratorFetch('/generate', {
         method: 'POST',
         body: JSON.stringify({
@@ -192,8 +197,9 @@ export function GenerationPage() {
           provider: agentConfig.provider,
           model: agentConfig.model,
           api_key: apiKey,
-          generation_mode: 'full',
+          generation_mode: generationMode,
           supabase_project_id: project.id,
+          ...(selectedNarrative && { selected_narrative: selectedNarrative }),
         }),
       });
 
@@ -281,6 +287,22 @@ export function GenerationPage() {
           </div>
           
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            {/* Branching Mode Toggle */}
+            <button
+              onClick={() => setUseBranchingMode(!useBranchingMode)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                useBranchingMode
+                  ? 'bg-cyan-600/20 text-cyan-400 border border-cyan-600/50'
+                  : 'bg-slate-700/50 text-slate-400 border border-slate-600'
+              }`}
+              title={useBranchingMode ? 'Branching mode: Choose from multiple narrative directions' : 'Direct mode: Generate single narrative'}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+              {useBranchingMode ? 'Branching' : 'Direct'}
+            </button>
+            
             {project.status === 'completed' && (
               <button
                 onClick={startNewGeneration}
@@ -361,6 +383,12 @@ export function GenerationPage() {
             projectResult={project?.result}
             onUpdateResult={handleUpdateResult}
             onRegenerate={handleRegenerate}
+            onNarrativePossibilitySelected={async (possibility) => {
+              // User selected a narrative possibility, start full generation with it
+              setSelectedNarrative(possibility);
+              setRunId(null); // Clear current runId to trigger new generation
+              // The useEffect will trigger startNewGeneration with the selected narrative
+            }}
             onComplete={async (result) => {
               if (project) {
                 try {

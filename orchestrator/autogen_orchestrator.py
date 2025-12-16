@@ -22,15 +22,18 @@ from prompts import (
     COMPLEXITY_CHECKLIST_PROMPT,
     CONTRADICTION_MAPS_PROMPT,
     CRITIC_SYSTEM_PROMPT,
+    DEEPENING_CHECKPOINT_PROMPT,
     EMOTIONAL_BEAT_SHEET_PROMPT,
     IMPACT_ASSESSMENT_SYSTEM_PROMPT,
     NARRATOR_DESIGN_PROMPT,
+    NARRATIVE_POSSIBILITIES_PROMPT,
     ORIGINALITY_CHECK_SYSTEM_PROMPT,
     POLISH_SYSTEM_PROMPT,
     PROFILER_SYSTEM_PROMPT,
     SENSORY_BLUEPRINT_PROMPT,
     STRATEGIST_SYSTEM_PROMPT,
     SUBTEXT_DESIGN_PROMPT,
+    SYMBOLIC_MOTIF_LAYER_PROMPT,
     WORLDBUILDER_SYSTEM_PROMPT,
     WRITER_SYSTEM_PROMPT,
 )
@@ -144,24 +147,60 @@ class StorytellerGroupChat:
         # Initialize agents
         self._initialize_agents()
 
-    async def initialize_memory(self, openai_api_key: Optional[str] = None) -> bool:
+    async def initialize_memory(
+        self,
+        openai_api_key: Optional[str] = None,
+        gemini_api_key: Optional[str] = None,
+        prefer_local: bool = False,
+    ) -> bool:
         """Initialize Qdrant memory service for character/worldbuilding storage.
 
+        Supports multiple embedding providers with automatic fallback:
+        1. OpenAI (if API key provided) - best quality, 1536 dimensions
+        2. Gemini (if API key provided) - good quality, 768 dimensions
+        3. Local fastembed (no key required) - 384 dimensions
+
         Args:
-            openai_api_key: OpenAI API key for generating embeddings
+            openai_api_key: OpenAI API key for embeddings (highest priority)
+            gemini_api_key: Gemini API key for embeddings (second priority)
+            prefer_local: If True, use local embeddings even if API keys available
 
         Returns:
             True if memory was initialized successfully, False otherwise
         """
-        api_key = openai_api_key or self._openai_api_key
-        if not api_key:
-            self._emit_event("memory_init", {"status": "skipped", "reason": "no_api_key"})
-            return False
+        openai_key = openai_api_key or self._openai_api_key
+
+        # Try to get Gemini key from config if not provided
+        gemini_key = gemini_api_key
+        if not gemini_key and self.config.gemini:
+            try:
+                gemini_key = self.config.gemini.api_key.get_secret_value()
+            except Exception:
+                pass
 
         try:
             self.qdrant_memory = QdrantMemoryService(url=self._qdrant_url)
-            await self.qdrant_memory.connect(openai_api_key=api_key)
-            self._emit_event("memory_init", {"status": "connected", "url": self._qdrant_url})
+            await self.qdrant_memory.connect(
+                openai_api_key=openai_key,
+                gemini_api_key=gemini_key,
+                prefer_local=prefer_local,
+            )
+
+            # Get embedding provider info for the event
+            provider_info = {}
+            if self.qdrant_memory.embedding_provider:
+                info = self.qdrant_memory.embedding_provider.info
+                provider_info = {
+                    "provider_type": info.provider_type.value,
+                    "model_name": info.model_name,
+                    "dimension": info.dimension,
+                }
+
+            self._emit_event("memory_init", {
+                "status": "connected",
+                "url": self._qdrant_url,
+                **provider_info,
+            })
             return True
         except Exception as e:
             self._emit_event("memory_init", {"status": "failed", "error": str(e)})
@@ -769,6 +808,145 @@ Output the revised narrative as valid JSON.
             ],
         }
 
+    async def run_narrative_possibilities(
+        self, project: StoryProject
+    ) -> Dict[str, Any]:
+        """
+        Generate multiple narrative possibilities (3-5) for user selection.
+
+        This implements the Narrative Possibilities Branching feature from
+        Storyteller Framework Section 1.4. Instead of generating a single
+        narrative direction, this generates multiple distinct possibilities
+        for the user to choose from.
+
+        Args:
+            project: The StoryProject with seed idea and configuration
+
+        Returns:
+            Dict containing:
+            - narrative_possibilities: List of 3-5 narrative options
+            - recommendation: Architect's recommended choice
+            - messages: Agent communication log
+        """
+        self.state = GenerationState(
+            phase=GenerationPhase.GENESIS,
+            project_id=project.seed_idea[:20].replace(" ", "_"),
+        )
+
+        self._emit_event("phase_start", {"phase": "narrative_possibilities"})
+
+        # Build custom moral system section if provided
+        custom_moral_section = ""
+        if project.custom_moral_system:
+            custom_moral_section = f"\n- Custom Moral System: {project.custom_moral_system}"
+
+        # Format the prompt with project configuration
+        formatted_prompt = NARRATIVE_POSSIBILITIES_PROMPT.format(
+            seed_idea=project.seed_idea,
+            moral_compass=project.moral_compass.value,
+            target_audience=project.target_audience,
+            theme_core=", ".join(project.theme_core) if project.theme_core else "Not specified",
+            tone_style_references=", ".join(project.tone_style_references) if project.tone_style_references else "Not specified",
+            custom_moral_system_section=custom_moral_section,
+        )
+
+        # Architect generates multiple narrative possibilities
+        architect_response = await self._call_agent(self.architect, formatted_prompt)
+        architect_msg = self._parse_agent_message("Architect", architect_response)
+        self.state.messages.append(architect_msg)
+
+        # Extract the narrative possibilities from the response
+        possibilities_data = architect_msg.content if isinstance(architect_msg.content, dict) else {}
+        narrative_possibilities = possibilities_data.get("narrative_possibilities", [])
+        recommendation = possibilities_data.get("recommendation", {})
+
+        # Emit event with all possibilities for frontend to display
+        self._emit_event("narrative_possibilities_generated", {
+            "count": len(narrative_possibilities),
+            "possibilities": narrative_possibilities,
+            "recommendation": recommendation,
+        })
+
+        self._emit_event("phase_complete", {
+            "phase": "narrative_possibilities",
+            "count": len(narrative_possibilities),
+        })
+
+        return {
+            "narrative_possibilities": narrative_possibilities,
+            "recommendation": recommendation,
+            "messages": [
+                {"agent": m.from_agent, "type": m.type, "content": str(m.content)[:500]}
+                for m in self.state.messages
+            ],
+        }
+
+    async def run_genesis_with_selection(
+        self,
+        project: StoryProject,
+        selected_possibility: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Run Genesis phase with a pre-selected narrative possibility.
+
+        This is called after the user has selected one of the narrative
+        possibilities generated by run_narrative_possibilities.
+
+        Args:
+            project: The StoryProject with seed idea and configuration
+            selected_possibility: The user's chosen narrative possibility
+
+        Returns:
+            Dict containing the selected narrative as the genesis result
+        """
+        self.state = GenerationState(
+            phase=GenerationPhase.GENESIS,
+            project_id=project.seed_idea[:20].replace(" ", "_"),
+        )
+
+        self._emit_event("phase_start", {"phase": "genesis"})
+
+        # Convert selected possibility to standard narrative format
+        # The selected possibility already has the required fields
+        narrative = {
+            "plot_summary": selected_possibility.get("plot_summary", ""),
+            "setting_description": selected_possibility.get("setting_description", ""),
+            "main_conflict": selected_possibility.get("main_conflict", ""),
+            "potential_characters": selected_possibility.get("potential_characters", []),
+            "possible_twists": selected_possibility.get("possible_twists", []),
+            "thematic_elements": selected_possibility.get("thematic_elements", []),
+            "moral_compass_application": selected_possibility.get("moral_compass_application", ""),
+            # Additional fields from branching
+            "title": selected_possibility.get("title", ""),
+            "genre_approach": selected_possibility.get("genre_approach", ""),
+            "conflict_type": selected_possibility.get("conflict_type", ""),
+            "unique_appeal": selected_possibility.get("unique_appeal", ""),
+            "estimated_tone": selected_possibility.get("estimated_tone", ""),
+        }
+
+        self.state.narrative = narrative
+
+        # Create a synthetic agent message for the log
+        self.state.messages.append(AgentMessage(
+            type="artifact",
+            from_agent="Architect",
+            content=narrative,
+        ))
+
+        self._emit_event("phase_complete", {
+            "phase": "genesis",
+            "result": narrative,
+            "selected_from_possibilities": True,
+        })
+
+        return {
+            "narrative_possibility": narrative,
+            "messages": [
+                {"agent": m.from_agent, "type": m.type, "content": str(m.content)[:500]}
+                for m in self.state.messages
+            ],
+        }
+
     async def run_characters_phase(
         self,
         narrative: Dict[str, Any],
@@ -1165,6 +1343,7 @@ Now create the plot outline as valid JSON.
         change_request: Optional[str] = None,
         sensory_blueprint: Optional[Dict[str, Any]] = None,
         subtext_design: Optional[Dict[str, Any]] = None,
+        motif_target: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the Drafting phase with Writer↔Critic loop.
@@ -1190,6 +1369,12 @@ Now create the plot outline as valid JSON.
                 - sample_voice: Example of the narrator's voice
             sensory_blueprint: Optional pre-planned sensory details for the scene
             subtext_design: Optional pre-designed subtext layer for the scene
+            motif_target: Optional per-scene motif target from the motif bible with:
+                - primary_motif: Main motif to feature in this scene
+                - secondary_motifs: Supporting motifs to weave in
+                - visual_focus: Key visual to emphasize
+                - color_emphasis: Dominant color if any
+                - symbol_placement: Where/how symbols should appear
         """
         self.state.phase = GenerationPhase.DRAFTING
         scene_number = scene.get("scene_number", 1)
@@ -1481,6 +1666,45 @@ IMPORTANT: Use these pre-designed subtext layers. Remember: show, don't tell. Mo
                         subtext_str += f"- {entry.get('character', 'Character')}: {entry.get('motivation', 'N/A')}\n"
                 subtext_str += "\n"
 
+        # Format motif target if available
+        motif_str = ""
+        if motif_target:
+            motif_str = """
+## Symbolic/Motif Layer (From Motif Bible)
+
+IMPORTANT: Weave these symbolic elements naturally into your scene. Motifs should enhance meaning without being heavy-handed.
+
+"""
+            if motif_target.get("primary_motif"):
+                motif_str += f"**Primary Motif:** {motif_target['primary_motif']}\n"
+                motif_str += "This is the main symbolic element to feature in this scene.\n\n"
+
+            if motif_target.get("secondary_motifs"):
+                secondary = motif_target["secondary_motifs"]
+                if isinstance(secondary, list):
+                    motif_str += f"**Secondary Motifs:** {', '.join(secondary)}\n"
+                else:
+                    motif_str += f"**Secondary Motifs:** {secondary}\n"
+                motif_str += "Weave these supporting motifs subtly throughout the scene.\n\n"
+
+            if motif_target.get("visual_focus"):
+                motif_str += f"**Visual Focus:** {motif_target['visual_focus']}\n"
+                motif_str += "This is the key visual to emphasize in descriptions.\n\n"
+
+            if motif_target.get("color_emphasis"):
+                motif_str += f"**Color Emphasis:** {motif_target['color_emphasis']}\n"
+                motif_str += "Use this color palette to reinforce the scene's mood and symbolism.\n\n"
+
+            if motif_target.get("symbol_placement"):
+                motif_str += f"**Symbol Placement:** {motif_target['symbol_placement']}\n\n"
+
+            if motif_target.get("subtext_layer"):
+                motif_str += f"**Symbolic Subtext:** {motif_target['subtext_layer']}\n"
+                motif_str += "This is what the motifs communicate beneath the surface.\n\n"
+
+            if motif_target.get("connection_to_theme"):
+                motif_str += f"**Thematic Connection:** {motif_target['connection_to_theme']}\n\n"
+
         user_prompt = f"""
 ## Scene Context
 
@@ -1522,6 +1746,7 @@ IMPORTANT: Use these pre-designed subtext layers. Remember: show, don't tell. Mo
 {narrator_str}
 {sensory_str}
 {subtext_str}
+{motif_str}
 ## Style Guidelines
 
 **Moral Compass:** {moral_compass}
@@ -2520,6 +2745,262 @@ Output your revised scene as valid JSON with the same structure as the original 
 Design the narrator for this story as valid JSON.
 """
 
+    # Priority 2: Deepening Checkpoints (Storyteller Section 6.1)
+    # =========================================================================
+
+    async def run_deepening_checkpoint(
+        self,
+        scene_number: int,
+        scene_draft: Dict[str, Any],
+        checkpoint_type: str,
+        narrative: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        outline: Dict[str, Any],
+        previous_scenes: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run a deepening checkpoint evaluation for a key structural scene.
+
+        Deepening checkpoints are quality gates at critical narrative points:
+        - inciting_incident: Scene that disrupts the protagonist's ordinary world
+        - midpoint: Major shift in story direction, stakes escalation
+        - climax: Highest tension point, protagonist's defining choice
+        - resolution: Emotional closure, arc completion
+
+        Args:
+            scene_number: The scene number being evaluated
+            scene_draft: The drafted scene content
+            checkpoint_type: Type of checkpoint (inciting_incident, midpoint, climax, resolution)
+            narrative: Narrative foundation from Genesis phase
+            characters: Character profiles from Profiler
+            outline: Plot outline from Strategist
+            previous_scenes: Optional list of previous scene drafts for context
+
+        Returns:
+            Dict with checkpoint evaluation results including pass/fail and feedback
+        """
+        valid_checkpoints = ["inciting_incident", "midpoint", "climax", "resolution"]
+        if checkpoint_type not in valid_checkpoints:
+            raise ValueError(f"Invalid checkpoint_type: {checkpoint_type}. Must be one of {valid_checkpoints}")
+
+        self._emit_event("checkpoint_start", {
+            "scene_number": scene_number,
+            "checkpoint_type": checkpoint_type,
+        })
+
+        # Format scene content for evaluation
+        scene_content = scene_draft.get("narrative_content", "")
+        if isinstance(scene_content, list):
+            scene_content = "\n\n".join(scene_content)
+        elif isinstance(scene_content, dict):
+            scene_content = json.dumps(scene_content, indent=2)
+
+        scene_title = scene_draft.get("scene_title", f"Scene {scene_number}")
+
+        # Format character arcs
+        character_arcs = []
+        for char in characters:
+            arc_info = f"- {char.get('name', 'Unknown')}: {char.get('potential_arc', char.get('arc_type', 'Unknown arc'))}"
+            if char.get('psychological_wound'):
+                arc_info += f" (wound: {char.get('psychological_wound')})"
+            character_arcs.append(arc_info)
+        character_arcs_str = "\n".join(character_arcs) if character_arcs else "No character arc information available"
+
+        # Format themes
+        themes = narrative.get("thematic_elements", [])
+        if isinstance(themes, list):
+            themes_str = ", ".join(themes) if themes else "No themes specified"
+        else:
+            themes_str = str(themes)
+
+        # Format previous events
+        previous_events = []
+        if previous_scenes:
+            for prev_scene in previous_scenes[-3:]:
+                prev_title = prev_scene.get("scene_title", "Untitled")
+                prev_summary = prev_scene.get("scene_summary", prev_scene.get("plot_advancement", ""))
+                if prev_summary:
+                    previous_events.append(f"- {prev_title}: {prev_summary[:200]}")
+        previous_events_str = "\n".join(previous_events) if previous_events else "This is an early scene with no significant previous events"
+
+        # Format narrative summary
+        narrative_summary = f"""
+Plot Summary: {narrative.get("plot_summary", "Not available")}
+Main Conflict: {narrative.get("main_conflict", "Not available")}
+Setting: {narrative.get("setting_description", "Not available")}
+"""
+
+        # Build the evaluation prompt
+        user_prompt = DEEPENING_CHECKPOINT_PROMPT.format(
+            checkpoint_type=checkpoint_type.replace("_", " ").title(),
+            scene_number=scene_number,
+            scene_title=scene_title,
+            scene_content=scene_content[:5000],
+            narrative_summary=narrative_summary,
+            character_arcs=character_arcs_str,
+            themes=themes_str,
+            previous_events=previous_events_str,
+        )
+
+        # Use the Critic agent for checkpoint evaluation
+        response = await self._call_agent(self.critic, user_prompt)
+        checkpoint_msg = self._parse_agent_message("Critic", response)
+        self.state.messages.append(checkpoint_msg)
+
+        # Parse the checkpoint result
+        checkpoint_result = checkpoint_msg.content if isinstance(checkpoint_msg.content, dict) else {}
+
+        # Determine if checkpoint passed
+        passed = checkpoint_result.get("passed", False)
+        overall_score = checkpoint_result.get("overall_score", 0)
+
+        # Check passing criteria
+        criteria_scores = checkpoint_result.get("criteria_scores", {})
+        structural_score = criteria_scores.get("structural_function", {}).get("score", 0)
+        min_score = min(
+            [c.get("score", 10) for c in criteria_scores.values() if isinstance(c, dict)],
+            default=10
+        )
+
+        # Apply passing threshold logic
+        if overall_score >= 7.0 and min_score >= 5 and structural_score >= 7:
+            passed = True
+        else:
+            passed = False
+
+        checkpoint_result["passed"] = passed
+
+        self._emit_event("checkpoint_complete", {
+            "scene_number": scene_number,
+            "checkpoint_type": checkpoint_type,
+            "passed": passed,
+            "overall_score": overall_score,
+            "structural_score": structural_score,
+            "revision_priority": checkpoint_result.get("revision_priority", "medium"),
+        })
+
+        return {
+            "checkpoint_type": checkpoint_type,
+            "scene_number": scene_number,
+            "passed": passed,
+            "overall_score": overall_score,
+            "criteria_scores": criteria_scores,
+            "strengths": checkpoint_result.get("strengths", []),
+            "areas_for_improvement": checkpoint_result.get("areas_for_improvement", []),
+            "checkpoint_specific_notes": checkpoint_result.get("checkpoint_specific_notes", ""),
+            "revision_priority": checkpoint_result.get("revision_priority", "medium"),
+            "suggested_revisions": checkpoint_result.get("suggested_revisions", []),
+        }
+
+    def get_checkpoint_scenes(self, outline: Dict[str, Any]) -> Dict[str, int]:
+        """
+        Extract the checkpoint scene numbers from the outline.
+
+        Returns:
+            Dict mapping checkpoint type to scene number
+        """
+        return {
+            "inciting_incident": outline.get("inciting_incident_scene", 2),
+            "midpoint": outline.get("midpoint_scene", outline.get("total_scenes", 10) // 2),
+            "climax": outline.get("climax_scene", int(outline.get("total_scenes", 10) * 0.8)),
+            "resolution": outline.get("resolution_scene", outline.get("total_scenes", 10)),
+        }
+
+    def is_checkpoint_scene(self, scene_number: int, outline: Dict[str, Any]) -> Optional[str]:
+        """
+        Check if a scene number is a checkpoint scene.
+
+        Args:
+            scene_number: The scene number to check
+            outline: The plot outline containing checkpoint markers
+
+        Returns:
+            The checkpoint type if this is a checkpoint scene, None otherwise
+        """
+        checkpoint_scenes = self.get_checkpoint_scenes(outline)
+        for checkpoint_type, checkpoint_scene in checkpoint_scenes.items():
+            if scene_number == checkpoint_scene:
+                return checkpoint_type
+        return None
+
+    # =========================================================================
+    # Priority 1: Symbolic/Motif Layer Planning (Storyteller Section 3.5.2)
+    # =========================================================================
+
+    async def run_motif_layer_planning(
+        self,
+        narrative: Dict[str, Any],
+        characters: List[Dict[str, Any]],
+        outline: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate a comprehensive Symbolic/Motif Layer Plan - a "Motif Bible" for the story.
+
+        This creates the symbolic and motif layer that will run throughout the narrative,
+        including visual metaphors, recurring symbols, and per-scene motif targets.
+
+        Args:
+            narrative: Narrative foundation from Genesis phase
+            characters: Character profiles from Profiler
+            outline: Plot outline from Strategist
+
+        Returns:
+            Dict containing the motif bible with core symbols, visual metaphor system,
+            character motifs, structural motifs, and per-scene motif targets
+        """
+        self._emit_event("phase_start", {"phase": "motif_layer_planning"})
+        self._emit_event("motif_planning_start", {
+            "total_scenes": len(outline.get("scenes", [])),
+        })
+
+        # Format narrative summary
+        narrative_summary = f"""
+Plot Summary: {narrative.get("plot_summary", "Not available")}
+Main Conflict: {narrative.get("main_conflict", "Not available")}
+Setting: {narrative.get("setting_description", "Not available")}
+Genre: {narrative.get("genre_approach", "Not specified")}
+Tone: {narrative.get("estimated_tone", "Not specified")}
+"""
+
+        # Format themes
+        themes = narrative.get("thematic_elements", [])
+        if isinstance(themes, list):
+            themes_str = "\n".join([f"- {t}" for t in themes]) if themes else "No themes specified"
+        else:
+            themes_str = str(themes)
+
+        # Format characters
+        characters_str = ""
+        for char in characters:
+            char_info = f"""
+**{char.get('name', 'Unknown')}** ({char.get('role', 'Unknown role')})
+- Arc: {char.get('potential_arc', char.get('arc_type', 'Unknown'))}
+- Psychological Wound: {char.get('psychological_wound', 'Not specified')}
+- Core Desire: {char.get('core_desire', 'Not specified')}
+- Core Fear: {char.get('core_fear', 'Not specified')}
+"""
+            characters_str += char_info
+
+        # Format outline summary
+        scenes = outline.get("scenes", [])
+        outline_summary = f"Total Scenes: {len(scenes)}\n\n"
+        for scene in scenes:
+            scene_num = scene.get("scene_number", "?")
+            scene_title = scene.get("title", scene.get("scene_title", "Untitled"))
+            scene_purpose = scene.get("purpose", scene.get("scene_purpose", ""))
+            outline_summary += f"Scene {scene_num}: {scene_title}\n"
+            if scene_purpose:
+                outline_summary += f"  Purpose: {scene_purpose[:100]}...\n" if len(scene_purpose) > 100 else f"  Purpose: {scene_purpose}\n"
+
+        # Build the prompt
+        user_prompt = SYMBOLIC_MOTIF_LAYER_PROMPT.format(
+            narrative_summary=narrative_summary,
+            themes=themes_str,
+            characters=characters_str,
+            outline_summary=outline_summary,
+        )
+
+        # Use the Architect agent for motif planning (creative, structural work)
         response = await self._call_agent(self.architect, user_prompt)
         msg = self._parse_agent_message("Architect", response)
         self.state.messages.append(msg)
@@ -2544,6 +3025,50 @@ Design the narrator for this story as valid JSON.
             "reliability": reliability_level,
             "stance": stance_primary,
         }
+
+        motif_result = msg.content if isinstance(msg.content, dict) else {}
+
+        # Extract key components for validation
+        motif_bible = motif_result.get("motif_bible", {})
+        scene_motif_targets = motif_result.get("scene_motif_targets", [])
+
+        # Emit completion event with summary
+        self._emit_event("motif_planning_complete", {
+            "core_symbols_count": len(motif_bible.get("core_symbols", [])),
+            "character_motifs_count": len(motif_bible.get("character_motifs", [])),
+            "scene_targets_count": len(scene_motif_targets),
+            "has_structural_motifs": bool(motif_bible.get("structural_motifs")),
+        })
+
+        self._emit_event("phase_complete", {"phase": "motif_layer_planning"})
+
+        return {
+            "motif_bible": motif_bible,
+            "scene_motif_targets": scene_motif_targets,
+            "motif_tracking": motif_result.get("motif_tracking", {}),
+            "integration_guidelines": motif_result.get("integration_guidelines", {}),
+        }
+
+    def get_scene_motif_target(
+        self,
+        scene_number: int,
+        motif_layer: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the motif target for a specific scene.
+
+        Args:
+            scene_number: The scene number to get motif target for
+            motif_layer: The full motif layer planning result
+
+        Returns:
+            The motif target for the scene, or None if not found
+        """
+        scene_targets = motif_layer.get("scene_motif_targets", [])
+        for target in scene_targets:
+            if target.get("scene_number") == scene_number:
+                return target
+        return None
 
     # =========================================================================
     # Priority 3: Advanced Features
@@ -3223,6 +3748,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         previous_run_id: Optional[str] = None,
         change_request: Optional[str] = None,
         supabase_project_id: Optional[str] = None,
+        selected_narrative: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete story generation pipeline with optional Qdrant memory integration
@@ -3246,6 +3772,8 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             scenes_to_regenerate: Optional list of scene numbers to regenerate (1-indexed)
                 If provided, only these scenes will be regenerated while keeping others intact
             previous_run_id: Run ID of the previous generation run (for loading existing scenes)
+            selected_narrative: Pre-selected narrative possibility from branching UI
+                If provided, skips Genesis phase and uses this narrative directly
         """
         results = {
             "project": project.model_dump(),
@@ -3383,7 +3911,16 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
 
         # Phase 1: Genesis
         genesis_result = None
-        if should_skip_phase("genesis"):
+
+        # Check if user provided a pre-selected narrative from branching UI
+        if selected_narrative:
+            # User selected a narrative from the branching possibilities
+            genesis_result = await self.run_genesis_with_selection(project, selected_narrative)
+            await store_artifact("genesis", "narrative_possibility", genesis_result.get("narrative_possibility", {}))
+            # Also store the selected narrative ID for reference
+            if "id" in selected_narrative:
+                await store_artifact("genesis", "selected_narrative_id", {"id": selected_narrative["id"]})
+        elif should_skip_phase("genesis"):
             # Use previous genesis result
             narrative = get_previous_artifact("genesis", "narrative_possibility")
             if narrative:
@@ -3575,6 +4112,27 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
         outline = outlining_result["outline"]
         scenes = outline.get("scenes", [])
 
+        # Phase 4.5: Motif Layer Planning (Symbolic/Motif Bible)
+        motif_layer_result = None
+        if should_skip_phase("advanced_planning"):
+            # Motif layer is part of advanced planning, so skip if advanced planning is skipped
+            motif_layer = get_previous_artifact("motif_layer", "motif_bible")
+            if motif_layer:
+                motif_layer_result = motif_layer
+                results["phases"]["motif_layer"] = motif_layer_result
+                self._emit_event("phase_skipped", {"phase": "motif_layer", "reason": "using_previous_artifact"})
+
+        if not motif_layer_result:
+            await self._check_pause()  # Pause checkpoint
+            motif_layer_result = await self.run_motif_layer_planning(
+                narrative=genesis_result["narrative_possibility"],
+                characters=characters_result["characters"],
+                outline=outline,
+            )
+            await store_artifact("motif_layer", "motif_bible", motif_layer_result)
+
+        results["phases"]["motif_layer"] = motif_layer_result
+
         # Phase 5: Advanced Planning
         advanced_planning_result = None
         if should_skip_phase("advanced_planning"):
@@ -3697,6 +4255,11 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                 if scene_regen_mode and continuity["next_scene_summary"] != "N/A":
                     memory_ctx["next_scene_context"] = continuity["next_scene_summary"]
 
+                # Get per-scene motif target from the motif layer planning
+                scene_motif_target = None
+                if motif_layer_result:
+                    scene_motif_target = self.get_scene_motif_target(scene_number, motif_layer_result)
+
                 # Generate per-scene Sensory Blueprint
                 # This plans specific sensory details before drafting for richer prose
                 emotional_beat = scene.get("emotional_beat", {})
@@ -3737,6 +4300,7 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     change_request=change_request,
                     sensory_blueprint=scene_sensory_blueprint,
                     subtext_design=scene_subtext_design,
+                    motif_target=scene_motif_target,
                 )
 
                 # Quality Gate with retry logic (per scene)
@@ -3757,6 +4321,34 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
                     # Update draft_result with the final (possibly revised) draft
                     draft_result["draft"] = quality_enforcement_result["final_draft"]
                     draft_result["quality_enforcement"] = quality_enforcement_result
+
+                # Deepening Checkpoint evaluation for key structural scenes
+                checkpoint_type = self.is_checkpoint_scene(scene_number, outline)
+                if checkpoint_type and draft_result.get("draft"):
+                    # Collect previous scene drafts for context
+                    previous_scene_drafts = [
+                        d.get("draft", {}) for d in drafts[:i] if d.get("draft")
+                    ]
+                    checkpoint_result = await self.run_deepening_checkpoint(
+                        scene_number=scene_number,
+                        scene_draft=draft_result["draft"],
+                        checkpoint_type=checkpoint_type,
+                        narrative=genesis_result["narrative_possibility"],
+                        characters=characters_result["characters"],
+                        outline=outline,
+                        previous_scenes=previous_scene_drafts,
+                    )
+                    draft_result["checkpoint"] = checkpoint_result
+
+                    # Store checkpoint result as artifact
+                    if persistence_service and run_id and persistence_service.is_connected:
+                        await persistence_service.store_artifact(
+                            run_id=run_id,
+                            phase=f"checkpoint_{checkpoint_type}",
+                            artifact_type="checkpoint_evaluation",
+                            content=checkpoint_result,
+                            project_id=supabase_project_id,
+                        )
 
                 # Update or append draft result
                 if scene_regen_mode and i < len(drafts):
@@ -3785,6 +4377,14 @@ Output as JSON with fields: overall_score, strengths (array), improvements (arra
             for d in drafts if d.get("quality_enforcement")
         ]
         results["phases"]["quality_gate"] = {"scenes": quality_results}
+
+        # Collect deepening checkpoint results from drafts
+        checkpoint_results = {
+            d.get("checkpoint", {}).get("checkpoint_type"): d.get("checkpoint", {})
+            for d in drafts if d.get("checkpoint")
+        }
+        if checkpoint_results:
+            results["phases"]["checkpoints"] = checkpoint_results
 
         # Phase 7: Polish (all scenes or selective regeneration)
         polished_drafts = []
