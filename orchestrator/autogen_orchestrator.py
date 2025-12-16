@@ -2119,7 +2119,58 @@ Make sure your output reflects these requirements.
 
         draft = writer_msg.content if isinstance(writer_msg.content, dict) else None
 
-        # Critic reviews the draft
+        # =======================================================================
+        # BUG FIX #1: Mandatory First Revision Pass (Anti "Critic-Agreeer")
+        # First drafts should NEVER pass without at least one refinement cycle.
+        # This forces the Writer to tighten subtext, remove didactic elements,
+        # and subvert at least one cliché before Critic even reviews.
+        # =======================================================================
+        if self.state.revision_count[scene_number] == 0:
+            logger.info(f"[run_drafting_phase] Scene {scene_number}: Mandatory first revision pass (first draft never passes)")
+            self._emit_event("mandatory_revision", {
+                "scene_number": scene_number,
+                "reason": "First draft always requires refinement",
+            })
+            
+            mandatory_revision_prompt = f"""
+## MANDATORY REFINEMENT PASS
+
+Your first draft has been automatically flagged for refinement. This is a standard quality control step - first drafts ALWAYS require at least one revision pass.
+
+**Scene Number:** {scene_number}
+**Scene Title:** {scene.get("title", "Untitled")}
+
+## Your Current Draft
+
+{json.dumps(draft, indent=2) if draft else writer_response}
+
+## REQUIRED REFINEMENTS (You MUST address ALL of these):
+
+1. **Tighten Subtext**: Review all dialogue and narration. Remove any lines where characters directly state their emotions or the moral of the scene. Show through action and implication, never tell.
+
+2. **Eliminate Didacticism**: Remove any passages that feel preachy, moralistic, or that explain the theme directly to the reader. Trust the reader to understand.
+
+3. **Subvert One Cliché**: Identify the most obvious trope or cliché in your draft and subvert it. Take the expected and twist it into something fresh.
+
+4. **Reduce Exposition**: Cut any "as you know" dialogue or narrator explanations that could be shown through action instead.
+
+5. **Strengthen Sensory Details**: Replace any generic descriptions with specific, concrete sensory details unique to this scene.
+
+---
+
+Output your REVISED scene as valid JSON. This revision does NOT count against your revision limit - it's a mandatory quality step.
+"""
+            writer_response = await self._call_agent(
+                self.writer,
+                mandatory_revision_prompt,
+                [{"role": "assistant", "content": writer_response}],
+            )
+            writer_msg = self._parse_agent_message("Writer", writer_response)
+            self.state.messages.append(writer_msg)
+            draft = writer_msg.content if isinstance(writer_msg.content, dict) else draft
+            logger.info(f"[run_drafting_phase] Scene {scene_number}: Mandatory revision complete, proceeding to Critic review")
+
+        # Critic reviews the draft (now reviewing the refined version)
         approved = False
         while not approved and self.state.revision_count[scene_number] < self.state.max_revisions:
             critique_prompt = f"""
@@ -2147,10 +2198,28 @@ Make sure your output reflects these requirements.
 
 ---
 
-Provide a comprehensive critique. If the scene needs revision (score < 7.0), use:
+## STRICT EVALUATION CRITERIA (Be Harsh - First Pass Rarely Passes)
+
+Provide a comprehensive critique evaluating:
+
+1. **Subtext Quality (Critical)**: Does the scene SHOW rather than TELL? Are emotions implied through action rather than stated? Score below 8.0 if any character directly states their feelings or the theme is explained.
+
+2. **Didacticism Check (Critical)**: Is there ANY moralizing, preaching, or on-the-nose thematic exposition? If yes, this is an automatic REVISION_REQUEST regardless of other scores.
+
+3. **Originality**: Are there clichés, overused metaphors, or predictable plot beats? Each cliché found should lower the score.
+
+4. **Emotional Impact**: Does the scene achieve its intended emotional beat through craft, not exposition?
+
+**Scoring Guidelines:**
+- Score 9.0+: Exceptional - rare, only for truly outstanding work
+- Score 8.0-8.9: Strong - minor polish needed
+- Score 7.0-7.9: Acceptable - some issues but passable
+- Score < 7.0: Needs revision - significant issues
+
+If the scene needs revision (score < 8.0 OR any didacticism detected), use:
 REVISION_REQUEST: [specific issues] INSTRUCTIONS: [how to fix]
 
-If approved (score >= 7.0), say APPROVED and output your critique as JSON.
+If approved (score >= 8.0 AND no didacticism), say APPROVED and output your critique as JSON.
 Revision {self.state.revision_count[scene_number] + 1} of {self.state.max_revisions} maximum.
 """
 
@@ -2158,27 +2227,66 @@ Revision {self.state.revision_count[scene_number] + 1} of {self.state.max_revisi
             critic_msg = self._parse_agent_message("Critic", critic_response)
             self.state.messages.append(critic_msg)
 
-            if critic_msg.type == "approved" or "APPROVED" in critic_response.upper():
+            # =======================================================================
+            # BUG FIX #2: Stricter Approval Logic (Anti "Critic-Agreeer")
+            # Don't auto-approve on unparseable responses. Require explicit approval.
+            # Also check for didacticism indicators in the critique.
+            # =======================================================================
+            
+            # Extract score from critique if available
+            critic_score = None
+            if isinstance(critic_msg.content, dict):
+                critic_score = critic_msg.content.get("overall_score", critic_msg.content.get("score"))
+            
+            # Check for didacticism flags in the response
+            didacticism_detected = any(term in critic_response.lower() for term in [
+                "didactic", "moraliz", "preach", "on-the-nose", "tells rather than shows",
+                "states emotion", "explains the theme", "heavy-handed"
+            ])
+            
+            if didacticism_detected:
+                logger.info(f"[run_drafting_phase] Scene {scene_number}: Didacticism detected in critique, forcing revision")
+            
+            # Stricter approval: require explicit APPROVED AND no didacticism AND score >= 8.0
+            is_explicitly_approved = critic_msg.type == "approved" or "APPROVED" in critic_response.upper()
+            score_passes = critic_score is None or critic_score >= 8.0  # If no score, don't block on it
+            
+            if is_explicitly_approved and not didacticism_detected and score_passes:
                 approved = True
+                logger.info(f"[run_drafting_phase] Scene {scene_number}: Approved (score={critic_score}, didacticism={didacticism_detected})")
                 self._emit_event("scene_approved", {
                     "scene_number": scene_number,
                     "revisions": self.state.revision_count[scene_number],
+                    "critic_score": critic_score,
                 })
-            elif critic_msg.type == "revision_request":
+            elif critic_msg.type == "revision_request" or didacticism_detected or (critic_score and critic_score < 8.0):
                 self.state.revision_count[scene_number] += 1
+                
+                # Build revision issues
+                issues = ""
+                instructions = ""
+                if isinstance(critic_msg.content, dict):
+                    issues = critic_msg.content.get("issues", "")
+                    instructions = critic_msg.content.get("instructions", "")
+                
+                if didacticism_detected and "didactic" not in issues.lower():
+                    issues += " CRITICAL: Didacticism/moralizing detected - remove all on-the-nose thematic exposition."
+                    instructions += " Show the theme through character actions and consequences, never state it directly."
 
+                logger.info(f"[run_drafting_phase] Scene {scene_number}: Revision requested (score={critic_score}, didacticism={didacticism_detected})")
                 self._emit_event("revision_requested", {
                     "scene_number": scene_number,
                     "revision_number": self.state.revision_count[scene_number],
-                    "issues": critic_msg.content.get("issues", ""),
+                    "issues": issues,
+                    "didacticism_detected": didacticism_detected,
                 })
 
                 # Writer revises
                 revision_prompt = f"""
 The Critic requests revisions:
 
-Issues: {critic_msg.content.get("issues", "")}
-Instructions: {critic_msg.content.get("instructions", "")}
+Issues: {issues}
+Instructions: {instructions}
 
 Please revise the scene to address these concerns.
 This is revision {self.state.revision_count[scene_number]} of {self.state.max_revisions} maximum.
@@ -2193,8 +2301,39 @@ Output the revised scene as valid JSON.
                 self.state.messages.append(writer_msg)
                 draft = writer_msg.content if isinstance(writer_msg.content, dict) else draft
             else:
-                # Treat as approved if no clear revision request
-                approved = True
+                # =======================================================================
+                # BUG FIX: Don't auto-approve unparseable responses
+                # If we can't parse the response, request clarification instead of approving
+                # =======================================================================
+                logger.warning(f"[run_drafting_phase] Scene {scene_number}: Unparseable critic response, requesting revision for safety")
+                self.state.revision_count[scene_number] += 1
+                
+                self._emit_event("revision_requested", {
+                    "scene_number": scene_number,
+                    "revision_number": self.state.revision_count[scene_number],
+                    "issues": "Critic response unclear - applying standard refinement",
+                })
+                
+                # Request standard refinement
+                revision_prompt = f"""
+The previous review was unclear. Please apply these standard refinements:
+
+1. Tighten all subtext - ensure emotions are shown, not told
+2. Remove any didactic or moralizing passages
+3. Subvert any obvious clichés
+4. Strengthen sensory details
+
+This is revision {self.state.revision_count[scene_number]} of {self.state.max_revisions} maximum.
+Output the revised scene as valid JSON.
+"""
+                writer_response = await self._call_agent(
+                    self.writer,
+                    revision_prompt,
+                    [{"role": "assistant", "content": writer_response}],
+                )
+                writer_msg = self._parse_agent_message("Writer", writer_response)
+                self.state.messages.append(writer_msg)
+                draft = writer_msg.content if isinstance(writer_msg.content, dict) else draft
 
         # If max revisions reached, approve with notes
         if not approved:
@@ -2460,8 +2599,12 @@ Analyze this scene for originality. Identify cliches, evaluate trope usage, asse
         originality_result = originality_msg.content if isinstance(originality_msg.content, dict) else {}
 
         # Determine if revision is required based on score
+        # BUG FIX #3: Raised threshold from 6.0 to 8.0 - originality is now a hard blocker
         originality_score = originality_result.get("originality_score", 10)
-        revision_required = originality_score < 6.0 or originality_result.get("revision_required", False)
+        originality_threshold = 8.0  # Was 6.0 - now stricter to force trope subversion
+        revision_required = originality_score < originality_threshold or originality_result.get("revision_required", False)
+        
+        logger.info(f"[run_originality_check] Scene {scene_number}: score={originality_score}, threshold={originality_threshold}, revision_required={revision_required}")
 
         self._emit_event("phase_complete", {
             "phase": "originality_check",
@@ -2654,13 +2797,19 @@ Assess the emotional impact of this scene. Evaluate how well the intended emotio
             genre_context: Genre context
             quality_thresholds: Optional custom thresholds (defaults provided)
         """
-        # Default quality thresholds
+        # =======================================================================
+        # BUG FIX #3: Stricter Quality Thresholds (Anti "Formal Originality Check")
+        # Originality is now a HARD BLOCKER with threshold 8.0 (was 6.0)
+        # This forces Writer to subvert clichés rather than just acknowledge them
+        # =======================================================================
         thresholds = quality_thresholds or {
-            "critic_overall": 7.0,
-            "critic_category_min": 5,
-            "originality_score": 6.0,
-            "impact_score": 6.0,
+            "critic_overall": 8.0,      # Was 7.0 - raised for stricter quality
+            "critic_category_min": 6,   # Was 5 - raised for stricter quality
+            "originality_score": 8.0,   # Was 6.0 - CRITICAL: This is now a hard blocker
+            "impact_score": 7.0,        # Was 6.0 - raised for stricter quality
         }
+        
+        logger.info(f"[run_quality_gate] Scene {scene_number}: Starting quality gate with thresholds: {thresholds}")
 
         self._emit_event("quality_gate_start", {
             "scene_number": scene_number,
@@ -2712,18 +2861,43 @@ Assess the emotional impact of this scene. Evaluate how well the intended emotio
         impact_passed = impact_result["impact_score"] >= thresholds["impact_score"]
 
         quality_passed = critic_passed and originality_passed and impact_passed
+        
+        # Log decision inputs for debugging
+        logger.info(f"[run_quality_gate] Scene {scene_number}: DECISION INPUTS - "
+                   f"critic_passed={critic_passed}, "
+                   f"originality_score={originality_result['originality_score']} (threshold={thresholds['originality_score']}), "
+                   f"impact_score={impact_result['impact_score']} (threshold={thresholds['impact_score']})")
+        logger.info(f"[run_quality_gate] Scene {scene_number}: GATE DECISION - quality_passed={quality_passed}")
 
         # Compile issues for revision
         revision_issues = []
+        revision_tags = []  # Tags to guide revision focus
+        
         if not critic_passed:
             revision_issues.extend(critic_issues)
+            revision_tags.append("IMPROVE_CRAFT")
+            
         if not originality_passed:
-            revision_issues.append(f"Originality score {originality_result['originality_score']} below threshold {thresholds['originality_score']}")
-            revision_issues.extend([
-                f"Cliche: {c.get('text', 'Unknown')}" for c in originality_result.get("flagged_sections", [])[:3]
-            ])
+            # =======================================================================
+            # BUG FIX #3 CONTINUED: Add "Subvert Tropes" tag for low originality
+            # This explicitly tells Writer to subvert clichés, not just acknowledge them
+            # =======================================================================
+            revision_issues.append(f"CRITICAL: Originality score {originality_result['originality_score']} below threshold {thresholds['originality_score']}")
+            revision_issues.append("ACTION REQUIRED: Subvert at least 2 clichés/tropes identified below")
+            revision_tags.append("SUBVERT_TROPES")  # Key tag for Writer
+            
+            # List specific clichés to subvert
+            cliches = originality_result.get("flagged_sections", [])
+            for i, c in enumerate(cliches[:5]):  # Show up to 5 clichés
+                cliche_text = c.get('text', c.get('cliche', 'Unknown'))
+                severity = c.get('severity', 'moderate')
+                revision_issues.append(f"  [{i+1}] Cliché ({severity}): {cliche_text}")
+            
+            logger.info(f"[run_quality_gate] Scene {scene_number}: Originality FAILED - {len(cliches)} clichés found, adding SUBVERT_TROPES tag")
+            
         if not impact_passed:
             revision_issues.append(f"Impact score {impact_result['impact_score']} below threshold {thresholds['impact_score']}")
+            revision_tags.append("STRENGTHEN_IMPACT")
             revision_issues.extend([
                 f"Weak section: {s.get('location', 'Unknown')}" for s in impact_result.get("weak_sections", [])[:3]
             ])
@@ -2743,6 +2917,7 @@ Assess the emotional impact of this scene. Evaluate how well the intended emotio
             "critic_passed": critic_passed,
             "critic_issues": critic_issues,
             "revision_issues": revision_issues,
+            "revision_tags": revision_tags,  # Tags like SUBVERT_TROPES, IMPROVE_CRAFT, STRENGTHEN_IMPACT
             "scores": {
                 "originality": originality_result["originality_score"],
                 "impact": impact_result["impact_score"],
@@ -2781,25 +2956,66 @@ Assess the emotional impact of this scene. Evaluate how well the intended emotio
         # Format the quality feedback for Writer
         issues = quality_result.get("revision_issues", [])
         scores = quality_result.get("scores", {})
+        thresholds = quality_result.get("thresholds", {"originality_score": 8.0, "impact_score": 7.0, "critic_overall": 8.0})
+        revision_tags = quality_result.get("revision_tags", [])
         originality_result = quality_result.get("originality_result", {})
         impact_result = quality_result.get("impact_result", {})
+        
+        logger.info(f"[run_quality_revision] Scene {scene_number}: Starting revision with tags={revision_tags}, scores={scores}")
 
         # Build detailed feedback
         feedback_sections = []
 
-        # Score summary
+        # Score summary with ACTUAL thresholds (not hardcoded old values)
         feedback_sections.append(f"""## Quality Gate Results
 
 Your scene did not pass the quality gate. Please revise to address the following issues:
 
 **Current Scores:**
-- Originality: {scores.get('originality', 'N/A')} (threshold: 6.0)
-- Impact: {scores.get('impact', 'N/A')} (threshold: 6.0)
-- Critic Overall: {scores.get('critic_overall', 'N/A')} (threshold: 7.0)
+- Originality: {scores.get('originality', 'N/A')} (threshold: {thresholds.get('originality_score', 8.0)})
+- Impact: {scores.get('impact', 'N/A')} (threshold: {thresholds.get('impact_score', 7.0)})
+- Critic Overall: {scores.get('critic_overall', 'N/A')} (threshold: {thresholds.get('critic_overall', 8.0)})
+
+**Revision Tags:** {', '.join(revision_tags) if revision_tags else 'None'}
 """)
 
-        # Originality issues
-        if originality_result.get("originality_score", 10) < 6.0:
+        # =======================================================================
+        # BUG FIX #3 CONTINUED: SUBVERT_TROPES specific instructions
+        # When originality fails, give Writer concrete guidance on HOW to subvert
+        # =======================================================================
+        if "SUBVERT_TROPES" in revision_tags:
+            flagged = originality_result.get("flagged_sections", [])
+            suggestions = originality_result.get("suggestions", [])
+            feedback_sections.append("""## CRITICAL: Originality Issues - SUBVERT TROPES REQUIRED
+
+Your scene contains clichés that MUST be subverted, not just acknowledged. For each cliché below:
+1. Identify the reader's expectation
+2. Set up that expectation in your revision
+3. Then SUBVERT it - deliver something unexpected that still serves the story
+
+**Clichés to Subvert (pick at least 2):**
+""")
+            for i, section in enumerate(flagged[:5]):
+                cliche_text = section.get('text', section.get('cliche', section.get('description', 'Unknown')))
+                feedback_sections.append(f"  [{i+1}] {cliche_text}")
+            
+            feedback_sections.append("""
+**Subversion Techniques:**
+- Invert the outcome (hero fails, villain shows mercy)
+- Change the motivation (expected reason is wrong)
+- Shift perspective (show familiar scene from unexpected POV)
+- Add complication (expected resolution creates new problem)
+- Undercut with realism (fantasy trope meets mundane reality)
+
+Do NOT simply remove the trope - SUBVERT it to create something fresh.
+""")
+            if suggestions:
+                feedback_sections.append("**Specific Suggestions:**")
+                for sug in suggestions[:3]:
+                    feedback_sections.append(f"- {sug}")
+        
+        # Standard originality issues (when not using SUBVERT_TROPES tag)
+        elif originality_result.get("originality_score", 10) < thresholds.get("originality_score", 8.0):
             flagged = originality_result.get("flagged_sections", [])
             suggestions = originality_result.get("suggestions", [])
             feedback_sections.append("""## Originality Issues
@@ -2813,8 +3029,8 @@ The scene contains clichés or overused tropes that reduce its freshness:
                 for sug in suggestions[:3]:
                     feedback_sections.append(f"- {sug}")
 
-        # Impact issues
-        if impact_result.get("impact_score", 10) < 6.0:
+        # Impact issues (using dynamic threshold)
+        if impact_result.get("impact_score", 10) < thresholds.get("impact_score", 7.0):
             weak_sections = impact_result.get("weak_sections", [])
             enhancements = impact_result.get("enhancement_suggestions", [])
             feedback_sections.append("""## Impact Issues
