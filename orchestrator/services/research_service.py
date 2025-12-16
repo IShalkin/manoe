@@ -113,6 +113,37 @@ Please provide a detailed market research report covering:
 - Suggested marketing approach
 - Timing recommendations
 
+### 8. EXECUTIVE SUMMARY FOR AI AGENTS (CRITICAL)
+**This section MUST be included and will be used to guide AI writing agents.**
+
+Provide a concise summary (max 1500 words) structured as follows:
+```
+=== MARKET RESEARCH CONTEXT ===
+
+TARGET AUDIENCE PROFILE:
+[2-3 sentences describing the ideal audience]
+
+KEY INSIGHTS:
+- [Insight 1]
+- [Insight 2]
+- [Insight 3]
+- [Insight 4]
+- [Insight 5]
+
+CONTENT RECOMMENDATIONS:
+- Themes that resonate: [list]
+- Themes to avoid: [list]
+- Tone/style guidance: [brief description]
+
+COMPETITIVE POSITIONING:
+[2-3 sentences on how to differentiate]
+
+CRITICAL SUCCESS FACTORS:
+[3-5 bullet points]
+
+=== END MARKET RESEARCH CONTEXT ===
+```
+
 Please include specific data points, statistics, and citations where available. Focus on actionable insights that can inform creative and business decisions."""
 
     async def research_with_perplexity(
@@ -171,11 +202,14 @@ Please include specific data points, statistics, and citations where available. 
             if data.get("choices") and len(data["choices"]) > 0:
                 content = data["choices"][0].get("message", {}).get("content", "")
 
+            prompt_context = self._extract_prompt_context(content) if content else ""
+            
             return {
                 "success": True,
                 "provider": ResearchProvider.PERPLEXITY.value,
                 "model": model,
                 "content": content,
+                "prompt_context": prompt_context,
                 "citations": data.get("citations", []),
                 "search_results": data.get("search_results", []),
                 "usage": data.get("usage", {}),
@@ -329,6 +363,79 @@ Please include specific data points, statistics, and citations where available. 
             "error": f"Research timed out after {max_wait_seconds} seconds",
         }
 
+    def _extract_prompt_context(self, content: str) -> str:
+        """
+        Extract the executive summary section from research content for prompt injection.
+        
+        This extracts the structured summary between === MARKET RESEARCH CONTEXT ===
+        markers, or generates a fallback summary if not found.
+        
+        Args:
+            content: Full research content
+            
+        Returns:
+            Distilled prompt context (~1500 tokens max)
+        """
+        import re
+        
+        start_marker = "=== MARKET RESEARCH CONTEXT ==="
+        end_marker = "=== END MARKET RESEARCH CONTEXT ==="
+        
+        start_idx = content.find(start_marker)
+        end_idx = content.find(end_marker)
+        
+        if start_idx != -1 and end_idx != -1:
+            prompt_context = content[start_idx:end_idx + len(end_marker)]
+            return prompt_context.strip()
+        
+        lines = content.split('\n')
+        summary_lines = []
+        in_summary = False
+        
+        for line in lines:
+            lower_line = line.lower()
+            if 'executive summary' in lower_line or 'key findings' in lower_line:
+                in_summary = True
+            if in_summary:
+                summary_lines.append(line)
+                if len('\n'.join(summary_lines)) > 6000:
+                    break
+        
+        if summary_lines:
+            return '\n'.join(summary_lines)
+        
+        sections_to_extract = [
+            "target audience",
+            "key insights",
+            "recommendations",
+            "competitive",
+        ]
+        
+        extracted = []
+        current_section = []
+        current_header = ""
+        
+        for line in lines:
+            if line.startswith('#') or line.startswith('**'):
+                if current_section and current_header:
+                    extracted.append(f"{current_header}\n" + '\n'.join(current_section[:10]))
+                current_header = line
+                current_section = []
+                for section in sections_to_extract:
+                    if section in line.lower():
+                        break
+            else:
+                current_section.append(line)
+        
+        if extracted:
+            result = '\n\n'.join(extracted[:4])
+            return f"=== MARKET RESEARCH CONTEXT ===\n\n{result}\n\n=== END MARKET RESEARCH CONTEXT ==="
+        
+        truncated = content[:6000]
+        if len(content) > 6000:
+            truncated = truncated.rsplit('.', 1)[0] + '.'
+        return f"=== MARKET RESEARCH CONTEXT ===\n\n{truncated}\n\n=== END MARKET RESEARCH CONTEXT ==="
+
     def _parse_openai_response(self, data: Dict[str, Any], model: str) -> Dict[str, Any]:
         """Parse OpenAI Deep Research response."""
         output_text = data.get("output_text", "")
@@ -356,11 +463,14 @@ Please include specific data points, statistics, and citations where available. 
                                     "title": ann.get("title", ""),
                                 })
 
+        prompt_context = self._extract_prompt_context(output_text) if output_text else ""
+        
         return {
             "success": True,
             "provider": ResearchProvider.OPENAI_DEEP_RESEARCH.value,
             "model": model,
             "content": output_text,
+            "prompt_context": prompt_context,
             "citations": citations,
             "web_searches": web_searches,
             "usage": data.get("usage", {}),
