@@ -215,7 +215,7 @@ export function DashboardPage() {
         themes: project.themes,
         toneStyleReferences: '',
         outputFormat: (project.outputFormat as OutputFormat) || 'short_story',
-        readerSensibilities: (project.readerSensibilities as ReaderSensibilities) || { ...DEFAULT_READER_SENSIBILITIES },
+        readerSensibilities: (project.readerSensibilities as unknown as ReaderSensibilities) || { ...DEFAULT_READER_SENSIBILITIES },
         generationMode: 'demo',
         maxRevisions: 2,
         narrativePov: 'third_person_limited',
@@ -301,7 +301,7 @@ export function DashboardPage() {
             targetAudience: formData.targetAudience,
             themes: formData.themes,
             outputFormat: formData.outputFormat,
-            readerSensibilities: formData.readerSensibilities,
+            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
             status: 'pending',
             result: null,
           });
@@ -314,7 +314,7 @@ export function DashboardPage() {
             targetAudience: formData.targetAudience,
             themes: formData.themes,
             outputFormat: formData.outputFormat,
-            readerSensibilities: formData.readerSensibilities,
+            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
           });
           projectId = newProject.id;
         }
