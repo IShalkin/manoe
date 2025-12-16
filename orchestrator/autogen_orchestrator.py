@@ -3059,14 +3059,23 @@ Design the narrator for this story as valid JSON.
 """
 
         # Call the architect agent to design the narrator
+        # Note: We use Architect agent but emit as "Narrator" for UI visibility
+        logger.info("[run_narrator_design] Starting narrator design generation")
         narrator_response = await self._call_agent(self.architect, user_prompt)
-        narrator_msg = self._parse_agent_message("Architect", narrator_response)
+        
+        # Parse and emit as "Narrator" agent for UI card visibility
+        narrator_msg = self._parse_agent_message("Narrator", narrator_response)
         self.state.messages.append(narrator_msg)
+        
+        # Emit agent message for UI to show Narrator card
+        self._emit_agent_message("Narrator", "response", narrator_response)
 
         # Parse narrator design
         narrator_design = {}
         if isinstance(narrator_msg.content, dict):
             narrator_design = narrator_msg.content
+        
+        logger.info(f"[run_narrator_design] Narrator design generated: POV={narrator_design.get('pov', {}).get('type', 'unknown')}")
 
         self._emit_event("phase_complete", {
             "phase": "narrator_design",
