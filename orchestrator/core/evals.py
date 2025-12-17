@@ -352,9 +352,9 @@ Respond in JSON format:
             eval_data = self._mock_evaluation(eval_criteria)
         
         # Process evaluation results
-        results = []
-        total_weighted_score = 0
-        total_weight = 0
+        results: List[EvalResult] = []
+        total_weighted_score: float = 0.0
+        total_weight: float = 0.0
         all_passed = True
         
         criteria_map = {c.criterion.value: c for c in eval_criteria}
