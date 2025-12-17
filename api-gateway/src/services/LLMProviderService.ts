@@ -124,7 +124,7 @@ export class LLMProviderService {
                                  options.model.startsWith("o1") || 
                                  options.model.startsWith("o3");
       if (usesNewTokenParam) {
-        (requestParams as Record<string, unknown>).max_completion_tokens = options.maxTokens;
+        (requestParams as unknown as Record<string, unknown>).max_completion_tokens = options.maxTokens;
       } else {
         requestParams.max_tokens = options.maxTokens;
       }
