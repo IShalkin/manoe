@@ -888,3 +888,50 @@ class SupabasePersistenceService:
         except Exception as e:
             print(f"Failed to search similar research: {e}")
             return []
+
+    async def get_run_owner_via_project(self, run_id: str) -> Optional[str]:
+        """
+        Get the owner (user_id) of a run by looking up the project it belongs to.
+        This is used as a fallback for legacy runs that don't have ownership in Redis.
+        
+        Args:
+            run_id: UUID of the generation run
+            
+        Returns:
+            User ID of the project owner, or None if not found
+        """
+        if not self.is_connected:
+            return None
+            
+        try:
+            # First, get the project_id from run_artifacts
+            artifact_result = (
+                self.client.table("run_artifacts")
+                .select("project_id")
+                .eq("run_id", run_id)
+                .limit(1)
+                .execute()
+            )
+            
+            if not artifact_result.data:
+                return None
+                
+            project_id = artifact_result.data[0].get("project_id")
+            if not project_id:
+                return None
+            
+            # Then, get the user_id from the project
+            project_result = (
+                self.client.table("projects")
+                .select("user_id")
+                .eq("id", project_id)
+                .single()
+                .execute()
+            )
+            
+            if project_result.data:
+                return project_result.data.get("user_id")
+            return None
+        except Exception as e:
+            print(f"Failed to get run owner via project: {e}")
+            return None
