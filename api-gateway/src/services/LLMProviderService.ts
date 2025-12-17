@@ -1,0 +1,405 @@
+/**
+ * LLM Provider Service
+ * Unified model client adapter supporting multiple LLM providers (BYOK)
+ * 
+ * Supports:
+ * - OpenAI (GPT-5.2, GPT-5, O3, etc.)
+ * - Anthropic Claude (Opus 4.5, Sonnet 4, etc.)
+ * - Google Gemini (Gemini 3 Pro, Flash, etc.)
+ * - OpenRouter (access to all models)
+ * - DeepSeek (V3, R1)
+ * - Venice AI (Dolphin Mistral, Llama 4 Maverick)
+ */
+
+import { Service } from "@tsed/di";
+import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  LLMProvider,
+  LLMResponse,
+  CompletionOptions,
+  ChatMessage,
+  MessageRole,
+  TokenUsage,
+} from "../models/LLMModels";
+
+/**
+ * Provider base URLs
+ */
+const PROVIDER_BASE_URLS: Record<string, string> = {
+  openai: "https://api.openai.com/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  deepseek: "https://api.deepseek.com/v1",
+  venice: "https://api.venice.ai/api/v1",
+};
+
+@Service()
+export class LLMProviderService {
+  /**
+   * Create a chat completion using the specified provider
+   * 
+   * @param options - Completion options including messages, model, provider, and API key
+   * @returns Unified LLM response
+   */
+  async createCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const startTime = Date.now();
+
+    let response: LLMResponse;
+
+    switch (options.provider) {
+      case LLMProvider.OPENAI:
+        response = await this.openAICompletion(options);
+        break;
+      case LLMProvider.ANTHROPIC:
+        response = await this.anthropicCompletion(options);
+        break;
+      case LLMProvider.GEMINI:
+        response = await this.geminiCompletion(options);
+        break;
+      case LLMProvider.OPENROUTER:
+        response = await this.openRouterCompletion(options);
+        break;
+      case LLMProvider.DEEPSEEK:
+        response = await this.deepSeekCompletion(options);
+        break;
+      case LLMProvider.VENICE:
+        response = await this.veniceCompletion(options);
+        break;
+      default:
+        throw new Error(`Unsupported provider: ${options.provider}`);
+    }
+
+    response.latencyMs = Date.now() - startTime;
+    return response;
+  }
+
+  /**
+   * OpenAI completion
+   */
+  private async openAICompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const client = new OpenAI({
+      apiKey: options.apiKey,
+      baseURL: PROVIDER_BASE_URLS.openai,
+    });
+
+    const requestParams: OpenAI.ChatCompletionCreateParams = {
+      model: options.model,
+      messages: this.formatMessagesForOpenAI(options.messages),
+      temperature: options.temperature ?? 0.7,
+    };
+
+    if (options.maxTokens) {
+      requestParams.max_tokens = options.maxTokens;
+    }
+
+    if (options.responseFormat?.type === "json_object") {
+      requestParams.response_format = { type: "json_object" };
+    }
+
+    const response = await client.chat.completions.create(requestParams);
+
+    return {
+      content: response.choices[0]?.message?.content ?? "",
+      model: options.model,
+      provider: LLMProvider.OPENAI,
+      usage: {
+        promptTokens: response.usage?.prompt_tokens ?? 0,
+        completionTokens: response.usage?.completion_tokens ?? 0,
+        totalTokens: response.usage?.total_tokens ?? 0,
+      },
+      finishReason: response.choices[0]?.finish_reason ?? "stop",
+    };
+  }
+
+  /**
+   * Anthropic Claude completion
+   */
+  private async anthropicCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const client = new Anthropic({
+      apiKey: options.apiKey,
+    });
+
+    // Extract system message
+    let systemMessage = "";
+    const chatMessages: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+    for (const msg of options.messages) {
+      if (msg.role === MessageRole.SYSTEM) {
+        systemMessage = msg.content;
+      } else {
+        chatMessages.push({
+          role: msg.role === MessageRole.USER ? "user" : "assistant",
+          content: msg.content,
+        });
+      }
+    }
+
+    // Add JSON instruction if response_format is json
+    if (options.responseFormat?.type === "json_object") {
+      systemMessage += "\n\nYou MUST respond with valid JSON only, no other text.";
+    }
+
+    const response = await client.messages.create({
+      model: options.model,
+      max_tokens: options.maxTokens ?? 4096,
+      system: systemMessage,
+      messages: chatMessages,
+      temperature: options.temperature ?? 0.7,
+    });
+
+    const content = response.content[0]?.type === "text" 
+      ? response.content[0].text 
+      : "";
+
+    return {
+      content,
+      model: options.model,
+      provider: LLMProvider.ANTHROPIC,
+      usage: {
+        promptTokens: response.usage?.input_tokens ?? 0,
+        completionTokens: response.usage?.output_tokens ?? 0,
+        totalTokens: (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0),
+      },
+      finishReason: response.stop_reason ?? "stop",
+    };
+  }
+
+  /**
+   * Google Gemini completion
+   */
+  private async geminiCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const genAI = new GoogleGenerativeAI(options.apiKey);
+    const model = genAI.getGenerativeModel({ model: options.model });
+
+    // Build prompt from messages
+    let systemContent = "";
+    let userContent = "";
+
+    for (const msg of options.messages) {
+      if (msg.role === MessageRole.SYSTEM) {
+        systemContent = msg.content;
+      } else if (msg.role === MessageRole.USER) {
+        userContent = msg.content;
+      } else if (msg.role === MessageRole.ASSISTANT) {
+        userContent += `\n\nAssistant: ${msg.content}`;
+      }
+    }
+
+    let fullPrompt = `${systemContent}\n\n---\n\n${userContent}`;
+
+    // Add JSON instruction if response_format is json
+    if (options.responseFormat?.type === "json_object") {
+      fullPrompt += "\n\nYou MUST respond with valid JSON only, no other text.";
+    }
+
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+      generationConfig: {
+        temperature: options.temperature ?? 0.7,
+        maxOutputTokens: options.maxTokens,
+      },
+    });
+
+    const response = result.response;
+    const content = response.text() ?? "";
+
+    return {
+      content,
+      model: options.model,
+      provider: LLMProvider.GEMINI,
+      usage: {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+      },
+      finishReason: "stop",
+    };
+  }
+
+  /**
+   * OpenRouter completion (OpenAI-compatible API)
+   */
+  private async openRouterCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const client = new OpenAI({
+      apiKey: options.apiKey,
+      baseURL: PROVIDER_BASE_URLS.openrouter,
+      defaultHeaders: {
+        "HTTP-Referer": "https://manoe.iliashalkin.com",
+        "X-Title": "MANOE",
+      },
+    });
+
+    const requestParams: OpenAI.ChatCompletionCreateParams = {
+      model: options.model,
+      messages: this.formatMessagesForOpenAI(options.messages),
+      temperature: options.temperature ?? 0.7,
+    };
+
+    if (options.maxTokens) {
+      requestParams.max_tokens = options.maxTokens;
+    }
+
+    if (options.responseFormat?.type === "json_object") {
+      requestParams.response_format = { type: "json_object" };
+    }
+
+    const response = await client.chat.completions.create(requestParams);
+
+    return {
+      content: response.choices[0]?.message?.content ?? "",
+      model: options.model,
+      provider: LLMProvider.OPENROUTER,
+      usage: {
+        promptTokens: response.usage?.prompt_tokens ?? 0,
+        completionTokens: response.usage?.completion_tokens ?? 0,
+        totalTokens: response.usage?.total_tokens ?? 0,
+      },
+      finishReason: response.choices[0]?.finish_reason ?? "stop",
+    };
+  }
+
+  /**
+   * DeepSeek completion (OpenAI-compatible API)
+   */
+  private async deepSeekCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const client = new OpenAI({
+      apiKey: options.apiKey,
+      baseURL: PROVIDER_BASE_URLS.deepseek,
+    });
+
+    const requestParams: OpenAI.ChatCompletionCreateParams = {
+      model: options.model,
+      messages: this.formatMessagesForOpenAI(options.messages),
+      temperature: options.temperature ?? 0.7,
+    };
+
+    if (options.maxTokens) {
+      requestParams.max_tokens = options.maxTokens;
+    }
+
+    if (options.responseFormat?.type === "json_object") {
+      requestParams.response_format = { type: "json_object" };
+    }
+
+    const response = await client.chat.completions.create(requestParams);
+
+    return {
+      content: response.choices[0]?.message?.content ?? "",
+      model: options.model,
+      provider: LLMProvider.DEEPSEEK,
+      usage: {
+        promptTokens: response.usage?.prompt_tokens ?? 0,
+        completionTokens: response.usage?.completion_tokens ?? 0,
+        totalTokens: response.usage?.total_tokens ?? 0,
+      },
+      finishReason: response.choices[0]?.finish_reason ?? "stop",
+    };
+  }
+
+  /**
+   * Venice AI completion (OpenAI-compatible API)
+   */
+  private async veniceCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const client = new OpenAI({
+      apiKey: options.apiKey,
+      baseURL: PROVIDER_BASE_URLS.venice,
+    });
+
+    const requestParams: OpenAI.ChatCompletionCreateParams = {
+      model: options.model,
+      messages: this.formatMessagesForOpenAI(options.messages),
+      temperature: options.temperature ?? 0.7,
+    };
+
+    if (options.maxTokens) {
+      requestParams.max_tokens = options.maxTokens;
+    }
+
+    if (options.responseFormat?.type === "json_object") {
+      requestParams.response_format = { type: "json_object" };
+    }
+
+    const response = await client.chat.completions.create(requestParams);
+
+    return {
+      content: response.choices[0]?.message?.content ?? "",
+      model: options.model,
+      provider: LLMProvider.VENICE,
+      usage: {
+        promptTokens: response.usage?.prompt_tokens ?? 0,
+        completionTokens: response.usage?.completion_tokens ?? 0,
+        totalTokens: response.usage?.total_tokens ?? 0,
+      },
+      finishReason: response.choices[0]?.finish_reason ?? "stop",
+    };
+  }
+
+  /**
+   * Format messages for OpenAI-compatible APIs
+   */
+  private formatMessagesForOpenAI(
+    messages: ChatMessage[]
+  ): OpenAI.ChatCompletionMessageParam[] {
+    return messages.map((msg) => ({
+      role: msg.role as "system" | "user" | "assistant",
+      content: msg.content,
+    }));
+  }
+
+  /**
+   * Check if an error is retryable (rate limit, server error, timeout)
+   */
+  isRetryableError(error: unknown): boolean {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      
+      // Rate limit errors
+      if (message.includes("rate limit") || message.includes("429")) {
+        return true;
+      }
+      
+      // Server errors
+      if (message.includes("500") || message.includes("502") || 
+          message.includes("503") || message.includes("504")) {
+        return true;
+      }
+      
+      // Timeout errors
+      if (message.includes("timeout") || message.includes("timed out")) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Create completion with automatic retry for transient errors
+   */
+  async createCompletionWithRetry(
+    options: CompletionOptions,
+    maxRetries: number = 3,
+    baseDelayMs: number = 1000
+  ): Promise<LLMResponse> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await this.createCompletion(options);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        
+        if (!this.isRetryableError(error) || attempt === maxRetries - 1) {
+          throw lastError;
+        }
+
+        // Exponential backoff
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+
+    throw lastError ?? new Error("Max retries exceeded");
+  }
+}
