@@ -75,11 +75,40 @@ export class LLMProviderService {
   }
 
   /**
+   * Get API key with fallback to environment variable
+   * BYOK (Bring Your Own Key) takes precedence over env fallback
+   */
+  private getApiKey(provider: LLMProvider, requestApiKey?: string): string {
+    // If request provides a valid API key, use it (BYOK)
+    if (requestApiKey && requestApiKey !== "test-key" && requestApiKey.length > 10) {
+      return requestApiKey;
+    }
+
+    // Fallback to environment variables
+    const envKeys: Record<string, string | undefined> = {
+      [LLMProvider.OPENAI]: process.env.OPENAI_API_KEY,
+      [LLMProvider.ANTHROPIC]: process.env.ANTHROPIC_API_KEY,
+      [LLMProvider.GEMINI]: process.env.GOOGLE_API_KEY,
+      [LLMProvider.OPENROUTER]: process.env.OPENROUTER_API_KEY,
+      [LLMProvider.DEEPSEEK]: process.env.DEEPSEEK_API_KEY,
+      [LLMProvider.VENICE]: process.env.VENICE_API_KEY,
+    };
+
+    const envKey = envKeys[provider];
+    if (envKey) {
+      return envKey;
+    }
+
+    throw new Error(`No API key provided for ${provider}. Either pass apiKey in request or set environment variable.`);
+  }
+
+  /**
    * OpenAI completion
    */
   private async openAICompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const apiKey = this.getApiKey(LLMProvider.OPENAI, options.apiKey);
     const client = new OpenAI({
-      apiKey: options.apiKey,
+      apiKey,
       baseURL: PROVIDER_BASE_URLS.openai,
     });
 
@@ -116,8 +145,9 @@ export class LLMProviderService {
    * Anthropic Claude completion
    */
   private async anthropicCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const apiKey = this.getApiKey(LLMProvider.ANTHROPIC, options.apiKey);
     const client = new Anthropic({
-      apiKey: options.apiKey,
+      apiKey,
     });
 
     // Extract system message
@@ -169,7 +199,8 @@ export class LLMProviderService {
    * Google Gemini completion
    */
   private async geminiCompletion(options: CompletionOptions): Promise<LLMResponse> {
-    const genAI = new GoogleGenerativeAI(options.apiKey);
+    const apiKey = this.getApiKey(LLMProvider.GEMINI, options.apiKey);
+    const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: options.model });
 
     // Build prompt from messages
@@ -221,8 +252,9 @@ export class LLMProviderService {
    * OpenRouter completion (OpenAI-compatible API)
    */
   private async openRouterCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const apiKey = this.getApiKey(LLMProvider.OPENROUTER, options.apiKey);
     const client = new OpenAI({
-      apiKey: options.apiKey,
+      apiKey,
       baseURL: PROVIDER_BASE_URLS.openrouter,
       defaultHeaders: {
         "HTTP-Referer": "https://manoe.iliashalkin.com",
@@ -263,8 +295,9 @@ export class LLMProviderService {
    * DeepSeek completion (OpenAI-compatible API)
    */
   private async deepSeekCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const apiKey = this.getApiKey(LLMProvider.DEEPSEEK, options.apiKey);
     const client = new OpenAI({
-      apiKey: options.apiKey,
+      apiKey,
       baseURL: PROVIDER_BASE_URLS.deepseek,
     });
 
@@ -301,8 +334,9 @@ export class LLMProviderService {
    * Venice AI completion (OpenAI-compatible API)
    */
   private async veniceCompletion(options: CompletionOptions): Promise<LLMResponse> {
+    const apiKey = this.getApiKey(LLMProvider.VENICE, options.apiKey);
     const client = new OpenAI({
-      apiKey: options.apiKey,
+      apiKey,
       baseURL: PROVIDER_BASE_URLS.venice,
     });
 
