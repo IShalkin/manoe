@@ -5,7 +5,9 @@ A scalable, event-driven platform designed to automate the creation of exception
 ## Live Demo
 
 - **Frontend**: https://manoe.iliashalkin.com
+- **API Gateway (ts.ed)**: https://manoe-gateway.iliashalkin.com
 - **Orchestrator API**: https://manoe-orchestrator.iliashalkin.com
+- **Langfuse Dashboard**: https://langfuse.iliashalkin.com
 
 ## System Architecture
 
@@ -154,6 +156,24 @@ MANOE includes self-hosted **Langfuse** for complete LLM observability:
 - **Latency Metrics**: Track response times across different LLM providers
 - **Error Debugging**: Inspect failed LLM calls with full request/response data
 
+**Langfuse Prompt Management:**
+
+MANOE uses Langfuse Prompt Management for versioned prompts with production labels:
+- `manoe-architect-v1` - Story structure and narrative design
+- `manoe-profiler-v1` - Character creation and psychology
+- `manoe-worldbuilder-v1` - Setting and world details
+- `manoe-writer-v1` - Prose generation
+- `manoe-critic-v1` - Quality evaluation and feedback
+
+**Model Selection Architecture:**
+
+The model used for generation is determined by the following precedence:
+1. **Request `llmConfig.model`** - User's selection from frontend settings (highest priority)
+2. **Environment variable** - Server-side default (e.g., `OPENAI_API_KEY` enables OpenAI)
+3. **`DEFAULT_MODELS`** - Code defaults in `LLMModels.ts` (gpt-5.2 for OpenAI)
+
+The `config.model` field in Langfuse prompts is metadata/documentation only - it does not override the user's model selection. Langfuse tracing shows the actual model used in each generation, not the prompt's config.model.
+
 **Self-Hosted Stack:**
 | Service | Description |
 |---------|-------------|
@@ -274,7 +294,23 @@ manoe/
 │   │   │   └── ...
 │   │   └── lib/                 # Utilities and Supabase client
 │   └── package.json
-├── orchestrator/                # Python/FastAPI AI Orchestrator
+├── api-gateway/                 # TypeScript ts.ed API Gateway
+│   ├── src/
+│   │   ├── controllers/         # ts.ed controllers with Swagger decorators
+│   │   │   └── OrchestrationController.ts  # Generation endpoints
+│   │   ├── services/            # Business logic services
+│   │   │   ├── LLMProviderService.ts       # Multi-provider LLM client (BYOK)
+│   │   │   ├── StorytellerOrchestrator.ts  # Multi-agent orchestration engine
+│   │   │   ├── LangfuseService.ts          # Tracing + Prompt Management
+│   │   │   ├── RedisStreamsService.ts      # SSE event streaming
+│   │   │   ├── QdrantMemoryService.ts      # Vector memory
+│   │   │   └── SupabaseService.ts          # Artifact persistence
+│   │   ├── models/              # DTOs and type definitions
+│   │   │   ├── LLMModels.ts     # LLM provider types and defaults
+│   │   │   └── AgentModels.ts   # Agent types and phase configs
+│   │   └── Server.ts            # ts.ed server configuration
+│   └── package.json
+├── orchestrator/                # Python/FastAPI AI Orchestrator (legacy)
 │   ├── services/
 │   │   ├── supabase_persistence.py  # Artifact storage
 │   │   ├── qdrant_memory.py         # Vector memory
