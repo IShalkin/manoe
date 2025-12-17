@@ -413,4 +413,74 @@ export class SupabaseService {
       throw new Error(`Failed to save audit log: ${error.message}`);
     }
   }
+
+  // ========================================================================
+  // Run Artifact Operations (for StorytellerOrchestrator)
+  // ========================================================================
+
+  /**
+   * Save a run artifact (narrative, characters, worldbuilding, outline, draft, etc.)
+   */
+  async saveRunArtifact(params: {
+    runId: string;
+    projectId: string;
+    artifactType: string;
+    content: unknown;
+  }): Promise<void> {
+    const client = this.getClient();
+    const { error } = await client.from("run_artifacts").upsert({
+      run_id: params.runId,
+      project_id: params.projectId,
+      artifact_type: params.artifactType,
+      content: params.content,
+      created_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      throw new Error(`Failed to save run artifact: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get run artifacts by run ID
+   */
+  async getRunArtifacts(runId: string): Promise<unknown[]> {
+    const client = this.getClient();
+    const { data, error } = await client
+      .from("run_artifacts")
+      .select("*")
+      .eq("run_id", runId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throw new Error(`Failed to get run artifacts: ${error.message}`);
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Get a specific run artifact by type
+   */
+  async getRunArtifact(
+    runId: string,
+    artifactType: string
+  ): Promise<unknown | null> {
+    const client = this.getClient();
+    const { data, error } = await client
+      .from("run_artifacts")
+      .select("*")
+      .eq("run_id", runId)
+      .eq("artifact_type", artifactType)
+      .single();
+
+    if (error) {
+      if (error.code === "PGRST116") {
+        return null;
+      }
+      throw new Error(`Failed to get run artifact: ${error.message}`);
+    }
+
+    return data;
+  }
 }
