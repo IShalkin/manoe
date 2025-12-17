@@ -32,7 +32,7 @@ export function GenerationPage() {
   const [error, setError] = useState<string | null>(null);
   const [useBranchingMode, setUseBranchingMode] = useState(true);
   const [selectedNarrative, setSelectedNarrative] = useState<NarrativePossibility | null>(null);
-  const [showObservability, setShowObservability] = useState(true);
+  const [isGlassBrainMode, setIsGlassBrainMode] = useState(true);
 
   // Glass Brain: SSE stream for observability panels
   const {
@@ -367,18 +367,18 @@ export function GenerationPage() {
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
             {/* Glass Brain Toggle */}
             <button
-              onClick={() => setShowObservability(!showObservability)}
+              onClick={() => setIsGlassBrainMode(!isGlassBrainMode)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                showObservability
+                isGlassBrainMode
                   ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/50'
                   : 'bg-slate-700/50 text-slate-400 border border-slate-600'
               }`}
-              title={showObservability ? 'Hide observability panels' : 'Show observability panels (Glass Brain)'}
+              title={isGlassBrainMode ? 'Hide observability panels' : 'Show observability panels (Glass Brain)'}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
               </svg>
-              {showObservability ? 'Glass Brain' : 'Simple'}
+              {isGlassBrainMode ? 'Glass Brain' : 'Simple'}
             </button>
             
             {/* Branching Mode Toggle */}
@@ -458,7 +458,7 @@ export function GenerationPage() {
       )}
 
       {/* Main Content - Glass Brain 3-column layout when observability enabled */}
-      <main className={`mx-auto px-3 sm:px-6 py-4 sm:py-6 ${showObservability && runId ? 'max-w-full' : 'max-w-7xl'}`}>
+      <main className={`mx-auto px-3 sm:px-6 py-4 sm:py-6 ${isGlassBrainMode && runId ? 'max-w-full' : 'max-w-7xl'}`}>
         {isStarting && !runId ? (
           <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center max-w-7xl mx-auto">
             <div className="w-16 h-16 rounded-full bg-slate-700/50 flex items-center justify-center mx-auto mb-4">
@@ -471,7 +471,7 @@ export function GenerationPage() {
             <p className="text-sm text-slate-500 mt-1">Connecting to the orchestrator</p>
           </div>
         ) : runId ? (
-          showObservability ? (
+          isGlassBrainMode ? (
             // Glass Brain: 3-column layout (20% WorldState | 50% AgentChat | 30% AgentGraph)
             <div className="grid grid-cols-[20%_50%_30%] gap-4 h-[calc(100vh-120px)]">
               {/* Left: World State Panel */}
