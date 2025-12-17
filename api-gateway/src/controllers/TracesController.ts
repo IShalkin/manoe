@@ -4,7 +4,7 @@
  * Provides API endpoints for querying Langfuse traces
  */
 
-import { Controller, Get, PathParams, Returns } from "@tsed/common";
+import { Controller, Get, PathParams } from "@tsed/common";
 import { Inject } from "@tsed/di";
 import { LangfuseService } from "../services/LangfuseService";
 
@@ -38,7 +38,6 @@ export class TracesController {
    * Get trace tree for a run
    */
   @Get("/")
-  @Returns(200, TraceTreeNode)
   async getTraces(@PathParams("runId") runId: string): Promise<TraceTreeNode | null> {
     // Note: This is a simplified implementation
     // In production, LangfuseService would need a method to fetch traces

@@ -30,8 +30,15 @@ export interface AgentContext {
  * Output from agent execution
  */
 export interface AgentOutput {
-  content: Record<string, unknown> | Record<string, unknown>[];
+  content: Record<string, unknown> | Record<string, unknown>[] | string;
   rawFacts?: RawFact[];  // For Archivist agent
+  messages?: {
+    sender: AgentType;
+    recipient?: AgentType;
+    type: 'agent_thought' | 'agent_dialogue' | 'agent_conflict' | 'agent_consensus';
+    content: string;
+    metadata?: Record<string, unknown>;
+  }[];
 }
 
 /**

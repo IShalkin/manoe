@@ -4,7 +4,7 @@
  * Provides API endpoints for querying generation state graph
  */
 
-import { Controller, Get, PathParams, Returns } from "@tsed/common";
+import { Controller, Get, PathParams } from "@tsed/common";
 import { Inject } from "@tsed/di";
 import { StorytellerOrchestrator } from "../services/StorytellerOrchestrator";
 import { GENERATION_GRAPH, getStateNodeByPhase, getNextStates } from "../models/StateGraph";
@@ -41,7 +41,6 @@ export class StateController {
    * Get current state graph for a run
    */
   @Get("/graph")
-  @Returns(200, StateGraphResponse)
   async getStateGraph(@PathParams("runId") runId: string): Promise<StateGraphResponse> {
     const runStatus = this.orchestrator.getRunStatus(runId);
     if (!runStatus) {

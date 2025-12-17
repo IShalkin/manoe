@@ -5,7 +5,8 @@
  * Active in: Drafting, Revision, Polish phases (runs every 3 scenes)
  */
 
-import { AgentType, GenerationPhase, RawFact, KeyConstraint } from "../models/AgentModels";
+import { AgentType, RawFact, KeyConstraint } from "../models/AgentModels";
+import { GenerationPhase } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService, AGENT_PROMPTS } from "../services/LangfuseService";
 import { BaseAgent } from "./BaseAgent";
@@ -46,10 +47,10 @@ export class ArchivistAgent extends BaseAgent {
     const validated = this.validateOutput(parsed, ArchivistOutputSchema, runId);
     
     // Extract key constraints from response
-    const constraints = this.extractConstraints(validated, state.currentScene);
+    const constraints = this.extractConstraints(validated as Record<string, unknown>, state.currentScene);
 
     return {
-      content: validated,
+      content: validated as Record<string, unknown>,
       rawFacts: constraints.map(c => ({
         fact: `${c.key}: ${c.value}`,
         source: AgentType.ARCHIVIST,
