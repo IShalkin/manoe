@@ -35,6 +35,7 @@ from services.security import (
     MAX_THEMES_LENGTH,
     MAX_TONE_STYLE_LENGTH,
     check_run_ownership,
+    check_run_ownership_async,
     get_current_user,
     run_ownership,
 )
@@ -1051,9 +1052,9 @@ async def get_run_state(run_id: str, request: Request):
     if not worker:
         raise HTTPException(status_code=503, detail="Worker not initialized")
 
-    # Authenticate user and verify ownership
+    # Authenticate user and verify ownership (async to check Redis for persisted ownership)
     user_id, _ = await get_current_user(request)
-    check_run_ownership(run_id, user_id)
+    await check_run_ownership_async(run_id, user_id)
 
     # Determine in-memory status
     in_memory_status = "unknown"
