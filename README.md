@@ -75,8 +75,7 @@ flowchart TB
     Supabase_Auth --> Supabase
 ```
 
-<details>
-<summary><strong>📊 Detailed Architecture Diagrams</strong> (click to expand)</summary>
+## Detailed Architecture Diagrams
 
 ### Request Lifecycle
 
@@ -318,8 +317,6 @@ flowchart LR
 - `generation_cancelled` - User cancelled
 - `generation_error` - Fatal error
 - `heartbeat` - Keep-alive every 15s
-
-</details>
 
 ## Generation Workflow
 
