@@ -15,63 +15,63 @@ MANOE is a distributed system with a React frontend, TypeScript orchestrator (ts
 
 ```mermaid
 flowchart TB
-    subgraph Client["Frontend (React + TypeScript + Vite)"]
-        UI["GenerationPage.tsx<br/>AgentChat.tsx"]
-        SSE["useGenerationStream.ts<br/>EventSource"]
-        Supabase_Auth["Supabase Auth<br/>JWT Tokens"]
+    subgraph Client["Frontend - React + Vite"]
+        UI["GenerationPage + AgentChat"]
+        SSE["useGenerationStream"]
+        Supabase_Auth["Supabase Auth"]
     end
 
-    subgraph Gateway["API Gateway (TypeScript + ts.ed)"]
-        API["OrchestrationController.ts<br/>POST /generate<br/>GET /stream/:runId"]
-        Orchestrator["StorytellerOrchestrator.ts<br/>1435 lines of orchestration logic"]
+    subgraph Gateway["API Gateway - ts.ed"]
+        API["OrchestrationController"]
+        Orchestrator["StorytellerOrchestrator"]
         
         subgraph Agents["9 Specialized AI Agents"]
-            Architect["Architect<br/>Story structure"]
-            Profiler["Profiler<br/>Character psychology"]
-            Worldbuilder["Worldbuilder<br/>World elements"]
-            Strategist["Strategist<br/>Advanced planning"]
-            Writer["Writer<br/>Prose generation"]
-            Critic["Critic<br/>Quality feedback"]
-            Originality["Originality<br/>Plagiarism check"]
-            Impact["Impact<br/>Emotional resonance"]
-            Archivist["Archivist<br/>Key Constraints"]
+            Architect["Architect"]
+            Profiler["Profiler"]
+            Worldbuilder["Worldbuilder"]
+            Strategist["Strategist"]
+            Writer["Writer"]
+            Critic["Critic"]
+            Originality["Originality"]
+            Impact["Impact"]
+            Archivist["Archivist"]
         end
         
-        LLMService["LLMProviderService.ts<br/>Multi-provider routing"]
-        LangfuseService["LangfuseService.ts<br/>Tracing + Prompt Mgmt"]
+        LLMService["LLMProviderService"]
+        LangfuseService["LangfuseService"]
     end
 
     subgraph Infrastructure["Infrastructure Services"]
-        Redis[("Redis Streams<br/>Event pub/sub")]
-        Supabase[("Supabase<br/>PostgreSQL + Auth")]
-        Qdrant[("Qdrant<br/>Vector memory")]
-        Langfuse[("Langfuse<br/>LLM observability")]
+        Redis[("Redis Streams")]
+        Supabase[("Supabase")]
+        Qdrant[("Qdrant")]
+        Langfuse[("Langfuse")]
     end
 
-    subgraph LLMProviders["LLM Providers (BYOK)"]
-        OpenAI["OpenAI<br/>GPT-5.2, O3"]
-        Anthropic["Anthropic<br/>Claude Opus 4.5"]
-        Gemini["Google<br/>Gemini 3 Pro"]
-        OpenRouter["OpenRouter<br/>Multi-model"]
-        DeepSeek["DeepSeek<br/>V3, R1"]
-        Venice["Venice AI<br/>Uncensored"]
+    subgraph LLMProviders["LLM Providers BYOK"]
+        OpenAI["OpenAI"]
+        Anthropic["Anthropic"]
+        Gemini["Google Gemini"]
+        OpenRouter["OpenRouter"]
+        DeepSeek["DeepSeek"]
+        Venice["Venice AI"]
     end
 
-    UI -->|"POST /generate<br/>Bearer JWT"| API
-    API -->|"startGeneration()"| Orchestrator
+    UI -->|POST /generate| API
+    API -->|startGeneration| Orchestrator
     Orchestrator --> Agents
     Agents --> LLMService
     LLMService --> LLMProviders
     LLMService --> LangfuseService
-    LangfuseService -->|"Traces & Prompts"| Langfuse
+    LangfuseService -->|Traces| Langfuse
     
-    Orchestrator -->|"publishEvent()"| Redis
-    Redis -->|"streamEvents()"| SSE
-    SSE -->|"Real-time updates"| UI
+    Orchestrator -->|publishEvent| Redis
+    Redis -->|streamEvents| SSE
+    SSE -->|Real-time updates| UI
     
-    Orchestrator -->|"saveArtifact()"| Supabase
-    Agents -->|"storeMemory()<br/>retrieveContext()"| Qdrant
-    UI -->|"Auth + Projects"| Supabase_Auth
+    Orchestrator -->|saveArtifact| Supabase
+    Agents -->|storeMemory| Qdrant
+    UI -->|Auth| Supabase_Auth
     Supabase_Auth --> Supabase
 ```
 
@@ -86,47 +86,47 @@ This sequence diagram shows the complete flow from when a user clicks "Generate"
 sequenceDiagram
     autonumber
     participant User as User Browser
-    participant FE as Frontend<br/>(GenerationPage.tsx)
-    participant API as API Gateway<br/>(OrchestrationController)
-    participant Orch as StorytellerOrchestrator
+    participant FE as Frontend
+    participant API as API Gateway
+    participant Orch as Orchestrator
     participant Redis as Redis Streams
     participant LLM as LLM Provider
-    participant Supabase as Supabase
-    participant Qdrant as Qdrant
+    participant DB as Supabase
+    participant Vec as Qdrant
 
-    User->>FE: Click "Generate"
-    FE->>FE: getAccessToken() from Supabase
-    FE->>API: POST /generate<br/>{projectId, seedIdea, llmConfig}
+    User->>FE: Click Generate
+    FE->>FE: getAccessToken()
+    FE->>API: POST /generate
     API->>Orch: startGeneration(options)
-    Orch->>Orch: Generate runId (UUID)
+    Orch->>Orch: Generate runId
     Orch-->>API: Return runId
-    API-->>FE: 202 Accepted<br/>{runId, streamUrl}
+    API-->>FE: 202 Accepted + runId
     
-    FE->>API: GET /stream/{runId}<br/>(SSE Connection)
-    API->>Redis: Subscribe to run:{runId}
+    FE->>API: GET /stream/runId (SSE)
+    API->>Redis: Subscribe to run:runId
     
     par Background Generation
-        Orch->>Redis: Publish "generation_started"
-        Redis-->>FE: SSE: generation_started
+        Orch->>Redis: generation_started
+        Redis-->>FE: SSE event
         
-        loop For each phase (12 phases)
-            Orch->>Redis: Publish "phase_start"
-            Redis-->>FE: SSE: phase_start
-            Orch->>Qdrant: Retrieve context
-            Qdrant-->>Orch: Vector results
-            Orch->>LLM: Generate with context
-            LLM-->>Orch: LLM response
-            Orch->>Supabase: Save artifact
-            Orch->>Qdrant: Store new vectors
-            Orch->>Redis: Publish "agent_complete"
-            Redis-->>FE: SSE: agent_complete
+        loop For each phase
+            Orch->>Redis: phase_start
+            Redis-->>FE: SSE event
+            Orch->>Vec: Retrieve context
+            Vec-->>Orch: Vector results
+            Orch->>LLM: Generate
+            LLM-->>Orch: Response
+            Orch->>DB: Save artifact
+            Orch->>Vec: Store vectors
+            Orch->>Redis: agent_complete
+            Redis-->>FE: SSE event
         end
         
-        Orch->>Redis: Publish "generation_complete"
-        Redis-->>FE: SSE: generation_complete
+        Orch->>Redis: generation_complete
+        Redis-->>FE: SSE event
     end
     
-    FE->>User: Display completed story
+    FE->>User: Display story
 ```
 
 ### Generation Workflow State Machine
@@ -149,7 +149,7 @@ stateDiagram-v2
         WriteDraft --> Critique: Draft complete
         Critique --> Revision: Needs improvement
         Revision --> Critique: Revision done
-        Critique --> [*]: Quality passed<br/>(max 2 iterations)
+        Critique --> [*]: Quality passed (max 2 iterations)
     }
     
     Drafting --> DraftingLoop: For each scene
@@ -161,7 +161,7 @@ stateDiagram-v2
         UpdateKeyConstraints --> [*]
     }
     
-    DraftingLoop --> ArchivistCheck: Scene count % 3 == 0
+    DraftingLoop --> ArchivistCheck: Scene count mod 3 equals 0
     ArchivistCheck --> DraftingLoop
     
     OriginalityCheck --> ImpactAssessment: Originality verified
@@ -169,9 +169,9 @@ stateDiagram-v2
     Polish --> [*]: Generation complete
     
     note right of DraftingLoop
-        Writer↔Critic loop
+        Writer-Critic loop
         Max 2 revision iterations
-        Quality threshold: 7/10
+        Quality threshold 7/10
     end note
     
     note right of ArchivistCheck
@@ -188,38 +188,38 @@ Each of the 9 agents has specific data inputs and outputs:
 ```mermaid
 flowchart TB
     subgraph Inputs["Input Sources"]
-        Seed["Seed Idea<br/>(User Input)"]
-        Outline["Outline<br/>(Supabase)"]
-        KeyConstraints["Key Constraints<br/>(In-memory)"]
-        QdrantMem["Qdrant Memory<br/>(Characters, World, Scenes)"]
-        PrevDraft["Previous Draft<br/>(Supabase)"]
-        CritiqueData["Critique Feedback<br/>(In-memory)"]
+        Seed["Seed Idea - User Input"]
+        Outline["Outline - Supabase"]
+        KeyConstraints["Key Constraints - In-memory"]
+        QdrantMem["Qdrant Memory"]
+        PrevDraft["Previous Draft - Supabase"]
+        CritiqueData["Critique Feedback"]
     end
     
     subgraph AgentLayer["Agent Layer"]
         subgraph Planning["Planning Agents"]
-            A_Architect["🏛️ Architect<br/>Genesis + Outlining"]
-            A_Profiler["👤 Profiler<br/>Characters"]
-            A_Worldbuilder["🌍 Worldbuilder<br/>Worldbuilding"]
-            A_Strategist["📋 Strategist<br/>Advanced Planning"]
+            A_Architect["Architect: Genesis + Outlining"]
+            A_Profiler["Profiler: Characters"]
+            A_Worldbuilder["Worldbuilder: Worldbuilding"]
+            A_Strategist["Strategist: Advanced Planning"]
         end
         
         subgraph Execution["Execution Agents"]
-            A_Writer["✍️ Writer<br/>Drafting + Revision"]
-            A_Critic["🔍 Critic<br/>Critique"]
+            A_Writer["Writer: Drafting + Revision"]
+            A_Critic["Critic: Critique"]
         end
         
         subgraph Quality["Quality Agents"]
-            A_Originality["🎯 Originality<br/>Plagiarism Check"]
-            A_Impact["💥 Impact<br/>Emotional Assessment"]
-            A_Archivist["📚 Archivist<br/>Constraint Resolution"]
+            A_Originality["Originality: Plagiarism Check"]
+            A_Impact["Impact: Emotional Assessment"]
+            A_Archivist["Archivist: Constraint Resolution"]
         end
     end
     
     subgraph Outputs["Output Destinations"]
-        Supabase_Out[("Supabase<br/>run_artifacts")]
-        Qdrant_Out[("Qdrant<br/>3 collections")]
-        Redis_Out[("Redis Streams<br/>SSE events")]
+        Supabase_Out[("Supabase run_artifacts")]
+        Qdrant_Out[("Qdrant 3 collections")]
+        Redis_Out[("Redis Streams SSE")]
     end
     
     Seed --> A_Architect
@@ -343,15 +343,15 @@ erDiagram
 flowchart LR
     subgraph Qdrant["Qdrant Vector Database"]
         subgraph Characters["characters collection"]
-            C1["Character Profile<br/>vector: 1536d<br/>payload: {name, archetype, psychology}"]
+            C1["Character Profile - 1536d vector"]
         end
         
         subgraph World["worldbuilding collection"]
-            W1["World Element<br/>vector: 1536d<br/>payload: {type, content, location}"]
+            W1["World Element - 1536d vector"]
         end
         
         subgraph Scenes["scenes collection"]
-            S1["Scene Content<br/>vector: 1536d<br/>payload: {scene_num, summary, characters}"]
+            S1["Scene Content - 1536d vector"]
         end
     end
     
@@ -361,13 +361,13 @@ flowchart LR
         Worldbuilder["Worldbuilder Agent"]
     end
     
-    Profiler -->|"store"| Characters
-    Worldbuilder -->|"store"| World
-    Writer -->|"store"| Scenes
+    Profiler -->|store| Characters
+    Worldbuilder -->|store| World
+    Writer -->|store| Scenes
     
-    Writer -->|"retrieve context"| Characters
-    Writer -->|"retrieve context"| World
-    Writer -->|"retrieve prev scenes"| Scenes
+    Writer -->|retrieve| Characters
+    Writer -->|retrieve| World
+    Writer -->|retrieve| Scenes
 ```
 
 ### Repository Structure Map
@@ -379,29 +379,29 @@ flowchart TB
         
         subgraph Frontend["frontend/"]
             FE_src["src/"]
-            FE_pages["pages/<br/>GenerationPage.tsx<br/>DashboardPage.tsx<br/>ProjectPage.tsx"]
-            FE_components["components/<br/>AgentChat.tsx (2534 lines)<br/>Layout.tsx<br/>SettingsModal.tsx"]
-            FE_hooks["hooks/<br/>useGenerationStream.ts<br/>useProjects.ts<br/>useSettings.ts"]
-            FE_lib["lib/<br/>api.ts<br/>supabase.ts"]
-            FE_contexts["contexts/<br/>AuthContext.tsx<br/>SettingsContext.tsx"]
+            FE_pages["pages/"]
+            FE_components["components/"]
+            FE_hooks["hooks/"]
+            FE_lib["lib/"]
+            FE_contexts["contexts/"]
         end
         
         subgraph APIGateway["api-gateway/"]
             AG_src["src/"]
-            AG_controllers["controllers/<br/>OrchestrationController.ts<br/>HealthController.ts"]
-            AG_services["services/<br/>StorytellerOrchestrator.ts (1435 lines)<br/>LLMProviderService.ts<br/>LangfuseService.ts<br/>RedisStreamsService.ts<br/>QdrantMemoryService.ts<br/>SupabaseService.ts"]
-            AG_models["models/<br/>AgentModels.ts (9 agents, 12 phases)<br/>LLMModels.ts (6 providers)"]
+            AG_controllers["controllers/"]
+            AG_services["services/"]
+            AG_models["models/"]
         end
         
         subgraph Infra["Infrastructure"]
-            Docker["docker-compose.yml<br/>(local dev)"]
-            DockerVPS["docker-compose.vps.yml<br/>(production)"]
-            Supabase_Dir["supabase/<br/>migrations/"]
+            Docker["docker-compose.yml"]
+            DockerVPS["docker-compose.vps.yml"]
+            Supabase_Dir["supabase/migrations/"]
         end
         
         subgraph Legacy["_legacy/"]
-            LegacyOrch["orchestrator/<br/>(Python/FastAPI - archived)"]
-            LegacyBackend["backend/<br/>(Express.js - archived)"]
+            LegacyOrch["orchestrator/ - archived"]
+            LegacyBackend["backend/ - archived"]
         end
     end
     
@@ -416,6 +416,14 @@ flowchart TB
     AG_src --> AG_models
 ```
 
+**Key Files:**
+- `frontend/src/pages/GenerationPage.tsx` - Main generation UI
+- `frontend/src/components/AgentChat.tsx` - Agent cards (2534 lines)
+- `frontend/src/hooks/useGenerationStream.ts` - SSE streaming hook
+- `api-gateway/src/services/StorytellerOrchestrator.ts` - Main orchestrator (1435 lines)
+- `api-gateway/src/models/AgentModels.ts` - 9 agents, 12 phases
+- `api-gateway/src/models/LLMModels.ts` - 6 LLM providers
+
 ### SSE Event Types
 
 The orchestrator publishes these event types to Redis Streams for real-time frontend updates:
@@ -423,27 +431,38 @@ The orchestrator publishes these event types to Redis Streams for real-time fron
 ```mermaid
 flowchart LR
     subgraph Events["SSE Event Types"]
-        E1["generation_started<br/>Run initialized"]
-        E2["phase_start<br/>Phase beginning"]
-        E3["agent_start<br/>Agent activated"]
-        E4["agent_complete<br/>Agent output ready"]
-        E5["new_developments_collected<br/>Archivist update"]
-        E6["generation_complete<br/>All phases done"]
-        E7["generation_cancelled<br/>User cancelled"]
-        E8["generation_error<br/>Fatal error"]
-        E9["heartbeat<br/>Keep-alive (15s)"]
+        E1["generation_started"]
+        E2["phase_start"]
+        E3["agent_start"]
+        E4["agent_complete"]
+        E5["new_developments_collected"]
+        E6["generation_complete"]
+        E7["generation_cancelled"]
+        E8["generation_error"]
+        E9["heartbeat"]
     end
     
     E1 --> E2
     E2 --> E3
     E3 --> E4
-    E4 -->|"next phase"| E2
-    E4 -->|"every 3 scenes"| E5
+    E4 -->|next phase| E2
+    E4 -->|every 3 scenes| E5
     E5 --> E4
-    E4 -->|"all done"| E6
-    E2 -->|"error"| E8
-    E2 -->|"cancelled"| E7
+    E4 -->|all done| E6
+    E2 -->|error| E8
+    E2 -->|cancelled| E7
 ```
+
+**Event Descriptions:**
+- `generation_started` - Run initialized with runId
+- `phase_start` - New phase beginning
+- `agent_start` - Agent activated
+- `agent_complete` - Agent output ready
+- `new_developments_collected` - Archivist constraint update
+- `generation_complete` - All phases done
+- `generation_cancelled` - User cancelled
+- `generation_error` - Fatal error
+- `heartbeat` - Keep-alive every 15s
 
 </details>
 
