@@ -38,6 +38,8 @@ import { RedisStreamsService } from "./RedisStreamsService";
 import { QdrantMemoryService } from "./QdrantMemoryService";
 import { LangfuseService, AGENT_PROMPTS, PHASE_PROMPTS } from "./LangfuseService";
 import { SupabaseService } from "./SupabaseService";
+import { AgentFactory } from "../agents/AgentFactory";
+import { AgentContext } from "../agents/types";
 
 /**
  * LLM Configuration for generation
@@ -96,6 +98,9 @@ export class StorytellerOrchestrator {
 
   @Inject()
   private supabase: SupabaseService;
+
+  @Inject()
+  private agentFactory: AgentFactory;
 
   /**
    * Start a new generation run
@@ -226,32 +231,16 @@ export class StorytellerOrchestrator {
     state.phase = GenerationPhase.GENESIS;
     await this.publishPhaseStart(runId, GenerationPhase.GENESIS);
 
-    // Get system prompt from Langfuse or use fallback
-    const systemPrompt = await this.getAgentPrompt(AgentType.ARCHITECT, {
-      seedIdea: options.seedIdea,
-    });
-
-    // Call Architect agent
-    const response = await this.callAgent(
+    // Use ArchitectAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.ARCHITECT);
+    const context: AgentContext = {
       runId,
-      AgentType.ARCHITECT,
-      systemPrompt,
-      `Create a compelling narrative concept based on this seed idea: "${options.seedIdea}"
-      
-      Develop:
-      1. Core premise and hook
-      2. Central theme and subthemes
-      3. Narrative arc structure (3-act or 5-act)
-      4. Tone and atmosphere
-      5. Target audience and genre positioning
-      
-      Output as JSON with fields: premise, hook, themes, arc, tone, audience, genre`,
-      options.llmConfig,
-      GenerationPhase.GENESIS
-    );
+      state,
+      projectId: options.projectId,
+    };
 
-    // Parse and store narrative
-    state.narrative = this.parseJSON(response);
+    const output = await agent.execute(context, options);
+    state.narrative = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
     // Save to Supabase
@@ -273,34 +262,16 @@ export class StorytellerOrchestrator {
     state.phase = GenerationPhase.CHARACTERS;
     await this.publishPhaseStart(runId, GenerationPhase.CHARACTERS);
 
-    const systemPrompt = await this.getAgentPrompt(AgentType.PROFILER, {
-      narrative: JSON.stringify(state.narrative),
-    });
-
-    const response = await this.callAgent(
+    // Use ProfilerAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.PROFILER);
+    const context: AgentContext = {
       runId,
-      AgentType.PROFILER,
-      systemPrompt,
-      `Based on the narrative concept, create detailed character profiles.
-      
-      For each character include:
-      1. Name and role (protagonist, antagonist, supporting)
-      2. Archetype and subversion
-      3. Core motivation and desire
-      4. Psychological wound and inner trap
-      5. Character arc trajectory
-      6. Backstory highlights
-      7. Visual signature and mannerisms
-      8. Voice and speech patterns
-      9. Relationships to other characters
-      
-      Create at least 3-5 main characters.
-      Output as JSON array with character objects.`,
-      options.llmConfig,
-      GenerationPhase.CHARACTERS
-    );
+      state,
+      projectId: options.projectId,
+    };
 
-    state.characters = this.parseJSONArray(response);
+    const output = await agent.execute(context, options);
+    state.characters = output.content as Record<string, unknown>[];
     state.updatedAt = new Date().toISOString();
 
     // Store characters in Qdrant for semantic search
@@ -325,33 +296,16 @@ export class StorytellerOrchestrator {
     state.phase = GenerationPhase.WORLDBUILDING;
     await this.publishPhaseStart(runId, GenerationPhase.WORLDBUILDING);
 
-    const systemPrompt = await this.getAgentPrompt(AgentType.WORLDBUILDER, {
-      narrative: JSON.stringify(state.narrative),
-      characters: JSON.stringify(state.characters),
-    });
-
-    const response = await this.callAgent(
+    // Use WorldbuilderAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.WORLDBUILDER);
+    const context: AgentContext = {
       runId,
-      AgentType.WORLDBUILDER,
-      systemPrompt,
-      `Create a rich, detailed world for the story.
-      
-      Include:
-      1. Geography and locations (key settings)
-      2. Time period and technology level
-      3. Social structures and power dynamics
-      4. Cultural elements (customs, beliefs, taboos)
-      5. Economic systems
-      6. Magic/technology rules (if applicable)
-      7. History and lore
-      8. Sensory details (sights, sounds, smells)
-      
-      Output as JSON with nested objects for each category.`,
-      options.llmConfig,
-      GenerationPhase.WORLDBUILDING
-    );
+      state,
+      projectId: options.projectId,
+    };
 
-    state.worldbuilding = this.parseJSON(response);
+    const output = await agent.execute(context, options);
+    state.worldbuilding = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
     // Store worldbuilding elements in Qdrant
@@ -383,36 +337,16 @@ export class StorytellerOrchestrator {
     state.phase = GenerationPhase.OUTLINING;
     await this.publishPhaseStart(runId, GenerationPhase.OUTLINING);
 
-    const systemPrompt = await this.getAgentPrompt(AgentType.STRATEGIST, {
-      narrative: JSON.stringify(state.narrative),
-      characters: JSON.stringify(state.characters),
-      worldbuilding: JSON.stringify(state.worldbuilding),
-    });
-
-    const response = await this.callAgent(
+    // Use StrategistAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.STRATEGIST);
+    const context: AgentContext = {
       runId,
-      AgentType.STRATEGIST,
-      systemPrompt,
-      `Create a detailed scene-by-scene outline for the story.
-      
-      For each scene include:
-      1. Scene number and title
-      2. Setting/location
-      3. Characters present
-      4. Scene goal (what must happen)
-      5. Conflict/tension
-      6. Emotional beat
-      7. Key dialogue moments
-      8. Scene ending hook
-      9. Word count target
-      
-      Create 10-20 scenes depending on story complexity.
-      Output as JSON with "scenes" array.`,
-      options.llmConfig,
-      GenerationPhase.OUTLINING
-    );
+      state,
+      projectId: options.projectId,
+    };
 
-    state.outline = this.parseJSON(response);
+    const output = await agent.execute(context, options);
+    state.outline = output.content as Record<string, unknown>;
     const scenes = (state.outline as Record<string, unknown>)?.scenes;
     state.totalScenes = Array.isArray(scenes) ? scenes.length : 0;
     state.updatedAt = new Date().toISOString();
@@ -434,31 +368,16 @@ export class StorytellerOrchestrator {
     state.phase = GenerationPhase.ADVANCED_PLANNING;
     await this.publishPhaseStart(runId, GenerationPhase.ADVANCED_PLANNING);
 
-    const systemPrompt = await this.getAgentPrompt(AgentType.STRATEGIST, {
-      narrative: JSON.stringify(state.narrative),
-      outline: JSON.stringify(state.outline),
-    });
-
-    const response = await this.callAgent(
+    // Use StrategistAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.STRATEGIST);
+    const context: AgentContext = {
       runId,
-      AgentType.STRATEGIST,
-      systemPrompt,
-      `Create advanced planning elements for the story:
-      
-      1. Motif layers - recurring symbols and their meanings
-      2. Subtext design - what's unsaid but implied
-      3. Emotional beat sheet - emotional journey per scene
-      4. Sensory blueprints - key sensory moments
-      5. Contradiction maps - internal character conflicts
-      6. Deepening checkpoints - where to add depth
-      7. Complexity checklists - ensuring narrative richness
-      
-      Output as JSON with each category as a key.`,
-      options.llmConfig,
-      GenerationPhase.ADVANCED_PLANNING
-    );
+      state,
+      projectId: options.projectId,
+    };
 
-    const advancedPlan = this.parseJSON(response);
+    const output = await agent.execute(context, options);
+    const advancedPlan = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
     await this.saveArtifact(runId, options.projectId, "advanced_plan", advancedPlan);
@@ -532,6 +451,7 @@ export class StorytellerOrchestrator {
     if (!state) return;
 
     state.phase = GenerationPhase.DRAFTING;
+    state.currentScene = sceneNum;
     await this.publishEvent(runId, "scene_draft_start", { sceneNum });
 
     // Get relevant context from Qdrant
@@ -542,38 +462,22 @@ export class StorytellerOrchestrator {
       3
     );
 
-    // Build key constraints block
-    const constraintsBlock = this.buildConstraintsBlock(state.keyConstraints);
+    // Store scene outline in state for WriterAgent to access
+    const outline = state.outline as Record<string, unknown>;
+    if (!outline) {
+      throw new Error("Outline not found in state");
+    }
 
-    const systemPrompt = await this.getAgentPrompt(AgentType.WRITER, {
-      narrative: JSON.stringify(state.narrative),
-      characters: JSON.stringify(relevantCharacters.map((r) => r.payload.character)),
-      keyConstraints: constraintsBlock,
-    });
-
-    const response = await this.callAgent(
+    // Use WriterAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.WRITER);
+    const context: AgentContext = {
       runId,
-      AgentType.WRITER,
-      systemPrompt,
-      `Write Scene ${sceneNum}: "${sceneTitle}"
-      
-      Scene outline:
-      ${JSON.stringify(sceneOutline, null, 2)}
-      
-      Requirements:
-      - Follow the emotional beat and conflict specified
-      - Maintain character voices and consistency
-      - Include sensory details and atmosphere
-      - End with the specified hook
-      - Target word count: ${sceneOutline.wordCount ?? 1500} words
-      
-      KEY CONSTRAINTS (MUST NOT VIOLATE):
-      ${constraintsBlock}
-      
-      Write the full scene prose.`,
-      options.llmConfig,
-      GenerationPhase.DRAFTING
-    );
+      state,
+      projectId: options.projectId,
+    };
+
+    const output = await agent.execute(context, options);
+    const response = output.content as string;
 
     const draft = {
       sceneNum,
@@ -611,45 +515,19 @@ export class StorytellerOrchestrator {
     if (!draft) return { approved: true };
 
     state.phase = GenerationPhase.CRITIQUE;
+    state.currentScene = sceneNum;
     await this.publishEvent(runId, "scene_critique_start", { sceneNum });
 
-    const constraintsBlock = this.buildConstraintsBlock(state.keyConstraints);
-
-    const systemPrompt = await this.getAgentPrompt(AgentType.CRITIC, {
-      keyConstraints: constraintsBlock,
-    });
-
-    const response = await this.callAgent(
+    // Use CriticAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.CRITIC);
+    const context: AgentContext = {
       runId,
-      AgentType.CRITIC,
-      systemPrompt,
-      `Critique Scene ${sceneNum}:
-      
-      ${(draft as Record<string, unknown>).content}
-      
-      Evaluate:
-      1. Prose quality (clarity, flow, voice)
-      2. Character consistency
-      3. Emotional impact
-      4. Pacing
-      5. Dialogue authenticity
-      6. Sensory details
-      7. Constraint adherence
-      
-      KEY CONSTRAINTS TO CHECK:
-      ${constraintsBlock}
-      
-      Output JSON with:
-      - approved: boolean (true if no major issues)
-      - score: number (1-10)
-      - strengths: string[]
-      - issues: string[]
-      - revisionRequests: string[] (specific changes needed)`,
-      options.llmConfig,
-      GenerationPhase.CRITIQUE
-    );
+      state,
+      projectId: options.projectId,
+    };
 
-    const critique = this.parseJSON(response);
+    const output = await agent.execute(context, options);
+    const critique = output.content as Record<string, unknown>;
     
     if (!state.critiques.has(sceneNum)) {
       state.critiques.set(sceneNum, []);
@@ -679,34 +557,19 @@ export class StorytellerOrchestrator {
     if (!draft) return;
 
     state.phase = GenerationPhase.REVISION;
+    state.currentScene = sceneNum;
     await this.publishEvent(runId, "scene_revision_start", { sceneNum });
 
-    const constraintsBlock = this.buildConstraintsBlock(state.keyConstraints);
-
-    const systemPrompt = await this.getAgentPrompt(AgentType.WRITER, {
-      keyConstraints: constraintsBlock,
-    });
-
-    const response = await this.callAgent(
+    // Use WriterAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.WRITER);
+    const context: AgentContext = {
       runId,
-      AgentType.WRITER,
-      systemPrompt,
-      `Revise Scene ${sceneNum} based on critique feedback.
-      
-      Original draft:
-      ${(draft as Record<string, unknown>).content}
-      
-      Critique feedback:
-      Issues: ${JSON.stringify(critique.issues)}
-      Revision requests: ${JSON.stringify(critique.revisionRequests)}
-      
-      KEY CONSTRAINTS (MUST NOT VIOLATE):
-      ${constraintsBlock}
-      
-      Write the revised scene, addressing all feedback while maintaining what works.`,
-      options.llmConfig,
-      GenerationPhase.REVISION
-    );
+      state,
+      projectId: options.projectId,
+    };
+
+    const output = await agent.execute(context, options);
+    const response = output.content as string;
 
     const revision = {
       sceneNum,
@@ -742,31 +605,19 @@ export class StorytellerOrchestrator {
     if (!draft) return;
 
     state.phase = GenerationPhase.POLISH;
+    state.currentScene = sceneNum;
     await this.publishEvent(runId, "scene_polish_start", { sceneNum });
 
-    const systemPrompt = await this.getAgentPrompt(AgentType.WRITER, {});
-
-    const response = await this.callAgent(
+    // Use WriterAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.WRITER);
+    const context: AgentContext = {
       runId,
-      AgentType.WRITER,
-      systemPrompt,
-      `Polish Scene ${sceneNum} for final publication quality.
-      
-      Current draft:
-      ${(draft as Record<string, unknown>).content}
-      
-      Focus on:
-      1. Sentence-level refinement
-      2. Word choice precision
-      3. Rhythm and flow
-      4. Removing redundancy
-      5. Strengthening imagery
-      6. Ensuring smooth transitions
-      
-      Output the polished scene.`,
-      options.llmConfig,
-      GenerationPhase.POLISH
-    );
+      state,
+      projectId: options.projectId,
+    };
+
+    const output = await agent.execute(context, options);
+    const response = output.content as string;
 
     const polished = {
       sceneNum,
@@ -804,40 +655,38 @@ export class StorytellerOrchestrator {
 
     if (newFacts.length === 0) return;
 
-    const systemPrompt = await this.getAgentPrompt(AgentType.ARCHIVIST, {});
+    state.currentScene = upToScene;
 
-    const response = await this.callAgent(
+    // Use ArchivistAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.ARCHIVIST);
+    const context: AgentContext = {
       runId,
-      AgentType.ARCHIVIST,
-      systemPrompt,
-      `Process raw facts and update key constraints.
-      
-      Current key constraints:
-      ${JSON.stringify(state.keyConstraints, null, 2)}
-      
-      New raw facts to process:
-      ${JSON.stringify(newFacts, null, 2)}
-      
-      Instructions (Chain of Thought):
-      1. IDENTIFY: List any conflicts between new facts and existing constraints
-      2. RESOLVE: For conflicts, keep the latest fact (by timestamp/scene number)
-      3. DISCARD: Remove irrelevant details that don't affect continuity
-      4. GENERATE: Output the updated constraints list
-      
-      Output JSON with:
-      - reasoning: string (your thought process)
-      - updatedConstraints: array of {key, value, source, sceneNumber, timestamp}
-      - discardedFacts: array of facts that were deemed irrelevant`,
-      options.llmConfig,
-      GenerationPhase.DRAFTING
-    );
+      state,
+      projectId: options.projectId,
+    };
 
-    const result = this.parseJSON(response);
+    const output = await agent.execute(context, options);
+    const result = output.content as Record<string, unknown>;
     
-    if (result.updatedConstraints && Array.isArray(result.updatedConstraints)) {
-      state.keyConstraints = result.updatedConstraints as KeyConstraint[];
+    if (result.constraints && Array.isArray(result.constraints)) {
+      // Update constraints from Archivist output
+      const newConstraints = result.constraints as KeyConstraint[];
+      // Merge with existing, resolving conflicts by timestamp
+      for (const newConstraint of newConstraints) {
+        const existingIndex = state.keyConstraints.findIndex(c => c.key === newConstraint.key);
+        if (existingIndex >= 0) {
+          // Replace if new constraint is more recent
+          const existing = state.keyConstraints[existingIndex];
+          if (new Date(newConstraint.timestamp) > new Date(existing.timestamp)) {
+            state.keyConstraints[existingIndex] = newConstraint;
+          }
+        } else {
+          state.keyConstraints.push(newConstraint);
+        }
+      }
     }
 
+    state.lastArchivistScene = upToScene;
     state.updatedAt = new Date().toISOString();
 
     await this.publishEvent(runId, "archivist_complete", {
@@ -1026,8 +875,12 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
   /**
    * Check if critique approves the scene
+   * Uses revision_needed flag from CriticAgent output
    */
   private isApproved(critique: Record<string, unknown>): boolean {
+    // Check revision_needed flag (inverted - if revision_needed is false, it's approved)
+    if (critique.revision_needed === false) return true;
+    // Fallback to old format
     if (critique.approved === true) return true;
     if (typeof critique.score === "number" && critique.score >= 8) return true;
     return false;

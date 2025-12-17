@@ -44,6 +44,64 @@ export enum MessageType {
 }
 
 /**
+ * Cinematic event types for real-time UI visualization
+ */
+export type CinematicEventType =
+  | "agent_thought"      // Agent's internal thought/process
+  | "agent_dialogue"     // Dialogue between agents
+  | "agent_conflict"     // Conflict between agents
+  | "agent_consensus";   // Consensus reached
+
+/**
+ * Agent thought event (for Cinematic UI)
+ */
+export interface AgentThoughtEvent {
+  type: "agent_thought";
+  data: {
+    agent: AgentType;
+    thought: string;
+    sentiment: "neutral" | "agree" | "disagree" | "excited" | "concerned";
+    targetAgent?: AgentType;
+  };
+}
+
+/**
+ * Agent dialogue event (for Cinematic UI)
+ */
+export interface AgentDialogueEvent {
+  type: "agent_dialogue";
+  data: {
+    from: AgentType;
+    to: AgentType;
+    message: string;
+    dialogueType: "question" | "objection" | "approval" | "suggestion";
+  };
+}
+
+/**
+ * Agent conflict event (for Cinematic UI)
+ */
+export interface AgentConflictEvent {
+  type: "agent_conflict";
+  data: {
+    agents: [AgentType, AgentType];
+    issue: string;
+    resolution?: string;
+  };
+}
+
+/**
+ * Agent consensus event (for Cinematic UI)
+ */
+export interface AgentConsensusEvent {
+  type: "agent_consensus";
+  data: {
+    agents: AgentType[];
+    decision: string;
+  };
+}
+
+/**
  * Agent message structure
  */
 export class AgentMessage {
