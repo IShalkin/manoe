@@ -1808,8 +1808,13 @@ Output ONLY the JSON, starting with {{ and ending with }}. No other text."""
 
         # Format key constraints context (immutable facts from Archivist)
         # These are canonical truths that MUST be preserved across revisions
+        # Use relevance filtering based on characters present and recency
+        characters_present_names = scene.get("characters_present", [])
         constraints_context_str = ""
-        constraints_context = self.get_current_constraints_context()
+        constraints_context = self.get_current_constraints_context(
+            current_scene=scene_number,
+            characters_present=characters_present_names,
+        )
         if constraints_context and constraints_context != "No constraints established yet.":
             constraints_context_str = """
 ## Key Constraints (IMMUTABLE - DO NOT CONTRADICT)
@@ -2519,6 +2524,42 @@ Output the revised scene as valid JSON.
         if scene_number not in self.state.critiques:
             self.state.critiques[scene_number] = []
         self.state.critiques[scene_number].append(critique)
+
+        # =======================================================================
+        # LAZY WRITER PATTERN: Extract new_developments from Writer output
+        # Writer generates raw facts in natural language, Archivist converts to canonical keys
+        # =======================================================================
+        if draft and isinstance(draft, dict):
+            new_developments = draft.get("new_developments", [])
+            if new_developments:
+                logger.info(f"[run_drafting_phase] Scene {scene_number}: Collected {len(new_developments)} new developments")
+                for dev in new_developments:
+                    if isinstance(dev, dict):
+                        # Store raw fact for Archivist to process
+                        fact_str = f"{dev.get('subject', 'Unknown')}: {dev.get('change', 'Unknown change')} (category: {dev.get('category', 'unknown')})"
+                        self.add_raw_fact(fact_str, scene_number, source_agent="writer")
+                
+                self._emit_event("new_developments_collected", {
+                    "scene_number": scene_number,
+                    "count": len(new_developments),
+                    "developments": new_developments,
+                })
+
+        # =======================================================================
+        # ARCHIVIST TRIGGER: Check if we should run Archivist (async, non-blocking)
+        # Runs every ARCHIVIST_SNAPSHOT_INTERVAL scenes to resolve constraints
+        # =======================================================================
+        if self.should_run_archivist(scene_number):
+            logger.info(f"[run_drafting_phase] Scene {scene_number}: Triggering Archivist snapshot (async)")
+            # Use asyncio.create_task to run Archivist without blocking drafting
+            import asyncio
+            asyncio.create_task(
+                self.run_archivist_snapshot(
+                    current_scene=scene_number,
+                    characters=characters,
+                    plot_phase="drafting",
+                )
+            )
 
         self._emit_event("phase_complete", {
             "phase": "drafting",
@@ -4270,22 +4311,118 @@ Generate the complexity layer checklist as valid JSON.
             "timestamp": datetime.utcnow().isoformat(),
         })
 
-    def get_current_constraints_context(self) -> str:
-        """Get formatted string of current key constraints for agent context.
+    CONSTRAINT_RECENCY_WINDOW = 10  # Include constraints accessed in last N scenes
+
+    def get_current_constraints_context(
+        self,
+        current_scene: int = 0,
+        characters_present: Optional[List[str]] = None,
+    ) -> str:
+        """Get formatted string of relevant key constraints for agent context.
         
+        Uses relevance filtering to prevent context pollution:
+        1. Always include global constraints (is_global=True)
+        2. Include constraints matching characters present (char_{name}_*)
+        3. Include constraints accessed in last N scenes (recency fallback)
+        4. Always include plot_* constraints
+        
+        Args:
+            current_scene: Current scene number for recency filtering
+            characters_present: List of character names in current scene
+            
         Returns:
-            Formatted string of current constraints for inclusion in prompts
+            Formatted string of relevant constraints for inclusion in prompts
         """
         if not self.state or not self.state.key_constraints:
             return "No constraints established yet."
         
-        constraints_list = []
-        for key, constraint in self.state.key_constraints.items():
-            constraints_list.append(
-                f"- {key}: {constraint.get('value')} (scene {constraint.get('scene_number')})"
-            )
+        # Normalize character names for prefix matching
+        char_prefixes = []
+        if characters_present:
+            for char_name in characters_present:
+                # Normalize: lowercase, replace spaces with underscore
+                normalized = char_name.lower().replace(" ", "_").replace("-", "_")
+                char_prefixes.append(f"char_{normalized}_")
         
-        return "\n".join(constraints_list)
+        relevant_constraints = []
+        other_constraints = []
+        
+        for key, constraint in self.state.key_constraints.items():
+            is_relevant = False
+            
+            # 1. Always include global constraints
+            if constraint.get("is_global", False):
+                is_relevant = True
+            
+            # 2. Always include plot_* constraints
+            elif key.startswith("plot_"):
+                is_relevant = True
+            
+            # 3. Include constraints matching characters present
+            elif char_prefixes and any(key.startswith(prefix) for prefix in char_prefixes):
+                is_relevant = True
+            
+            # 4. Include constraints accessed recently (recency fallback)
+            elif current_scene > 0:
+                last_accessed = constraint.get("last_accessed_at_scene", 0)
+                scene_updated = constraint.get("scene_number", 0)
+                most_recent = max(last_accessed, scene_updated)
+                if current_scene - most_recent <= self.CONSTRAINT_RECENCY_WINDOW:
+                    is_relevant = True
+            
+            if is_relevant:
+                relevant_constraints.append((key, constraint))
+            else:
+                other_constraints.append((key, constraint))
+        
+        # Update last_accessed_at_scene for included constraints
+        for key, constraint in relevant_constraints:
+            if current_scene > 0:
+                constraint["last_accessed_at_scene"] = current_scene
+        
+        if not relevant_constraints:
+            return "No constraints established yet."
+        
+        # Format output
+        lines = []
+        
+        # Group by category for readability
+        global_lines = []
+        char_lines = []
+        world_lines = []
+        plot_lines = []
+        other_lines = []
+        
+        for key, constraint in relevant_constraints:
+            line = f"- {key}: {constraint.get('value')} (scene {constraint.get('scene_number')})"
+            if constraint.get("is_global"):
+                line += " [GLOBAL]"
+            
+            if key.startswith("char_"):
+                char_lines.append(line)
+            elif key.startswith("world_"):
+                world_lines.append(line)
+            elif key.startswith("plot_"):
+                plot_lines.append(line)
+            elif key.startswith("rel_"):
+                other_lines.append(line)
+            else:
+                other_lines.append(line)
+        
+        if plot_lines:
+            lines.append("**Plot:**")
+            lines.extend(plot_lines)
+        if char_lines:
+            lines.append("**Characters:**")
+            lines.extend(char_lines)
+        if world_lines:
+            lines.append("**World:**")
+            lines.extend(world_lines)
+        if other_lines:
+            lines.append("**Other:**")
+            lines.extend(other_lines)
+        
+        return "\n".join(lines)
 
     async def run_archivist_snapshot(
         self,
