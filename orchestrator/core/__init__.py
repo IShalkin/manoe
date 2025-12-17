@@ -20,6 +20,8 @@ from core.blackboard import (
     AdvancedPlanningData,
     DraftingData,
     NarratorConfig,
+    KeyConstraints,
+    ConstraintFact,
 )
 from core.graph import (
     GraphRunner,
@@ -72,6 +74,8 @@ __all__ = [
     "AdvancedPlanningData",
     "DraftingData",
     "NarratorConfig",
+    "KeyConstraints",
+    "ConstraintFact",
     # Graph-based Orchestration
     "GraphRunner",
     "Graph",
