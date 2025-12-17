@@ -1052,9 +1052,40 @@ async def get_run_state(run_id: str, request: Request):
     if not worker:
         raise HTTPException(status_code=503, detail="Worker not initialized")
 
-    # Authenticate user and verify ownership (async to check Redis for persisted ownership)
+    # Authenticate user
     user_id, _ = await get_current_user(request)
-    await check_run_ownership_async(run_id, user_id)
+    
+    # Try to verify ownership via Redis first
+    owner = await run_ownership.get_owner_async(run_id)
+    if owner is not None:
+        # Owner found in Redis - verify it matches
+        if owner != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this run",
+            )
+    else:
+        # Owner not in Redis - check via Supabase (legacy run fallback)
+        if worker.persistence_service and worker.persistence_service.is_connected:
+            supabase_owner = await worker.persistence_service.get_run_owner_via_project(run_id)
+            if supabase_owner is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Run not found or access denied",
+                )
+            if supabase_owner != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to access this run",
+                )
+            # Self-healing: store ownership in Redis for future requests
+            await run_ownership.register_run_async(run_id, user_id)
+            print(f"[get_run_state] Restored ownership for legacy run {run_id} -> {user_id}")
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Run not found or access denied",
+            )
 
     # Determine in-memory status
     in_memory_status = "unknown"
