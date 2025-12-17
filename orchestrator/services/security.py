@@ -234,7 +234,7 @@ run_ownership = RunOwnershipStore()
 
 def check_run_ownership(run_id: str, user_id: str) -> None:
     """
-    Check if a user owns a run.
+    Check if a user owns a run (sync, in-memory only).
     
     Args:
         run_id: Run ID to check
@@ -255,6 +255,37 @@ def check_run_ownership(run_id: str, user_id: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to access this run",
         )
+
+
+async def check_run_ownership_async(run_id: str, user_id: str) -> None:
+    """
+    Check if a user owns a run (async, checks Redis for persisted ownership).
+    
+    This should be used for endpoints that need to work after orchestrator redeploy,
+    when ownership info may only exist in Redis, not in-memory.
+    
+    Args:
+        run_id: Run ID to check
+        user_id: User ID to verify ownership
+        
+    Raises:
+        HTTPException: If user doesn't own the run
+    """
+    # First try async verification which checks Redis
+    if await run_ownership.verify_ownership_async(run_id, user_id):
+        return
+    
+    # Check if run exists at all (in Redis)
+    owner = await run_ownership.get_owner_async(run_id)
+    if owner is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found or access denied",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You don't have permission to access this run",
+    )
 
 
 # Request size limits (in characters)
