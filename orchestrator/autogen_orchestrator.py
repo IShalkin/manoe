@@ -51,6 +51,7 @@ from prompts import (
 from services.model_client import UnifiedModelClient
 from services.qdrant_memory import QdrantMemoryService
 from services.supabase_persistence import SupabasePersistenceService
+from services.tracing import tracing_service
 
 
 class GenerationPhase(str, Enum):
@@ -698,6 +699,7 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         conversation_history: Optional[List[Dict[str, str]]] = None,
         max_tokens: Optional[int] = None,
         max_retries: int = 3,
+        run_id: Optional[str] = None,
     ) -> str:
         """Call an agent and get its response with automatic retry for transient errors.
         
@@ -707,7 +709,11 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
             conversation_history: Optional conversation history
             max_tokens: Maximum tokens for response. If None, uses phase-based dynamic limit.
             max_retries: Maximum number of retry attempts for transient errors (default: 3)
+            run_id: Optional run ID for Langfuse tracing
         """
+        import time
+        call_start_time = time.time()
+        
         # Check pause before every agent call for responsive pause behavior
         await self._check_pause()
 
@@ -767,6 +773,9 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
                     response_format={"type": "json_object"} if "json" in user_message.lower() else None,
                 )
 
+                # Calculate latency
+                latency_ms = (time.time() - call_start_time) * 1000
+
                 # Log finish_reason to detect truncation
                 logger.info(f"[_call_agent] Agent: {agent['name']}, finish_reason: {response.finish_reason}, usage: {response.usage}")
                 if response.finish_reason in ("length", "max_tokens"):
@@ -786,11 +795,40 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
                     content=response.content,
                 )
 
+                # Log to Langfuse for observability
+                if run_id and tracing_service.enabled:
+                    tracing_service.log_generation(
+                        run_id=run_id,
+                        name=f"{agent['name']}_{phase_name}",
+                        model=model,
+                        provider=provider.value if hasattr(provider, 'value') else str(provider),
+                        input_messages=messages,
+                        output=response.content,
+                        input_tokens=response.usage.get("prompt_tokens", 0),
+                        output_tokens=response.usage.get("completion_tokens", 0),
+                        latency_ms=latency_ms,
+                        metadata={
+                            "phase": phase_name,
+                            "finish_reason": response.finish_reason,
+                            "attempts": attempt + 1,
+                        },
+                    )
+
                 return response.content
                 
             except Exception as e:
                 last_error = e
                 logger.warning(f"[_call_agent] Agent {agent['name']} attempt {attempt + 1}/{max_retries} failed: {e}")
+                
+                # Log error to Langfuse
+                if run_id and tracing_service.enabled:
+                    tracing_service.log_error(
+                        run_id=run_id,
+                        error=str(e),
+                        phase=phase_name,
+                        agent=agent["name"],
+                        metadata={"attempt": attempt + 1, "max_retries": max_retries},
+                    )
                 
                 # Check if error is retryable
                 if not self._is_retryable_error(e):
