@@ -100,6 +100,186 @@ class NarratorConfig:
 
 
 @dataclass
+class ConstraintFact:
+    """
+    A single immutable constraint fact.
+    
+    These facts are NEVER deleted or compressed by summarization.
+    They are always injected into context during revisions.
+    """
+    fact: str
+    category: str  # "character_state", "world_rule", "plot_fact", "continuity"
+    source: str  # Which agent/phase added this
+    scene_id: Optional[int] = None  # Scene this applies to (None = global)
+    character_name: Optional[str] = None  # Character this applies to
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "fact": self.fact,
+            "category": self.category,
+            "source": self.source,
+            "scene_id": self.scene_id,
+            "character_name": self.character_name,
+            "created_at": self.created_at.isoformat(),
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ConstraintFact":
+        return cls(
+            fact=data["fact"],
+            category=data["category"],
+            source=data["source"],
+            scene_id=data.get("scene_id"),
+            character_name=data.get("character_name"),
+            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.utcnow(),
+        )
+
+
+@dataclass
+class KeyConstraints:
+    """
+    Immutable key constraints that prevent Context Drift.
+    
+    These constraints are:
+    - APPEND-ONLY: Facts can only be added, never removed
+    - ALWAYS INJECTED: Into context during Writer/Critic revisions
+    - NEVER COMPRESSED: Summarization chain ignores these
+    
+    Categories:
+    - character_state: Physical/emotional states (e.g., "Hero is wounded in left arm")
+    - world_rule: World rules that must be followed (e.g., "Magic requires verbal incantation")
+    - plot_fact: Plot facts that can't be contradicted (e.g., "The letter was burned")
+    - continuity: Scene-to-scene continuity (e.g., "It's raining outside")
+    """
+    facts: List[ConstraintFact] = field(default_factory=list)
+    
+    def add_constraint(
+        self,
+        fact: str,
+        category: str,
+        source: str,
+        scene_id: Optional[int] = None,
+        character_name: Optional[str] = None,
+    ) -> ConstraintFact:
+        """
+        Add a new constraint fact (append-only).
+        
+        Args:
+            fact: The constraint fact text
+            category: One of "character_state", "world_rule", "plot_fact", "continuity"
+            source: Which agent/phase added this
+            scene_id: Scene this applies to (None = global)
+            character_name: Character this applies to (if relevant)
+            
+        Returns:
+            The created ConstraintFact
+        """
+        constraint = ConstraintFact(
+            fact=fact,
+            category=category,
+            source=source,
+            scene_id=scene_id,
+            character_name=character_name,
+        )
+        self.facts.append(constraint)
+        return constraint
+    
+    def get_constraints_for_scene(self, scene_id: int) -> List[ConstraintFact]:
+        """Get all constraints relevant to a specific scene."""
+        return [
+            f for f in self.facts
+            if f.scene_id is None or f.scene_id == scene_id
+        ]
+    
+    def get_constraints_for_character(self, character_name: str) -> List[ConstraintFact]:
+        """Get all constraints relevant to a specific character."""
+        return [
+            f for f in self.facts
+            if f.character_name is None or f.character_name.lower() == character_name.lower()
+        ]
+    
+    def get_constraints_by_category(self, category: str) -> List[ConstraintFact]:
+        """Get all constraints of a specific category."""
+        return [f for f in self.facts if f.category == category]
+    
+    def to_context_string(
+        self,
+        scene_id: Optional[int] = None,
+        character_names: Optional[List[str]] = None,
+        max_facts: int = 20,
+    ) -> str:
+        """
+        Build a context string for injection into prompts.
+        
+        Args:
+            scene_id: Filter to constraints relevant to this scene
+            character_names: Filter to constraints relevant to these characters
+            max_facts: Maximum number of facts to include
+            
+        Returns:
+            Formatted string for prompt injection
+        """
+        relevant_facts = self.facts
+        
+        # Filter by scene if specified
+        if scene_id is not None:
+            relevant_facts = [
+                f for f in relevant_facts
+                if f.scene_id is None or f.scene_id == scene_id
+            ]
+        
+        # Filter by characters if specified
+        if character_names:
+            char_names_lower = [c.lower() for c in character_names]
+            relevant_facts = [
+                f for f in relevant_facts
+                if f.character_name is None or f.character_name.lower() in char_names_lower
+            ]
+        
+        # Limit facts
+        relevant_facts = relevant_facts[:max_facts]
+        
+        if not relevant_facts:
+            return ""
+        
+        # Group by category
+        by_category: Dict[str, List[str]] = {}
+        for fact in relevant_facts:
+            if fact.category not in by_category:
+                by_category[fact.category] = []
+            by_category[fact.category].append(fact.fact)
+        
+        # Build formatted string
+        sections = []
+        category_labels = {
+            "character_state": "CHARACTER STATES",
+            "world_rule": "WORLD RULES",
+            "plot_fact": "PLOT FACTS",
+            "continuity": "CONTINUITY",
+        }
+        
+        for category, facts in by_category.items():
+            label = category_labels.get(category, category.upper())
+            facts_text = "\n".join(f"- {f}" for f in facts)
+            sections.append(f"[{label}]\n{facts_text}")
+        
+        return "=== KEY CONSTRAINTS (DO NOT VIOLATE) ===\n" + "\n\n".join(sections)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "facts": [f.to_dict() for f in self.facts],
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "KeyConstraints":
+        constraints = cls()
+        for fact_data in data.get("facts", []):
+            constraints.facts.append(ConstraintFact.from_dict(fact_data))
+        return constraints
+
+
+@dataclass
 class BlackboardState:
     """
     Unified state object for the entire generation process.
@@ -129,6 +309,10 @@ class BlackboardState:
     advanced_planning: AdvancedPlanningData = field(default_factory=AdvancedPlanningData)
     drafting: DraftingData = field(default_factory=DraftingData)
     narrator: NarratorConfig = field(default_factory=NarratorConfig)
+    
+    # Key Constraints - IMMUTABLE facts that prevent Context Drift
+    # These are NEVER compressed by summarization and ALWAYS injected during revisions
+    key_constraints: KeyConstraints = field(default_factory=KeyConstraints)
     
     # Polished output
     polished_scenes: List[Dict[str, Any]] = field(default_factory=list)
@@ -264,6 +448,7 @@ class BlackboardState:
                 "style": self.narrator.style,
                 "design": self.narrator.design,
             },
+            "key_constraints": self.key_constraints.to_dict(),
             "polished_scenes": self.polished_scenes,
             "quality_scores": self.quality_scores,
             "quality_feedback": self.quality_feedback,
@@ -350,6 +535,10 @@ class BlackboardState:
             style=narrator.get("style", ""),
             design=narrator.get("design", {}),
         )
+        
+        # Restore key constraints (immutable facts)
+        key_constraints_data = data.get("key_constraints", {})
+        state.key_constraints = KeyConstraints.from_dict(key_constraints_data)
         
         state.polished_scenes = data.get("polished_scenes", [])
         state.quality_scores = data.get("quality_scores", {})

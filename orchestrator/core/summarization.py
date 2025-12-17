@@ -403,8 +403,22 @@ class ContextBuilder:
         worldbuilding: Dict[str, Any],
         narrator_config: Dict[str, Any],
         max_tokens: int = 8000,
+        key_constraints_text: Optional[str] = None,
+        is_revision: bool = False,
     ) -> str:
-        """Build context string for the Writer agent."""
+        """
+        Build context string for the Writer agent.
+        
+        Args:
+            current_scene: Current scene number
+            scene_outline: Outline for the current scene
+            characters: List of relevant characters
+            worldbuilding: Worldbuilding context
+            narrator_config: Narrator configuration
+            max_tokens: Maximum tokens for context
+            key_constraints_text: Pre-formatted key constraints string (from KeyConstraints.to_context_string())
+            is_revision: Whether this is a revision (constraints are ALWAYS injected for revisions)
+        """
         context = self.context_manager.build_context(
             current_scene=current_scene,
             include_characters=True,
@@ -413,6 +427,11 @@ class ContextBuilder:
         )
         
         sections = []
+        
+        # KEY CONSTRAINTS - ALWAYS inject for revisions to prevent Context Drift
+        # These are immutable facts that must not be violated
+        if key_constraints_text and (is_revision or key_constraints_text):
+            sections.append(key_constraints_text)
         
         # Story summary
         if context["story_summary"]:
@@ -460,9 +479,27 @@ class ContextBuilder:
         characters: List[Dict[str, Any]],
         previous_critiques: Optional[List[Dict[str, Any]]] = None,
         max_tokens: int = 6000,
+        key_constraints_text: Optional[str] = None,
     ) -> str:
-        """Build context string for the Critic agent."""
+        """
+        Build context string for the Critic agent.
+        
+        Args:
+            scene_draft: The draft text to critique
+            scene_outline: Outline for the scene
+            characters: List of relevant characters
+            previous_critiques: Previous critique feedback
+            max_tokens: Maximum tokens for context
+            key_constraints_text: Pre-formatted key constraints string (from KeyConstraints.to_context_string())
+                                  Critic MUST check draft against these constraints
+        """
         sections = []
+        
+        # KEY CONSTRAINTS - Critic must verify draft doesn't violate these
+        # These are immutable facts that prevent Context Drift
+        if key_constraints_text:
+            sections.append(key_constraints_text)
+            sections.append("IMPORTANT: Verify the draft does NOT violate any of the above constraints.")
         
         # Scene draft to critique
         sections.append(f"=== SCENE DRAFT ===\n{scene_draft}")
