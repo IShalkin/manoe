@@ -86,7 +86,7 @@ jobs:
 
       - name: Run mypy type checking
         run: |
-          poetry run mypy core/ --ignore-missing-imports || true
+          poetry run mypy core/ --ignore-missing-imports
 
   lint-frontend:
     name: Lint Frontend (TypeScript)

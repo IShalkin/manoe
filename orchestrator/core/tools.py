@@ -89,7 +89,7 @@ class Tool:
     handler: Callable[..., Any]  # The actual function to execute
     is_async: bool = True
     
-    async def execute(self, **kwargs) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
         """Execute the tool with the given arguments."""
         try:
             if self.is_async:
@@ -121,7 +121,7 @@ class ToolRegistry:
     - Filters tools by category or agent
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self._tools: Dict[str, Tool] = {}
         self._agent_tools: Dict[str, List[str]] = {}  # agent_name -> tool_names
     
@@ -199,7 +199,7 @@ class ToolRegistry:
             tools = list(self._tools.values())
         return [tool.spec.to_anthropic_tool() for tool in tools]
     
-    async def execute(self, name: str, **kwargs) -> ToolResult:
+    async def execute(self, name: str, **kwargs: Any) -> ToolResult:
         """Execute a tool by name."""
         tool = self._tools.get(name)
         if not tool:
@@ -367,10 +367,10 @@ def _get_character_by_name(ctx: Any, name: str) -> Dict[str, Any]:
     if not ctx or not ctx.state:
         return {}
     
-    characters = ctx.state.characters.characters
+    characters: List[Dict[str, Any]] = ctx.state.characters.characters
     for char in characters:
         if char.get("name", "").lower() == name.lower():
-            return char
+            return dict(char)
     return {}
 
 
@@ -419,7 +419,7 @@ def _check_consistency(ctx: Any, text: str, aspects: Optional[List[str]] = None)
     if not ctx or not ctx.state:
         return {"consistent": True, "issues": []}
     
-    issues = []
+    issues: List[str] = []
     
     # Check character name consistency
     if not aspects or "character_names" in aspects:
