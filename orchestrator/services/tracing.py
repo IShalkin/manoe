@@ -1,365 +1,426 @@
 """
-Langfuse Tracing Service for MANOE Orchestrator.
-
-Provides observability for LLM calls, agent interactions, and generation runs.
-Integrates with self-hosted Langfuse instance.
-
-Environment Variables:
-    LANGFUSE_HOST: URL of Langfuse server (e.g., http://langfuse-web:3000)
-    LANGFUSE_PUBLIC_KEY: Project public key from Langfuse UI
-    LANGFUSE_SECRET_KEY: Project secret key from Langfuse UI
+Langfuse Tracing Service for MANOE
+Provides observability for agent calls, token usage, and latency tracking.
 """
 
-import logging
 import os
-from contextlib import contextmanager
+import time
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 from functools import wraps
-from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
-
-# Check if Langfuse is available
 try:
     from langfuse import Langfuse
-    from langfuse.decorators import observe
+    from langfuse.decorators import langfuse_context, observe
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False
-    logger.warning("[Tracing] langfuse package not installed. Tracing disabled.")
+    Langfuse = None
+    langfuse_context = None
+    observe = None
+
+
+@dataclass
+class TraceMetadata:
+    """Metadata for a trace span."""
+    run_id: str
+    phase: str
+    agent_name: Optional[str] = None
+    model: Optional[str] = None
+    provider: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    latency_ms: float = 0
+    success: bool = True
+    error: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class TracingService:
     """
-    Singleton service for Langfuse tracing integration.
-
+    Service for tracing agent calls and orchestration steps using Langfuse.
+    
     Provides:
-    - Trace creation for generation runs
-    - Span tracking for agent calls
-    - LLM call logging with token usage
+    - Trace trees for full generation runs
+    - Span tracking for individual agent calls
+    - Token usage and latency metrics
     - Error tracking and debugging
+    
+    Falls back to no-op if Langfuse is not configured.
     """
-
-    _instance: Optional["TracingService"] = None
-    _initialized: bool = False
-
-    def __new__(cls) -> "TracingService":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __init__(self) -> None:
-        if self._initialized:
-            return
-
-        self._client: Optional[Any] = None
-        self._enabled: bool = False
-
-        # Check environment variables
-        host = os.getenv("LANGFUSE_HOST", "")
-        public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
-        secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
-
+    
+    def __init__(self):
+        self._client: Optional[Langfuse] = None
+        self._enabled = False
+        self._traces: Dict[str, Any] = {}  # run_id -> trace
+        
+    def initialize(
+        self,
+        public_key: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        host: Optional[str] = None,
+    ) -> bool:
+        """
+        Initialize Langfuse client.
+        
+        Args:
+            public_key: Langfuse public key (or LANGFUSE_PUBLIC_KEY env var)
+            secret_key: Langfuse secret key (or LANGFUSE_SECRET_KEY env var)
+            host: Langfuse host URL (or LANGFUSE_HOST env var)
+            
+        Returns:
+            True if initialization successful, False otherwise
+        """
         if not LANGFUSE_AVAILABLE:
-            logger.info("[Tracing] Langfuse package not available. Tracing disabled.")
-            self._initialized = True
-            return
-
-        if not all([host, public_key, secret_key]):
-            missing = []
-            if not host:
-                missing.append("LANGFUSE_HOST")
-            if not public_key:
-                missing.append("LANGFUSE_PUBLIC_KEY")
-            if not secret_key:
-                missing.append("LANGFUSE_SECRET_KEY")
-            logger.warning(f"[Tracing] Missing environment variables: {', '.join(missing)}. Tracing disabled.")
-            self._initialized = True
-            return
-
+            print("Langfuse not installed. Tracing disabled.")
+            return False
+            
+        public_key = public_key or os.getenv("LANGFUSE_PUBLIC_KEY")
+        secret_key = secret_key or os.getenv("LANGFUSE_SECRET_KEY")
+        host = host or os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+        
+        if not public_key or not secret_key:
+            print("Langfuse keys not configured. Tracing disabled.")
+            return False
+            
         try:
             self._client = Langfuse(
-                host=host,
                 public_key=public_key,
                 secret_key=secret_key,
+                host=host,
             )
             self._enabled = True
-            logger.info(f"[Tracing] Langfuse initialized successfully. Host: {host}")
+            print(f"Langfuse tracing initialized. Host: {host}")
+            return True
         except Exception as e:
-            logger.error(f"[Tracing] Failed to initialize Langfuse: {e}")
-
-        self._initialized = True
-
+            print(f"Failed to initialize Langfuse: {e}")
+            return False
+    
     @property
     def enabled(self) -> bool:
         """Check if tracing is enabled."""
         return self._enabled and self._client is not None
-
-    @property
-    def client(self) -> Optional[Any]:
-        """Get the Langfuse client."""
-        return self._client
-
-    def create_trace(
+    
+    def start_trace(
         self,
-        name: str,
         run_id: str,
-        user_id: Optional[str] = None,
+        name: str = "generation",
         metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[list] = None,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> Optional[Any]:
         """
-        Create a new trace for a generation run.
-
+        Start a new trace for a generation run.
+        
         Args:
-            name: Name of the trace (e.g., "generation_run")
-            run_id: Unique identifier for the run
-            user_id: Optional user identifier
-            metadata: Optional metadata dict
-            tags: Optional list of tags
-
+            run_id: Unique identifier for the generation run
+            name: Name of the trace
+            metadata: Additional metadata to attach
+            user_id: User identifier
+            session_id: Session identifier
+            
         Returns:
-            Langfuse trace object or None if tracing disabled
+            Trace object or None if tracing disabled
         """
         if not self.enabled:
             return None
-
+            
         try:
             trace = self._client.trace(
-                name=name,
                 id=run_id,
-                user_id=user_id,
+                name=name,
                 metadata=metadata or {},
-                tags=tags or [],
+                user_id=user_id,
+                session_id=session_id,
             )
-            logger.debug(f"[Tracing] Created trace: {name} (run_id={run_id})")
+            self._traces[run_id] = trace
             return trace
         except Exception as e:
-            logger.error(f"[Tracing] Failed to create trace: {e}")
+            print(f"Failed to start trace: {e}")
             return None
-
-    def create_span(
+    
+    def get_trace(self, run_id: str) -> Optional[Any]:
+        """Get an existing trace by run_id."""
+        return self._traces.get(run_id)
+    
+    def end_trace(
         self,
-        trace_id: str,
-        name: str,
+        run_id: str,
+        output: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        input_data: Optional[Any] = None,
-    ) -> Optional[Any]:
-        """
-        Create a span within a trace.
-
-        Args:
-            trace_id: ID of the parent trace
-            name: Name of the span (e.g., "writer_agent")
-            metadata: Optional metadata dict
-            input_data: Optional input data
-
-        Returns:
-            Langfuse span object or None if tracing disabled
-        """
-        if not self.enabled:
-            return None
-
-        try:
-            span = self._client.span(
-                trace_id=trace_id,
-                name=name,
-                metadata=metadata or {},
-                input=input_data,
-            )
-            logger.debug(f"[Tracing] Created span: {name} (trace_id={trace_id})")
-            return span
-        except Exception as e:
-            logger.error(f"[Tracing] Failed to create span: {e}")
-            return None
-
-    def log_generation(
-        self,
-        trace_id: str,
-        name: str,
-        model: str,
-        prompt: Any,
-        completion: Any,
-        usage: Optional[Dict[str, int]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Any]:
-        """
-        Log an LLM generation call.
-
-        Args:
-            trace_id: ID of the parent trace
-            name: Name of the generation (e.g., "writer_draft")
-            model: Model name (e.g., "gpt-4o")
-            prompt: Input prompt/messages
-            completion: Model output
-            usage: Token usage dict (prompt_tokens, completion_tokens, total_tokens)
-            metadata: Optional metadata dict
-
-        Returns:
-            Langfuse generation object or None if tracing disabled
-        """
-        if not self.enabled:
-            return None
-
-        try:
-            generation = self._client.generation(
-                trace_id=trace_id,
-                name=name,
-                model=model,
-                input=prompt,
-                output=completion,
-                usage=usage,
-                metadata=metadata or {},
-            )
-            logger.debug(f"[Tracing] Logged generation: {name} (model={model})")
-            return generation
-        except Exception as e:
-            logger.error(f"[Tracing] Failed to log generation: {e}")
-            return None
-
-    def end_span(
-        self,
-        span: Any,
-        output: Optional[Any] = None,
-        status: str = "success",
-        error: Optional[str] = None,
     ) -> None:
         """
-        End a span with output and status.
-
+        End a trace and flush to Langfuse.
+        
         Args:
-            span: Langfuse span object
-            output: Output data
-            status: Status string ("success" or "error")
-            error: Error message if status is "error"
+            run_id: Run identifier
+            output: Final output of the generation
+            metadata: Additional metadata to attach
         """
-        if not self.enabled or span is None:
+        if not self.enabled:
             return
-
+            
+        trace = self._traces.pop(run_id, None)
+        if trace:
+            try:
+                trace.update(
+                    output=output,
+                    metadata=metadata,
+                )
+                self._client.flush()
+            except Exception as e:
+                print(f"Failed to end trace: {e}")
+    
+    @asynccontextmanager
+    async def span(
+        self,
+        run_id: str,
+        name: str,
+        span_type: str = "span",
+        input_data: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        Context manager for creating a span within a trace.
+        
+        Args:
+            run_id: Run identifier
+            name: Name of the span
+            span_type: Type of span (span, generation, event)
+            input_data: Input data for the span
+            metadata: Additional metadata
+            
+        Yields:
+            Span object or None if tracing disabled
+        """
+        if not self.enabled:
+            yield None
+            return
+            
+        trace = self._traces.get(run_id)
+        if not trace:
+            yield None
+            return
+            
+        start_time = time.time()
+        span = None
+        
         try:
-            span.end(
+            span = trace.span(
+                name=name,
+                input=input_data,
+                metadata=metadata or {},
+            )
+            yield span
+        except Exception as e:
+            if span:
+                span.update(
+                    level="ERROR",
+                    status_message=str(e),
+                )
+            raise
+        finally:
+            if span:
+                latency_ms = (time.time() - start_time) * 1000
+                span.update(
+                    metadata={
+                        **(metadata or {}),
+                        "latency_ms": latency_ms,
+                    }
+                )
+    
+    def log_generation(
+        self,
+        run_id: str,
+        name: str,
+        model: str,
+        provider: str,
+        input_messages: List[Dict[str, str]],
+        output: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        latency_ms: float = 0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Log an LLM generation call.
+        
+        Args:
+            run_id: Run identifier
+            name: Name of the generation (e.g., agent name)
+            model: Model used
+            provider: LLM provider
+            input_messages: Input messages sent to the model
+            output: Model output
+            input_tokens: Number of input tokens
+            output_tokens: Number of output tokens
+            latency_ms: Latency in milliseconds
+            metadata: Additional metadata
+        """
+        if not self.enabled:
+            return
+            
+        trace = self._traces.get(run_id)
+        if not trace:
+            return
+            
+        try:
+            trace.generation(
+                name=name,
+                model=model,
+                input=input_messages,
                 output=output,
-                level="ERROR" if status == "error" else "DEFAULT",
-                status_message=error if error else None,
+                usage={
+                    "input": input_tokens,
+                    "output": output_tokens,
+                    "total": input_tokens + output_tokens,
+                },
+                metadata={
+                    "provider": provider,
+                    "latency_ms": latency_ms,
+                    **(metadata or {}),
+                },
             )
         except Exception as e:
-            logger.error(f"[Tracing] Failed to end span: {e}")
-
+            print(f"Failed to log generation: {e}")
+    
+    def log_event(
+        self,
+        run_id: str,
+        name: str,
+        level: str = "DEFAULT",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Log an event within a trace.
+        
+        Args:
+            run_id: Run identifier
+            name: Event name
+            level: Event level (DEFAULT, DEBUG, WARNING, ERROR)
+            metadata: Additional metadata
+        """
+        if not self.enabled:
+            return
+            
+        trace = self._traces.get(run_id)
+        if not trace:
+            return
+            
+        try:
+            trace.event(
+                name=name,
+                level=level,
+                metadata=metadata or {},
+            )
+        except Exception as e:
+            print(f"Failed to log event: {e}")
+    
+    def log_error(
+        self,
+        run_id: str,
+        error: str,
+        phase: Optional[str] = None,
+        agent: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Log an error within a trace.
+        
+        Args:
+            run_id: Run identifier
+            error: Error message
+            phase: Phase where error occurred
+            agent: Agent that caused the error
+            metadata: Additional metadata
+        """
+        self.log_event(
+            run_id=run_id,
+            name=f"error_{phase or 'unknown'}_{agent or 'unknown'}",
+            level="ERROR",
+            metadata={
+                "error": error,
+                "phase": phase,
+                "agent": agent,
+                **(metadata or {}),
+            },
+        )
+    
     def flush(self) -> None:
         """Flush all pending traces to Langfuse."""
-        if not self.enabled:
-            return
-
-        try:
-            self._client.flush()
-            logger.debug("[Tracing] Flushed traces to Langfuse")
-        except Exception as e:
-            logger.error(f"[Tracing] Failed to flush traces: {e}")
-
+        if self.enabled and self._client:
+            try:
+                self._client.flush()
+            except Exception as e:
+                print(f"Failed to flush traces: {e}")
+    
     def shutdown(self) -> None:
         """Shutdown the tracing service."""
-        if not self.enabled:
-            return
-
-        try:
-            self._client.shutdown()
-            logger.info("[Tracing] Langfuse client shutdown")
-        except Exception as e:
-            logger.error(f"[Tracing] Failed to shutdown: {e}")
-
-
-# Global singleton instance
-_tracing_service: Optional[TracingService] = None
+        self.flush()
+        if self._client:
+            try:
+                self._client.shutdown()
+            except Exception:
+                pass
+        self._client = None
+        self._enabled = False
+        self._traces.clear()
 
 
-def get_tracing_service() -> TracingService:
-    """Get the global tracing service instance."""
-    global _tracing_service
-    if _tracing_service is None:
-        _tracing_service = TracingService()
-    return _tracing_service
+# Global tracing service instance
+tracing_service = TracingService()
 
 
-@contextmanager
-def trace_run(
-    run_id: str,
-    name: str = "generation_run",
-    user_id: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-):
+def trace_agent_call(agent_name: str, phase: str):
     """
-    Context manager for tracing a generation run.
-
+    Decorator for tracing agent calls.
+    
     Usage:
-        with trace_run(run_id="abc123", name="story_generation") as trace:
-            # ... generation code ...
-            pass
-    """
-    service = get_tracing_service()
-    trace = service.create_trace(
-        name=name,
-        run_id=run_id,
-        user_id=user_id,
-        metadata=metadata,
-    )
-    try:
-        yield trace
-    finally:
-        service.flush()
-
-
-@contextmanager
-def trace_agent(
-    trace_id: str,
-    agent_name: str,
-    input_data: Optional[Any] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-):
-    """
-    Context manager for tracing an agent call.
-
-    Usage:
-        with trace_agent(trace_id, "Writer", input_data=prompt) as span:
-            result = agent.run(prompt)
-            span.output = result
-    """
-    service = get_tracing_service()
-    span = service.create_span(
-        trace_id=trace_id,
-        name=agent_name,
-        metadata=metadata,
-        input_data=input_data,
-    )
-
-    class SpanContext:
-        def __init__(self, span_obj):
-            self._span = span_obj
-            self.output = None
-            self.error = None
-
-    ctx = SpanContext(span)
-    try:
-        yield ctx
-        service.end_span(span, output=ctx.output, status="success")
-    except Exception as e:
-        service.end_span(span, output=ctx.output, status="error", error=str(e))
-        raise
-
-
-def traced(name: Optional[str] = None):
-    """
-    Decorator for tracing a function.
-
-    Usage:
-        @traced("my_function")
-        def my_function(arg1, arg2):
-            return result
+        @trace_agent_call("Writer", "drafting")
+        async def run_drafting_phase(self, ...):
+            ...
     """
     def decorator(func):
         @wraps(func)
-        def wrapper(*args, **kwargs):
-            if LANGFUSE_AVAILABLE and get_tracing_service().enabled:
-                # Use langfuse's observe decorator if available
-                return observe(name=name or func.__name__)(func)(*args, **kwargs)
-            return func(*args, **kwargs)
+        async def wrapper(self, *args, **kwargs):
+            run_id = kwargs.get("run_id") or getattr(self, "_current_run_id", None)
+            
+            if not run_id or not tracing_service.enabled:
+                return await func(self, *args, **kwargs)
+            
+            start_time = time.time()
+            
+            async with tracing_service.span(
+                run_id=run_id,
+                name=f"{phase}_{agent_name}",
+                input_data={"args": str(args)[:500], "kwargs_keys": list(kwargs.keys())},
+                metadata={"agent": agent_name, "phase": phase},
+            ):
+                try:
+                    result = await func(self, *args, **kwargs)
+                    latency_ms = (time.time() - start_time) * 1000
+                    
+                    tracing_service.log_event(
+                        run_id=run_id,
+                        name=f"{agent_name}_complete",
+                        metadata={
+                            "phase": phase,
+                            "latency_ms": latency_ms,
+                            "success": True,
+                        },
+                    )
+                    
+                    return result
+                except Exception as e:
+                    tracing_service.log_error(
+                        run_id=run_id,
+                        error=str(e),
+                        phase=phase,
+                        agent=agent_name,
+                    )
+                    raise
+        
         return wrapper
     return decorator

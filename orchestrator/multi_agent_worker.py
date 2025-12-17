@@ -35,11 +35,11 @@ from services.security import (
     MAX_THEMES_LENGTH,
     MAX_TONE_STYLE_LENGTH,
     check_run_ownership,
-    check_run_ownership_async,
     get_current_user,
     run_ownership,
 )
 from services.supabase_persistence import SupabasePersistenceService
+from services.tracing import tracing_service
 
 load_dotenv()
 
@@ -583,6 +583,9 @@ async def startup():
     # Initialize Redis in ownership store for persistence across restarts
     if worker.redis_streams and worker.redis_streams._client:
         run_ownership.set_redis(worker.redis_streams._client)
+    # Initialize Langfuse tracing (reads from LANGFUSE_* env vars)
+    if tracing_service.initialize():
+        print("Langfuse tracing enabled")
 
 
 @app.on_event("shutdown")
@@ -620,11 +623,11 @@ async def generate(gen_request: GenerateRequest, request: Request):
     if not research_context:
         try:
             _, rms, supa = await get_research_services()
-            
+
             # Build query text from project parameters
             themes_list = [t.strip() for t in gen_request.themes.split(",") if t.strip()] if gen_request.themes else []
             query_text = f"{gen_request.seed_idea} | {gen_request.target_audience or ''} | {','.join(themes_list)} | {gen_request.moral_compass}"
-            
+
             # Search for similar research in Qdrant
             similar_results = await rms.search_similar_research(
                 query_text=query_text,
@@ -632,7 +635,7 @@ async def generate(gen_request: GenerateRequest, request: Request):
                 limit=1,
                 score_threshold=0.7,  # Only use highly relevant research
             )
-            
+
             if similar_results:
                 research_id = similar_results[0].get("payload", {}).get("research_id")
                 if research_id:
@@ -734,14 +737,14 @@ async def stream_events(run_id: str, request: Request):
 
     # Authenticate user
     user_id, _ = await get_current_user(request)
-    
+
     # Check if run is in memory (active) - use sync check first for speed
     owner = run_ownership.get_owner(run_id)
-    
+
     if owner is None:
         # Run not in memory - check Redis for persisted ownership (survives redeploy)
         owner = await run_ownership.get_owner_async(run_id)
-    
+
     if owner is None:
         # No ownership found in memory or Redis - check if Redis stream exists
         # This handles the case where ownership wasn't persisted but events were
@@ -750,24 +753,24 @@ async def stream_events(run_id: str, request: Request):
             stream_length = stream_info.get("length", 0)
         except Exception:
             stream_length = 0
-        
+
         if stream_length > 0:
             # Redis stream exists - replay events (run was interrupted but events are preserved)
             # For legacy runs without ownership in Redis, we replay events but mark as legacy
             # This is safe because the user is authenticated and the stream exists
             is_legacy_run = True
-            
+
             # Replay events from Redis stream
             async def replay_event_generator():
                 import datetime
                 existing = await worker.redis_streams.get_events(run_id, start_id="0", count=10000)
                 has_terminal_event = False
-                
+
                 for event in existing:
                     yield f"data: {json.dumps(event)}\n\n"
                     if event.get("type") in ["generation_complete", "generation_error"]:
                         has_terminal_event = True
-                
+
                 # If no terminal event, add an interrupted event
                 if not has_terminal_event:
                     interrupted_event = {
@@ -782,7 +785,7 @@ async def stream_events(run_id: str, request: Request):
                         }
                     }
                     yield f"data: {json.dumps(interrupted_event)}\n\n"
-            
+
             return StreamingResponse(
                 replay_event_generator(),
                 media_type="text/event-stream",
@@ -792,7 +795,7 @@ async def stream_events(run_id: str, request: Request):
                     "X-Accel-Buffering": "no",
                 }
             )
-        
+
         # No Redis stream - check Supabase for artifacts (fallback)
         async def interrupted_event_generator():
             import datetime
@@ -800,7 +803,7 @@ async def stream_events(run_id: str, request: Request):
             can_resume = False
             resume_from_phase = None
             artifacts_count = 0
-            
+
             if worker.persistence_service and worker.persistence_service.is_connected:
                 try:
                     artifacts = await worker.persistence_service.get_run_artifacts(run_id)
@@ -820,7 +823,7 @@ async def stream_events(run_id: str, request: Request):
                         error_msg = f"Run interrupted. Completed {len(completed_phases)} phases. Can resume from {resume_from_phase}."
                 except Exception as e:
                     error_msg = f"Error checking run state: {str(e)}"
-            
+
             event = {
                 "type": "generation_error",
                 "id": f"interrupted-{run_id}",
@@ -834,7 +837,7 @@ async def stream_events(run_id: str, request: Request):
                 }
             }
             yield f"data: {json.dumps(event)}\n\n"
-        
+
         return StreamingResponse(
             interrupted_event_generator(),
             media_type="text/event-stream",
@@ -844,7 +847,7 @@ async def stream_events(run_id: str, request: Request):
                 "X-Accel-Buffering": "no",
             }
         )
-    
+
     # Verify ownership for runs with known owner
     if owner != user_id:
         raise HTTPException(
@@ -1052,9 +1055,61 @@ async def get_run_state(run_id: str, request: Request):
     if not worker:
         raise HTTPException(status_code=503, detail="Worker not initialized")
 
-    # Authenticate user and verify ownership (async to check Redis for persisted ownership)
+    # Authenticate user
     user_id, _ = await get_current_user(request)
-    await check_run_ownership_async(run_id, user_id)
+
+    # Track if this is a legacy run without ownership verification
+    is_legacy_run_without_ownership = False
+
+    # Try to verify ownership via Redis first
+    owner = await run_ownership.get_owner_async(run_id)
+    if owner is not None:
+        # Owner found in Redis - verify it matches
+        if owner != user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have permission to access this run",
+            )
+    else:
+        # Owner not in Redis - check via Supabase (legacy run fallback)
+        if worker.persistence_service and worker.persistence_service.is_connected:
+            supabase_owner = await worker.persistence_service.get_run_owner_via_project(run_id)
+            if supabase_owner is None:
+                # No ownership in Redis or Supabase - check if Redis stream exists
+                # This handles legacy runs created before ownership persistence
+                redis_stream_key = f"manoe:events:{run_id}"
+                try:
+                    stream_exists = await worker.redis_client.exists(redis_stream_key)
+                    if stream_exists:
+                        # Legacy run with events but no ownership data
+                        # We can't verify ownership, but we can return a limited response
+                        is_legacy_run_without_ownership = True
+                        print(f"[get_run_state] Legacy run {run_id} - events exist but no ownership data")
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Run not found",
+                        )
+                except Exception as e:
+                    print(f"[get_run_state] Error checking Redis stream: {e}")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Run not found or access denied",
+                    )
+            elif supabase_owner != user_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You don't have permission to access this run",
+                )
+            else:
+                # Self-healing: store ownership in Redis for future requests
+                await run_ownership.register_run_async(run_id, user_id)
+                print(f"[get_run_state] Restored ownership for legacy run {run_id} -> {user_id}")
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Run not found or access denied",
+            )
 
     # Determine in-memory status
     in_memory_status = "unknown"
@@ -1075,15 +1130,15 @@ async def get_run_state(run_id: str, request: Request):
     artifacts = {}
     phase_statuses = {}
     last_completed_phase = None
-    
+
     if worker.persistence_service and worker.persistence_service.is_connected:
         # Get all artifacts for this run
         artifacts = await worker.persistence_service.get_run_artifacts(run_id)
-        
+
         # Extract phase statuses from artifacts
-        phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", 
+        phase_order = ["genesis", "characters", "narrator_design", "worldbuilding",
                        "outlining", "motif_layer", "advanced_planning", "drafting", "polish"]
-        
+
         for phase in phase_order:
             if phase in artifacts:
                 phase_artifacts = artifacts[phase]
@@ -1126,13 +1181,17 @@ async def get_run_state(run_id: str, request: Request):
             status = "completed"
         else:
             status = "interrupted"
+    elif is_legacy_run_without_ownership:
+        # Legacy run with events in Redis but no artifacts or ownership data
+        status = "legacy_interrupted"
     else:
         status = "not_found"
 
     # Determine if resume is possible
+    # Legacy runs without ownership cannot be resumed (no artifacts to resume from)
     can_resume = status == "interrupted" and last_completed_phase is not None
 
-    return {
+    response = {
         "run_id": run_id,
         "status": status,
         "in_memory_status": in_memory_status,
@@ -1143,10 +1202,16 @@ async def get_run_state(run_id: str, request: Request):
         "resume_from_phase": _get_next_phase(last_completed_phase) if can_resume else None,
     }
 
+    # Add message for legacy runs explaining why resume is not available
+    if is_legacy_run_without_ownership:
+        response["message"] = "This is a legacy run created before state persistence was implemented. Events can be viewed but resume is not available."
+
+    return response
+
 
 def _get_next_phase(current_phase: str) -> str:
     """Get the next phase after the current one."""
-    phase_order = ["genesis", "characters", "narrator_design", "worldbuilding", 
+    phase_order = ["genesis", "characters", "narrator_design", "worldbuilding",
                    "outlining", "motif_layer", "advanced_planning", "drafting", "polish"]
     try:
         idx = phase_order.index(current_phase)
@@ -1245,12 +1310,12 @@ async def _run_research_job(
 ):
     """Background task to run research and store results."""
     global research_jobs
-    
+
     try:
         research_jobs[job_id]["status"] = "running"
-        
+
         rs, rms, supa = await get_research_services()
-        
+
         # Conduct the actual research (this is the slow part)
         result = await rs.conduct_research(
             provider=research_request.provider,
@@ -1261,12 +1326,12 @@ async def _run_research_job(
             moral_compass=research_request.moral_compass,
             model=research_request.model,
         )
-        
+
         if not result.get("success"):
             research_jobs[job_id]["status"] = "failed"
             research_jobs[job_id]["error"] = result.get("error", "Research failed")
             return
-        
+
         # Store in Supabase
         research_id = None
         try:
@@ -1289,7 +1354,7 @@ async def _run_research_job(
             )
         except Exception as e:
             print(f"Error storing research in Supabase: {e}")
-        
+
         # Store in Qdrant if we have a valid research_id
         if research_id:
             try:
@@ -1306,7 +1371,7 @@ async def _run_research_job(
                 )
             except Exception as e:
                 print(f"Error storing research in Qdrant: {e}")
-        
+
         # Update job with results
         research_jobs[job_id].update({
             "status": "completed",
@@ -1320,7 +1385,7 @@ async def _run_research_job(
             "web_searches": result.get("web_searches"),
             "usage": result.get("usage"),
         })
-        
+
     except Exception as e:
         print(f"Research job {job_id} failed: {e}")
         research_jobs[job_id]["status"] = "failed"
@@ -1429,7 +1494,7 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
         "user_id": user_id,
         "created_at": asyncio.get_event_loop().time(),
     }
-    
+
     # Start background task
     asyncio.create_task(_run_research_job(
         job_id=job_id,
@@ -1438,7 +1503,7 @@ async def conduct_research(research_request: ResearchRequest, request: Request):
         themes_list=themes_list,
         query_text=query_text,
     ))
-    
+
     # Return immediately with job_id
     return ResearchResponse(
         success=True,
@@ -1455,36 +1520,36 @@ async def get_research_job(job_id: str, request: Request):
     Poll this endpoint until status is 'completed' or 'failed'.
     """
     user_id, _ = await get_current_user(request)
-    
+
     if job_id not in research_jobs:
         return ResearchResponse(
             success=False,
             error="Job not found",
         )
-    
+
     job = research_jobs[job_id]
-    
+
     # Verify ownership
     if job.get("user_id") != user_id:
         return ResearchResponse(
             success=False,
             error="Job not found",
         )
-    
+
     if job["status"] == "pending":
         return ResearchResponse(
             success=True,
             status="pending",
             job_id=job_id,
         )
-    
+
     if job["status"] == "running":
         return ResearchResponse(
             success=True,
             status="running",
             job_id=job_id,
         )
-    
+
     if job["status"] == "failed":
         return ResearchResponse(
             success=False,
@@ -1492,7 +1557,7 @@ async def get_research_job(job_id: str, request: Request):
             job_id=job_id,
             error=job.get("error", "Research failed"),
         )
-    
+
     # Completed - return full results
     return ResearchResponse(
         success=True,
