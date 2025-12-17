@@ -1055,6 +1055,9 @@ async def get_run_state(run_id: str, request: Request):
     # Authenticate user
     user_id, _ = await get_current_user(request)
     
+    # Track if this is a legacy run without ownership verification
+    is_legacy_run_without_ownership = False
+    
     # Try to verify ownership via Redis first
     owner = await run_ownership.get_owner_async(run_id)
     if owner is not None:
@@ -1069,18 +1072,36 @@ async def get_run_state(run_id: str, request: Request):
         if worker.persistence_service and worker.persistence_service.is_connected:
             supabase_owner = await worker.persistence_service.get_run_owner_via_project(run_id)
             if supabase_owner is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Run not found or access denied",
-                )
-            if supabase_owner != user_id:
+                # No ownership in Redis or Supabase - check if Redis stream exists
+                # This handles legacy runs created before ownership persistence
+                redis_stream_key = f"manoe:events:{run_id}"
+                try:
+                    stream_exists = await worker.redis_client.exists(redis_stream_key)
+                    if stream_exists:
+                        # Legacy run with events but no ownership data
+                        # We can't verify ownership, but we can return a limited response
+                        is_legacy_run_without_ownership = True
+                        print(f"[get_run_state] Legacy run {run_id} - events exist but no ownership data")
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Run not found",
+                        )
+                except Exception as e:
+                    print(f"[get_run_state] Error checking Redis stream: {e}")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Run not found or access denied",
+                    )
+            elif supabase_owner != user_id:
                 raise HTTPException(
                     status_code=403,
                     detail="You don't have permission to access this run",
                 )
-            # Self-healing: store ownership in Redis for future requests
-            await run_ownership.register_run_async(run_id, user_id)
-            print(f"[get_run_state] Restored ownership for legacy run {run_id} -> {user_id}")
+            else:
+                # Self-healing: store ownership in Redis for future requests
+                await run_ownership.register_run_async(run_id, user_id)
+                print(f"[get_run_state] Restored ownership for legacy run {run_id} -> {user_id}")
         else:
             raise HTTPException(
                 status_code=404,
@@ -1157,13 +1178,17 @@ async def get_run_state(run_id: str, request: Request):
             status = "completed"
         else:
             status = "interrupted"
+    elif is_legacy_run_without_ownership:
+        # Legacy run with events in Redis but no artifacts or ownership data
+        status = "legacy_interrupted"
     else:
         status = "not_found"
 
     # Determine if resume is possible
+    # Legacy runs without ownership cannot be resumed (no artifacts to resume from)
     can_resume = status == "interrupted" and last_completed_phase is not None
 
-    return {
+    response = {
         "run_id": run_id,
         "status": status,
         "in_memory_status": in_memory_status,
@@ -1173,6 +1198,12 @@ async def get_run_state(run_id: str, request: Request):
         "can_resume": can_resume,
         "resume_from_phase": _get_next_phase(last_completed_phase) if can_resume else None,
     }
+    
+    # Add message for legacy runs explaining why resume is not available
+    if is_legacy_run_without_ownership:
+        response["message"] = "This is a legacy run created before state persistence was implemented. Events can be viewed but resume is not available."
+    
+    return response
 
 
 def _get_next_phase(current_phase: str) -> str:
