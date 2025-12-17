@@ -20,6 +20,8 @@ import { MemoryController } from "./controllers/MemoryController";
 import { ModelsController } from "./controllers/ModelsController";
 import { HealthController } from "./controllers/HealthController";
 import { OrchestrationController } from "./controllers/OrchestrationController";
+import { StateController } from "./controllers/StateController";
+import { TracesController } from "./controllers/TracesController";
 
 const rootDir = __dirname;
 
@@ -38,6 +40,8 @@ const rootDir = __dirname;
     ],
     "/orchestrate": [
       OrchestrationController,
+      StateController,
+      TracesController,
     ],
   },
   swagger: [

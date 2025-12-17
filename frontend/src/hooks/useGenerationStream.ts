@@ -107,6 +107,14 @@ export function useGenerationStream({
             if (data.type === 'agent_complete') {
               setActiveAgent(null);
             }
+            
+            // Update active agent from cinematic events
+            if (data.type === 'agent_thought' || data.type === 'agent_dialogue') {
+              const agentData = data.data as any;
+              if (agentData.agent || agentData.from) {
+                setActiveAgent(agentData.agent || agentData.from);
+              }
+            }
 
             // Collect new developments (raw facts from Writer)
             if (data.type === 'new_developments_collected') {
@@ -146,6 +154,16 @@ export function useGenerationStream({
               const errorMsg = data.data.error as string || 'Unknown error';
               setError(errorMsg);
               onError?.(errorMsg);
+            }
+
+            // Handle cinematic events
+            if (
+              data.type === "agent_thought" ||
+              data.type === "agent_dialogue" ||
+              data.type === "agent_conflict" ||
+              data.type === "agent_consensus"
+            ) {
+              // These are handled specially in CinematicAgentPanel
             }
 
             // Store message
