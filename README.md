@@ -702,9 +702,6 @@ manoe/
 │   │   │   └── AgentModels.ts   # Agent types and phase configs
 │   │   └── Server.ts            # ts.ed server configuration
 │   └── package.json
-├── _legacy/                     # Archived legacy code (reference only)
-│   ├── orchestrator/            # Python/FastAPI orchestrator (replaced by api-gateway)
-│   └── backend/                 # Original Express.js backend
 ├── supabase/                    # Supabase configuration and migrations
 ├── docs/                        # Documentation
 ├── docker-compose.yml           # Docker Compose for local development
