@@ -10,21 +10,22 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 
 // Agent node colors (matching existing AgentChat colors, avoiding purple per user preference)
+// Using /90 opacity to prevent edges from showing through nodes
 const AGENT_COLORS: Record<string, { bg: string; border: string; text: string; glow: string }> = {
   Writer: {
-    bg: 'bg-emerald-900/50',
+    bg: 'bg-emerald-900/90',
     border: 'border-emerald-500',
     text: 'text-emerald-400',
     glow: 'shadow-emerald-500/30',
   },
   Critic: {
-    bg: 'bg-amber-900/50',
+    bg: 'bg-amber-900/90',
     border: 'border-amber-500',
     text: 'text-amber-400',
     glow: 'shadow-amber-500/30',
   },
   Archivist: {
-    bg: 'bg-cyan-900/50',
+    bg: 'bg-cyan-900/90',
     border: 'border-cyan-500',
     text: 'text-cyan-400',
     glow: 'shadow-cyan-500/30',
@@ -44,7 +45,12 @@ function AgentNode({ data }: NodeProps<{ label: string; isActive: boolean }>) {
         ${isActive ? `shadow-lg ${colors.glow} scale-110` : 'opacity-70'}
       `}
     >
-      <Handle type="target" position={Position.Top} className="!bg-slate-500" />
+      {/* Top/Bottom handles for vertical connections */}
+      <Handle type="target" position={Position.Top} id="top" className="!bg-slate-500" />
+      <Handle type="source" position={Position.Bottom} id="bottom" className="!bg-slate-500" />
+      {/* Left/Right handles for routing return edges around nodes */}
+      <Handle type="target" position={Position.Left} id="left" className="!bg-slate-500" />
+      <Handle type="source" position={Position.Right} id="right" className="!bg-slate-500" />
       <div className="flex items-center gap-2">
         {isActive && (
           <span className="relative flex h-2 w-2">
@@ -54,7 +60,6 @@ function AgentNode({ data }: NodeProps<{ label: string; isActive: boolean }>) {
         )}
         <span className={`font-semibold ${colors.text}`}>{data.label}</span>
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-slate-500" />
     </div>
   );
 }
@@ -87,18 +92,24 @@ const createNodes = (activeAgent: string | null): Node[] => [
 ];
 
 // Edges between agents
+// Using explicit handles and smoothstep routing to prevent edges from overlapping nodes
 const initialEdges: Edge[] = [
   {
     id: 'writer-critic',
     source: 'writer',
+    sourceHandle: 'bottom',
     target: 'critic',
+    targetHandle: 'top',
     animated: true,
     style: { stroke: '#10b981' },
+    type: 'smoothstep',
   },
   {
     id: 'critic-writer',
     source: 'critic',
+    sourceHandle: 'left',
     target: 'writer',
+    targetHandle: 'left',
     animated: true,
     style: { stroke: '#f59e0b' },
     type: 'smoothstep',
@@ -106,9 +117,12 @@ const initialEdges: Edge[] = [
   {
     id: 'writer-archivist',
     source: 'writer',
+    sourceHandle: 'right',
     target: 'archivist',
+    targetHandle: 'left',
     animated: false,
     style: { stroke: '#06b6d4', strokeDasharray: '5,5' },
+    type: 'smoothstep',
     label: 'async',
     labelStyle: { fill: '#94a3b8', fontSize: 10 },
   },
