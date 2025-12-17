@@ -75,13 +75,34 @@ export class LLMProviderService {
   }
 
   /**
+   * Common placeholder keys that should be rejected
+   */
+  private static readonly PLACEHOLDER_KEYS = [
+    "test-key",
+    "your-api-key",
+    "api-key-here",
+    "placeholder",
+    "xxx",
+  ];
+
+  /**
    * Get API key with fallback to environment variable
    * BYOK (Bring Your Own Key) takes precedence over env fallback
+   * 
+   * Security: API keys are never logged or included in error messages
    */
   private getApiKey(provider: LLMProvider, requestApiKey?: string): string {
-    // If request provides a valid API key, use it (BYOK)
-    if (requestApiKey && requestApiKey !== "test-key" && requestApiKey.length > 10) {
-      return requestApiKey;
+    // Trim and validate request API key (BYOK)
+    const trimmedKey = requestApiKey?.trim();
+    if (trimmedKey && trimmedKey.length > 10) {
+      // Reject common placeholder keys (case-insensitive)
+      const lowerKey = trimmedKey.toLowerCase();
+      const isPlaceholder = LLMProviderService.PLACEHOLDER_KEYS.some(
+        (placeholder) => lowerKey === placeholder || lowerKey.includes(placeholder)
+      );
+      if (!isPlaceholder) {
+        return trimmedKey;
+      }
     }
 
     // Fallback to environment variables
@@ -99,7 +120,9 @@ export class LLMProviderService {
       return envKey;
     }
 
-    throw new Error(`No API key provided for ${provider}. Either pass apiKey in request or set environment variable.`);
+    throw new Error(
+      `No API key provided for ${provider}. Either pass apiKey in request or set environment variable.`
+    );
   }
 
   /**
