@@ -18,9 +18,9 @@ flowchart TB
         SSE[SSE Client]
     end
 
-    subgraph Orchestrator["Orchestrator (Python + FastAPI)"]
-        API[REST API]
-        Worker[Multi-Agent Worker]
+    subgraph Gateway["API Gateway (TypeScript + ts.ed)"]
+        API[REST API + Swagger]
+        Orchestrator[StorytellerOrchestrator]
         
         subgraph Agents["AI Agents"]
             Genesis[Genesis Agent]
@@ -31,7 +31,7 @@ flowchart TB
             Editor[Editor Agent]
         end
         
-        ModelClient[Unified Model Client]
+        ModelClient[LLMProviderService]
     end
 
     subgraph Infrastructure["Infrastructure"]
@@ -310,18 +310,9 @@ manoe/
 │   │   │   └── AgentModels.ts   # Agent types and phase configs
 │   │   └── Server.ts            # ts.ed server configuration
 │   └── package.json
-├── orchestrator/                # Python/FastAPI AI Orchestrator (legacy)
-│   ├── services/
-│   │   ├── supabase_persistence.py  # Artifact storage
-│   │   ├── qdrant_memory.py         # Vector memory
-│   │   ├── redis_streams.py         # SSE event streaming
-│   │   ├── model_client.py          # Multi-provider LLM client
-│   │   ├── research_service.py      # Perplexity & OpenAI Deep Research integration
-│   │   ├── research_memory.py       # Research vector memory for "Eternal Memory"
-│   │   └── tracing.py               # Langfuse LLM observability integration
-│   ├── autogen_orchestrator.py      # Main orchestrator with phase functions
-│   ├── multi_agent_worker.py        # API endpoints and SSE streaming
-│   └── pyproject.toml
+├── _legacy/                     # Archived legacy code (reference only)
+│   ├── orchestrator/            # Python/FastAPI orchestrator (replaced by api-gateway)
+│   └── backend/                 # Original Express.js backend
 ├── supabase/                    # Supabase configuration and migrations
 ├── docs/                        # Documentation
 ├── docker-compose.yml           # Docker Compose for local development
@@ -411,14 +402,14 @@ cp .env.example .env
 npm run dev
 ```
 
-### Orchestrator
+### API Gateway (ts.ed)
 
 ```bash
-cd orchestrator
-poetry install
+cd api-gateway
+npm install
 cp .env.example .env
 # Configure environment variables
-poetry run python multi_agent_worker.py
+npm run dev
 ```
 
 ## Deployment
