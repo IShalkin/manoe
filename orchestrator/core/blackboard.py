@@ -684,11 +684,12 @@ class RunContext:
             return []
             
         try:
-            return await self.memory_service.search_characters(
+            result: List[Dict[str, Any]] = await self.memory_service.search_characters(
                 project_id=self.state.project_id,
                 query=query,
                 limit=limit,
             )
+            return result
         except Exception:
             return []
     
@@ -700,11 +701,12 @@ class RunContext:
             return {}
             
         try:
-            return await self.memory_service.search_worldbuilding(
+            result: Dict[str, Any] = await self.memory_service.search_worldbuilding(
                 project_id=self.state.project_id,
                 query=query,
                 limit=limit,
             )
+            return result
         except Exception:
             return {}
     
@@ -716,10 +718,11 @@ class RunContext:
             return []
             
         try:
-            return await self.memory_service.search_scenes(
+            result: List[Dict[str, Any]] = await self.memory_service.search_scenes(
                 project_id=self.state.project_id,
                 query=query,
                 limit=limit,
             )
+            return result
         except Exception:
             return []

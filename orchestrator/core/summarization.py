@@ -153,7 +153,7 @@ Provide an arc summary (5-7 sentences) that captures the essential narrative pro
             content=summary_text,
             source_type="scene",
             source_ids=[f"scene_{scene_number}"],
-            token_count=len(summary_text.split()) * 1.3,  # Rough token estimate
+            token_count=int(len(summary_text.split()) * 1.3),  # Rough token estimate
             metadata=metadata or {},
         )
         
@@ -194,7 +194,7 @@ Provide an arc summary (5-7 sentences) that captures the essential narrative pro
             content=summary_text,
             source_type="scenes_batch",
             source_ids=[f"scene_{i}" for i in range(start_scene, end_scene + 1)],
-            token_count=len(summary_text.split()) * 1.3,
+            token_count=int(len(summary_text.split()) * 1.3),
         )
         
         self.summaries[f"batch_{start_scene}_{end_scene}"] = summary
@@ -295,10 +295,13 @@ class ContextManager:
             ]
             batch_summaries = [s for s in batch_summaries if s is not None]
             
-            if batch_summaries:
+            # Filter out None values for type safety
+            valid_batch_summaries: List[Summary] = [s for s in batch_summaries if s is not None]
+            
+            if valid_batch_summaries:
                 # Create batch summary
                 batch_summary = await self.summarization_chain.summarize_batch(
-                    scene_summaries=batch_summaries,
+                    scene_summaries=valid_batch_summaries,
                     start_scene=start_scene,
                     end_scene=end_scene,
                 )
@@ -330,7 +333,7 @@ class ContextManager:
         """
         max_tokens = max_tokens or self.budget.available_for_context
         
-        context = {
+        context: Dict[str, Any] = {
             "story_summary": "",
             "recent_scenes": [],
             "current_scene_outline": None,
@@ -343,8 +346,9 @@ class ContextManager:
         # Add batch summaries (compressed history)
         if self.active_summaries:
             summary_texts = [s.content for s in self.active_summaries]
-            context["story_summary"] = "\n\n".join(summary_texts)
-            token_count += self.estimate_tokens(context["story_summary"])
+            story_summary = "\n\n".join(summary_texts)
+            context["story_summary"] = story_summary
+            token_count += self.estimate_tokens(story_summary)
         
         # Add recent scene summaries (not yet batched)
         recent_summaries = []
