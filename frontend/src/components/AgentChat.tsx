@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import rehypeSanitize from 'rehype-sanitize';
 import type { ProjectResult } from '../hooks/useProjects';
 import { orchestratorFetch, getAuthenticatedSSEUrl } from '../lib/api';
 import type { NarrativePossibility, NarrativePossibilitiesRecommendation } from '../types';
@@ -478,6 +479,7 @@ function MarkdownContent({ content, className = '' }: { content: string; classNa
   return (
     <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
       <ReactMarkdown
+        rehypePlugins={[rehypeSanitize]}
         components={{
           p: ({ children }) => <p className="mb-2 last:mb-0 text-slate-300 leading-relaxed">{children}</p>,
           strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
