@@ -3,7 +3,6 @@ name = "manoe-orchestrator"
 version = "0.1.0"
 description = "Multi-Agent Narrative Orchestration Engine - AI Orchestrator"
 authors = ["IShalkin <mailtoshalkin@gmail.com>"]
-readme = "README.md"
 packages = [{include = "orchestrator", from = ".."}]
 
 [tool.poetry.dependencies]
