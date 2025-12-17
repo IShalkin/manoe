@@ -239,9 +239,10 @@ class ResearchMemoryService:
         if filter_conditions:
             query_filter = qdrant_models.Filter(must=filter_conditions)
 
-        results = self.client.search(
+        # Use query_points for qdrant-client >= 1.16
+        results = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_embedding,
+            query=query_embedding,
             query_filter=query_filter,
             limit=limit,
             score_threshold=score_threshold,
@@ -252,18 +253,18 @@ class ResearchMemoryService:
                 "point_id": r.id,
                 "score": r.score,
                 "payload": {
-                    "research_id": r.payload.get("research_id"),
-                    "user_id": r.payload.get("user_id"),
-                    "seed_idea": r.payload.get("seed_idea"),
-                    "target_audience": r.payload.get("target_audience"),
-                    "themes": r.payload.get("themes"),
-                    "moral_compass": r.payload.get("moral_compass"),
-                    "provider": r.payload.get("provider"),
-                    "model": r.payload.get("model"),
-                    "created_at": r.payload.get("created_at"),
+                    "research_id": r.payload.get("research_id") if r.payload else None,
+                    "user_id": r.payload.get("user_id") if r.payload else None,
+                    "seed_idea": r.payload.get("seed_idea") if r.payload else None,
+                    "target_audience": r.payload.get("target_audience") if r.payload else None,
+                    "themes": r.payload.get("themes") if r.payload else None,
+                    "moral_compass": r.payload.get("moral_compass") if r.payload else None,
+                    "provider": r.payload.get("provider") if r.payload else None,
+                    "model": r.payload.get("model") if r.payload else None,
+                    "created_at": r.payload.get("created_at") if r.payload else None,
                 },
             }
-            for r in results
+            for r in results.points
         ]
 
     async def delete_research(self, point_id: str) -> None:

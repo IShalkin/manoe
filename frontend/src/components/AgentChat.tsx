@@ -528,6 +528,7 @@ interface AgentChatProps {
   onUpdateResult?: (result: ProjectResult) => void;
   onRegenerate?: (constraints: RegenerationConstraints) => void;
   onNarrativePossibilitySelected?: (possibility: NarrativePossibility) => void;
+  onResume?: (previousRunId: string, startFromPhase: string) => void;
 }
 
 export interface RegenerationConstraints {
@@ -644,7 +645,7 @@ interface AgentState {
   lastUpdate: string;
 }
 
-export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate, onNarrativePossibilitySelected }: AgentChatProps) {
+export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate, onNarrativePossibilitySelected, onResume }: AgentChatProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -693,6 +694,34 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   } | null>(null);
   const [isMotifPlanningActive, setIsMotifPlanningActive] = useState(false);
 
+  // Diagnostic (Two-Pass Critic) state
+  const [diagnosticResults, setDiagnosticResults] = useState<Record<number, {
+    scene_number: number;
+    rubric?: {
+      overall_score: number;
+      dimensions: Record<string, number>;
+      didacticism_detected: boolean;
+      cliches_found: string[];
+      evidence_quotes: string[];
+      weakness_candidates: Array<{ dimension: string; score: number; reason: string }>;
+    };
+    weakest_link?: {
+      dimension: string;
+      severity: string;
+      evidence: string;
+      revision_issues: string;
+    };
+    status: 'rubric_scanning' | 'analyzing_weakness' | 'revision_sent' | 'complete';
+  }>>({});
+  const [activeDiagnosticScene, setActiveDiagnosticScene] = useState<number | null>(null);
+
+  // Interrupted run state (for resume after redeploy)
+  const [isInterrupted, setIsInterrupted] = useState(false);
+  const [canResume, setCanResume] = useState(false);
+  const [resumeFromPhase, setResumeFromPhase] = useState<string | null>(null);
+  const [lastCompletedPhase, setLastCompletedPhase] = useState<string | null>(null);
+  const [isLoadingResumeState, setIsLoadingResumeState] = useState(false);
+
   useEffect(() => {
     if (projectResult?.locks) {
       setLockedAgents(projectResult.locks);
@@ -735,6 +764,15 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       // Reset motif layer state
       setMotifLayerResult(null);
       setIsMotifPlanningActive(false);
+      // Reset diagnostic state
+      setDiagnosticResults({});
+      setActiveDiagnosticScene(null);
+      // Reset interrupted state
+      setIsInterrupted(false);
+      setCanResume(false);
+      setResumeFromPhase(null);
+      setLastCompletedPhase(null);
+      setIsLoadingResumeState(false);
     }
   }, [runId]);
 
@@ -797,6 +835,39 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       setIsResuming(false);
     }
   }, [runId, orchestratorUrl, isResuming, isCancelled]);
+
+  // Handle resume interrupted generation (after redeploy)
+  const handleResumeInterrupted = useCallback(async () => {
+    if (!runId || !onResume || isLoadingResumeState) return;
+    
+    setIsLoadingResumeState(true);
+    
+    try {
+      // Fetch run state to get resume parameters
+      const response = await orchestratorFetch(`/runs/${runId}/state`, {
+        method: 'GET',
+      });
+      
+      if (response.ok) {
+        const state = await response.json();
+        if (state.can_resume && state.resume_from_phase) {
+          // Call parent's onResume with the parameters
+          onResume(runId, state.resume_from_phase);
+        } else {
+          setError('This run cannot be resumed. Please start a new generation.');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        console.error('Failed to get run state:', errorData);
+        setError(`Failed to get run state: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Failed to resume interrupted generation:', err);
+      setError('Failed to resume generation. Please try again.');
+    } finally {
+      setIsLoadingResumeState(false);
+    }
+  }, [runId, onResume, isLoadingResumeState]);
 
   const getAgentContent = useCallback((agent: string): string => {
     if (projectResult?.edits?.[agent]) {
@@ -1062,6 +1133,72 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
           setIsMotifPlanningActive(false);
           setMotifLayerResult(result);
         }
+
+        // Handle diagnostic (two-pass Critic) events
+        if (data.type === 'diagnostic_pass_start') {
+          const sceneNumber = (data.data as unknown as { scene_number: number }).scene_number;
+          setActiveDiagnosticScene(sceneNumber);
+          setCurrentPhase(`Diagnostic: Scene ${sceneNumber}`);
+          setDiagnosticResults(prev => ({
+            ...prev,
+            [sceneNumber]: {
+              scene_number: sceneNumber,
+              status: 'rubric_scanning',
+            }
+          }));
+        }
+
+        if (data.type === 'diagnostic_rubric_complete') {
+          const result = data.data as unknown as {
+            scene_number: number;
+            overall_score: number;
+            dimensions: Record<string, number>;
+            didacticism_detected: boolean;
+            cliches_found: string[];
+            evidence_quotes: string[];
+            weakness_candidates: Array<{ dimension: string; score: number; reason: string }>;
+          };
+          setDiagnosticResults(prev => ({
+            ...prev,
+            [result.scene_number]: {
+              ...prev[result.scene_number],
+              scene_number: result.scene_number,
+              rubric: {
+                overall_score: result.overall_score,
+                dimensions: result.dimensions,
+                didacticism_detected: result.didacticism_detected,
+                cliches_found: result.cliches_found || [],
+                evidence_quotes: result.evidence_quotes || [],
+                weakness_candidates: result.weakness_candidates || [],
+              },
+              status: 'analyzing_weakness',
+            }
+          }));
+        }
+
+        if (data.type === 'diagnostic_weakest_link') {
+          const result = data.data as unknown as {
+            scene_number: number;
+            weakest_link: string;
+            severity: string;
+            evidence?: string;
+            revision_issues: string;
+          };
+          setDiagnosticResults(prev => ({
+            ...prev,
+            [result.scene_number]: {
+              ...prev[result.scene_number],
+              weakest_link: {
+                dimension: result.weakest_link,
+                severity: result.severity,
+                evidence: result.evidence || '',
+                revision_issues: result.revision_issues,
+              },
+              status: 'revision_sent',
+            }
+          }));
+          setActiveDiagnosticScene(null);
+        }
         
         setMessages((prev) => [...prev, data]);
         
@@ -1076,10 +1213,27 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         
         // Close connection when generation is complete or errored
         if (data.type === 'generation_complete' || data.type === 'generation_error') {
-          setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : 'Error');
+          const isInterruptedRun = data.type === 'generation_error' && data.data.status === 'interrupted';
+          setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : (isInterruptedRun ? 'Interrupted' : 'Error'));
           setIsComplete(true);
           if (eventSource) eventSource.close();
           setIsConnected(false);
+          
+          // Set interrupted state for resume functionality
+          if (isInterruptedRun) {
+            setIsInterrupted(true);
+            // Fetch run state to check if resume is possible
+            orchestratorFetch(`/runs/${runId}/state`, { method: 'GET' })
+              .then(response => response.ok ? response.json() : null)
+              .then(state => {
+                if (state && state.can_resume) {
+                  setCanResume(true);
+                  setResumeFromPhase(state.resume_from_phase);
+                  setLastCompletedPhase(state.last_completed_phase);
+                }
+              })
+              .catch(err => console.error('Failed to fetch run state:', err));
+          }
           
           // Call onComplete callback with result
           if (onComplete) {
@@ -1619,10 +1773,209 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         </div>
       )}
 
+      {/* Diagnostic Analysis Panel (Two-Pass Critic) */}
+      {Object.keys(diagnosticResults).length > 0 && (
+        <div className="bg-slate-800/50 border-b border-slate-700 px-3 sm:px-4 py-3 sm:py-4">
+          <div className="flex items-center gap-2 mb-3">
+            <svg className="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+            <span className="text-xs font-medium text-slate-300">Diagnostic Analysis</span>
+            {activeDiagnosticScene && (
+              <span className="text-xs text-sky-400 animate-pulse">Analyzing Scene {activeDiagnosticScene}...</span>
+            )}
+          </div>
+          
+          <div className="space-y-3">
+            {Object.values(diagnosticResults).map(diagnostic => (
+              <div key={diagnostic.scene_number} className="rounded-lg overflow-hidden">
+                {/* Scene Header */}
+                <div className={`px-3 py-2 flex items-center justify-between ${
+                  diagnostic.status === 'rubric_scanning' ? 'bg-sky-500/20 border border-sky-500/30' :
+                  diagnostic.status === 'analyzing_weakness' ? 'bg-sky-500/20 border border-sky-500/30' :
+                  diagnostic.status === 'revision_sent' ? 'bg-amber-500/20 border border-amber-500/30' :
+                  'bg-emerald-500/20 border border-emerald-500/30'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium ${
+                      diagnostic.status === 'rubric_scanning' || diagnostic.status === 'analyzing_weakness' ? 'text-sky-400' :
+                      diagnostic.status === 'revision_sent' ? 'text-amber-400' :
+                      'text-emerald-400'
+                    }`}>
+                      Scene {diagnostic.scene_number}
+                    </span>
+                    {diagnostic.status === 'rubric_scanning' && (
+                      <span className="text-[10px] text-sky-300 flex items-center gap-1">
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Rubric Scan
+                      </span>
+                    )}
+                    {diagnostic.status === 'analyzing_weakness' && (
+                      <span className="text-[10px] text-sky-300 flex items-center gap-1">
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Finding Weakest Link
+                      </span>
+                    )}
+                    {diagnostic.status === 'revision_sent' && (
+                      <span className="text-[10px] text-amber-300">Revision Requested</span>
+                    )}
+                  </div>
+                  {diagnostic.rubric && (
+                    <span className={`text-xs font-bold ${
+                      diagnostic.rubric.overall_score >= 8 ? 'text-emerald-400' :
+                      diagnostic.rubric.overall_score >= 6 ? 'text-amber-400' :
+                      'text-red-400'
+                    }`}>
+                      {diagnostic.rubric.overall_score.toFixed(1)}/10
+                    </span>
+                  )}
+                </div>
+
+                {/* Rubric Details */}
+                {diagnostic.rubric && (
+                  <div className="bg-slate-900/50 px-3 py-2 border-x border-b border-slate-700/50">
+                    {/* Dimension Scores */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                      {Object.entries(diagnostic.rubric.dimensions).map(([dim, score]) => (
+                        <div key={dim} className="flex items-center justify-between text-[10px]">
+                          <span className="text-slate-400 truncate" title={dim.replace(/_/g, ' ')}>
+                            {dim.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase()).join('')}
+                          </span>
+                          <span className={`font-medium ${
+                            score >= 8 ? 'text-emerald-400' :
+                            score >= 6 ? 'text-amber-400' :
+                            'text-red-400'
+                          }`}>{score}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Flags */}
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {diagnostic.rubric.didacticism_detected && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-500/20 text-red-400 border border-red-500/30">
+                          Didacticism Detected
+                        </span>
+                      )}
+                      {diagnostic.rubric.cliches_found.length > 0 && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                          {diagnostic.rubric.cliches_found.length} Cliches
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Weakness Candidates */}
+                    {diagnostic.rubric.weakness_candidates.length > 0 && (
+                      <div className="text-[10px] text-slate-400">
+                        <span className="text-slate-500">Weaknesses: </span>
+                        {diagnostic.rubric.weakness_candidates.map((w, i) => (
+                          <span key={i} className="text-amber-400">
+                            {w.dimension.replace(/_/g, ' ')} ({w.score})
+                            {i < diagnostic.rubric!.weakness_candidates.length - 1 ? ', ' : ''}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Weakest Link Details */}
+                {diagnostic.weakest_link && (
+                  <div className={`px-3 py-2 border-x border-b rounded-b-lg ${
+                    diagnostic.weakest_link.severity === 'critical' ? 'bg-red-500/10 border-red-500/30' :
+                    diagnostic.weakest_link.severity === 'major' ? 'bg-amber-500/10 border-amber-500/30' :
+                    'bg-yellow-500/10 border-yellow-500/30'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <svg className={`w-3 h-3 ${
+                        diagnostic.weakest_link.severity === 'critical' ? 'text-red-400' :
+                        diagnostic.weakest_link.severity === 'major' ? 'text-amber-400' :
+                        'text-yellow-400'
+                      }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span className={`text-xs font-medium ${
+                        diagnostic.weakest_link.severity === 'critical' ? 'text-red-400' :
+                        diagnostic.weakest_link.severity === 'major' ? 'text-amber-400' :
+                        'text-yellow-400'
+                      }`}>
+                        {diagnostic.weakest_link.dimension.replace(/_/g, ' ')}
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        diagnostic.weakest_link.severity === 'critical' ? 'bg-red-500/20 text-red-300' :
+                        diagnostic.weakest_link.severity === 'major' ? 'bg-amber-500/20 text-amber-300' :
+                        'bg-yellow-500/20 text-yellow-300'
+                      }`}>
+                        {diagnostic.weakest_link.severity}
+                      </span>
+                    </div>
+                    {diagnostic.weakest_link.revision_issues && (
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        {diagnostic.weakest_link.revision_issues}
+                      </p>
+                    )}
+                    {diagnostic.weakest_link.evidence && (
+                      <p className="text-[10px] text-slate-500 mt-1 italic border-l-2 border-slate-600 pl-2">
+                        "{diagnostic.weakest_link.evidence.substring(0, 100)}{diagnostic.weakest_link.evidence.length > 100 ? '...' : ''}"
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Error Display */}
       {(error || generationError) && (
-        <div className="bg-red-500/10 border-b border-red-500/30 px-4 py-3">
-          <p className="text-sm text-red-400">{error || generationError}</p>
+        <div className={`border-b px-4 py-3 ${isInterrupted ? 'bg-amber-500/10 border-amber-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1">
+              <p className={`text-sm ${isInterrupted ? 'text-amber-400' : 'text-red-400'}`}>
+                {error || generationError}
+              </p>
+              {isInterrupted && lastCompletedPhase && (
+                <p className="text-xs text-slate-400 mt-1">
+                  Last completed phase: <span className="text-amber-300 font-medium">{lastCompletedPhase}</span>
+                  {resumeFromPhase && (
+                    <span> - Will resume from: <span className="text-emerald-300 font-medium">{resumeFromPhase}</span></span>
+                  )}
+                </p>
+              )}
+            </div>
+            {isInterrupted && canResume && onResume && (
+              <button
+                onClick={handleResumeInterrupted}
+                disabled={isLoadingResumeState}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                {isLoadingResumeState ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Loading...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Resume</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
