@@ -119,7 +119,15 @@ export class LLMProviderService {
     };
 
     if (options.maxTokens) {
-      requestParams.max_tokens = options.maxTokens;
+      // Newer models (gpt-5.x, o1, o3) use max_completion_tokens instead of max_tokens
+      const usesNewTokenParam = options.model.startsWith("gpt-5") || 
+                                 options.model.startsWith("o1") || 
+                                 options.model.startsWith("o3");
+      if (usesNewTokenParam) {
+        (requestParams as Record<string, unknown>).max_completion_tokens = options.maxTokens;
+      } else {
+        requestParams.max_tokens = options.maxTokens;
+      }
     }
 
     if (options.responseFormat?.type === "json_object") {
