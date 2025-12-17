@@ -1,10 +1,11 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useCallback } from 'react';
 import ReactFlow, {
   Node,
   Edge,
   Position,
   Handle,
   NodeProps,
+  ReactFlowInstance,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
@@ -122,18 +123,30 @@ export function AgentGraph({ activeAgent, currentPhase }: AgentGraphProps) {
   // Only update nodes when activeAgent changes (not on every token)
   const nodes = useMemo(() => createNodes(activeAgent), [activeAgent]);
 
+  // Call fitView after React Flow initializes to ensure proper viewport calculation
+  const onInit = useCallback((instance: ReactFlowInstance) => {
+    // Small delay to ensure container has final dimensions
+    requestAnimationFrame(() => {
+      instance.fitView({ padding: 0.3 });
+    });
+  }, []);
+
   return (
-    <div className="h-full w-full bg-slate-900/50 rounded-lg border border-slate-700">
-      <div className="px-3 py-2 border-b border-slate-700">
+    <div className="h-full w-full min-h-[300px] flex flex-col bg-slate-900/50 rounded-lg border border-slate-700">
+      {/* Header - fixed height */}
+      <div className="shrink-0 px-3 py-2 border-b border-slate-700">
         <h3 className="text-sm font-semibold text-slate-300">Agent Flow</h3>
         <p className="text-xs text-slate-500">{currentPhase || 'Idle'}</p>
       </div>
-      <div className="h-[calc(100%-48px)]">
+      {/* React Flow container - flex-1 to fill remaining space */}
+      <div className="flex-1 min-h-0">
         <ReactFlow
           nodes={nodes}
           edges={initialEdges}
           nodeTypes={nodeTypes}
+          onInit={onInit}
           fitView
+          fitViewOptions={{ padding: 0.3 }}
           panOnDrag={false}
           zoomOnScroll={false}
           zoomOnPinch={false}

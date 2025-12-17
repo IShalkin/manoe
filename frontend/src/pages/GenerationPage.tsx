@@ -472,15 +472,15 @@ export function GenerationPage() {
           </div>
         ) : runId ? (
           isGlassBrainMode ? (
-            // Glass Brain: 3-column layout (20% WorldState | 50% AgentChat | 30% AgentGraph)
-            <div className="grid grid-cols-[20%_50%_30%] gap-4 h-[calc(100vh-120px)]">
-              {/* Left: World State Panel */}
-              <div className="overflow-hidden">
+            // Glass Brain: 3-column layout with independent scrolling
+            <div className="flex h-[calc(100vh-120px)] overflow-hidden">
+              {/* Left: World State Panel (20%) */}
+              <div className="w-1/5 min-w-[250px] border-r border-slate-700 overflow-y-auto">
                 <WorldStatePanel facts={rawFacts} />
               </div>
               
-              {/* Center: Main Agent Chat */}
-              <div className="overflow-hidden">
+              {/* Center: Main Agent Chat (flex-1 to fill remaining space) */}
+              <div className="flex-1 min-w-[400px] flex flex-col overflow-hidden">
                 <AgentChat
                   runId={runId}
                   orchestratorUrl={ORCHESTRATOR_URL}
@@ -511,12 +511,12 @@ export function GenerationPage() {
                 />
               </div>
               
-              {/* Right: Agent Graph */}
-              <div className="overflow-hidden">
+              {/* Right: Agent Graph (30%) */}
+              <div className="w-[30%] min-w-[300px] border-l border-slate-700 h-full">
                 <AgentGraph activeAgent={activeAgent} currentPhase={currentPhase} />
               </div>
             </div>
-          ) : (
+          ): (
             // Simple mode: just AgentChat
             <AgentChat
               runId={runId}
