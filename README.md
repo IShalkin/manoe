@@ -11,74 +11,476 @@ A scalable, event-driven platform designed to automate the creation of exception
 
 ## System Architecture
 
+MANOE is a distributed system with a React frontend, TypeScript orchestrator (ts.ed), and multiple infrastructure services. The architecture follows an event-driven pattern where the orchestrator publishes events to Redis Streams, and the frontend subscribes via Server-Sent Events (SSE) for real-time updates.
+
 ```mermaid
 flowchart TB
-    subgraph Client["Frontend (React + TypeScript)"]
-        UI[Web Interface]
-        SSE[SSE Client]
+    subgraph Client["Frontend (React + TypeScript + Vite)"]
+        UI["GenerationPage.tsx<br/>AgentChat.tsx"]
+        SSE["useGenerationStream.ts<br/>EventSource"]
+        Supabase_Auth["Supabase Auth<br/>JWT Tokens"]
     end
 
     subgraph Gateway["API Gateway (TypeScript + ts.ed)"]
-        API[REST API + Swagger]
-        Orchestrator[StorytellerOrchestrator]
+        API["OrchestrationController.ts<br/>POST /generate<br/>GET /stream/:runId"]
+        Orchestrator["StorytellerOrchestrator.ts<br/>1435 lines of orchestration logic"]
         
-        subgraph Agents["AI Agents"]
-            Genesis[Genesis Agent]
-            Profiler[Profiler Agent]
-            Worldbuilder[Worldbuilder Agent]
-            Architect[Architect Agent]
-            Writer[Writer Agent]
-            Editor[Editor Agent]
+        subgraph Agents["9 Specialized AI Agents"]
+            Architect["Architect<br/>Story structure"]
+            Profiler["Profiler<br/>Character psychology"]
+            Worldbuilder["Worldbuilder<br/>World elements"]
+            Strategist["Strategist<br/>Advanced planning"]
+            Writer["Writer<br/>Prose generation"]
+            Critic["Critic<br/>Quality feedback"]
+            Originality["Originality<br/>Plagiarism check"]
+            Impact["Impact<br/>Emotional resonance"]
+            Archivist["Archivist<br/>Key Constraints"]
         end
         
-        ModelClient[LLMProviderService]
+        LLMService["LLMProviderService.ts<br/>Multi-provider routing"]
+        LangfuseService["LangfuseService.ts<br/>Tracing + Prompt Mgmt"]
     end
 
-    subgraph Infrastructure["Infrastructure"]
-        Redis[(Redis Streams)]
-        Supabase[(Supabase)]
-        Qdrant[(Qdrant Vector DB)]
-        Langfuse[(Langfuse Observability)]
+    subgraph Infrastructure["Infrastructure Services"]
+        Redis[("Redis Streams<br/>Event pub/sub")]
+        Supabase[("Supabase<br/>PostgreSQL + Auth")]
+        Qdrant[("Qdrant<br/>Vector memory")]
+        Langfuse[("Langfuse<br/>LLM observability")]
     end
 
     subgraph LLMProviders["LLM Providers (BYOK)"]
-        OpenAI[OpenAI]
-        Anthropic[Anthropic Claude]
-        Gemini[Google Gemini]
-        OpenRouter[OpenRouter]
-        DeepSeek[DeepSeek]
-        Venice[Venice AI]
+        OpenAI["OpenAI<br/>GPT-5.2, O3"]
+        Anthropic["Anthropic<br/>Claude Opus 4.5"]
+        Gemini["Google<br/>Gemini 3 Pro"]
+        OpenRouter["OpenRouter<br/>Multi-model"]
+        DeepSeek["DeepSeek<br/>V3, R1"]
+        Venice["Venice AI<br/>Uncensored"]
     end
 
-    UI -->|POST /generate| API
-    API -->|Start Generation| Worker
-    Worker --> Agents
-    Agents --> ModelClient
-    ModelClient --> LLMProviders
+    UI -->|"POST /generate<br/>Bearer JWT"| API
+    API -->|"startGeneration()"| Orchestrator
+    Orchestrator --> Agents
+    Agents --> LLMService
+    LLMService --> LLMProviders
+    LLMService --> LangfuseService
+    LangfuseService -->|"Traces & Prompts"| Langfuse
     
-    Worker -->|Publish Events| Redis
-    Redis -->|Stream Events| SSE
-    SSE -->|Real-time Updates| UI
+    Orchestrator -->|"publishEvent()"| Redis
+    Redis -->|"streamEvents()"| SSE
+    SSE -->|"Real-time updates"| UI
     
-    Worker -->|Store Artifacts| Supabase
-    Agents -->|Vector Memory| Qdrant
-    ModelClient -->|Trace LLM Calls| Langfuse
+    Orchestrator -->|"saveArtifact()"| Supabase
+    Agents -->|"storeMemory()<br/>retrieveContext()"| Qdrant
+    UI -->|"Auth + Projects"| Supabase_Auth
+    Supabase_Auth --> Supabase
 ```
 
-## Generation Workflow
+<details>
+<summary><strong>📊 Detailed Architecture Diagrams</strong> (click to expand)</summary>
 
-MANOE implements an **8-phase narrative generation workflow**:
+### Request Lifecycle
+
+This sequence diagram shows the complete flow from when a user clicks "Generate" to receiving real-time updates:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as User Browser
+    participant FE as Frontend<br/>(GenerationPage.tsx)
+    participant API as API Gateway<br/>(OrchestrationController)
+    participant Orch as StorytellerOrchestrator
+    participant Redis as Redis Streams
+    participant LLM as LLM Provider
+    participant Supabase as Supabase
+    participant Qdrant as Qdrant
+
+    User->>FE: Click "Generate"
+    FE->>FE: getAccessToken() from Supabase
+    FE->>API: POST /generate<br/>{projectId, seedIdea, llmConfig}
+    API->>Orch: startGeneration(options)
+    Orch->>Orch: Generate runId (UUID)
+    Orch-->>API: Return runId
+    API-->>FE: 202 Accepted<br/>{runId, streamUrl}
+    
+    FE->>API: GET /stream/{runId}<br/>(SSE Connection)
+    API->>Redis: Subscribe to run:{runId}
+    
+    par Background Generation
+        Orch->>Redis: Publish "generation_started"
+        Redis-->>FE: SSE: generation_started
+        
+        loop For each phase (12 phases)
+            Orch->>Redis: Publish "phase_start"
+            Redis-->>FE: SSE: phase_start
+            Orch->>Qdrant: Retrieve context
+            Qdrant-->>Orch: Vector results
+            Orch->>LLM: Generate with context
+            LLM-->>Orch: LLM response
+            Orch->>Supabase: Save artifact
+            Orch->>Qdrant: Store new vectors
+            Orch->>Redis: Publish "agent_complete"
+            Redis-->>FE: SSE: agent_complete
+        end
+        
+        Orch->>Redis: Publish "generation_complete"
+        Redis-->>FE: SSE: generation_complete
+    end
+    
+    FE->>User: Display completed story
+```
+
+### Generation Workflow State Machine
+
+MANOE implements a 12-phase generation workflow with revision loops and quality gates:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Genesis: User clicks Generate
+    
+    Genesis --> Characters: Narrative Possibility created
+    Characters --> NarratorDesign: Character profiles stored
+    NarratorDesign --> Worldbuilding: Voice config set
+    Worldbuilding --> Outlining: World elements in Qdrant
+    Outlining --> AdvancedPlanning: Scene outline ready
+    AdvancedPlanning --> Drafting: Planning artifacts saved
+    
+    state DraftingLoop {
+        [*] --> WriteDraft
+        WriteDraft --> Critique: Draft complete
+        Critique --> Revision: Needs improvement
+        Revision --> Critique: Revision done
+        Critique --> [*]: Quality passed<br/>(max 2 iterations)
+    }
+    
+    Drafting --> DraftingLoop: For each scene
+    DraftingLoop --> OriginalityCheck: All scenes drafted
+    
+    state ArchivistCheck {
+        [*] --> CheckConstraints
+        CheckConstraints --> UpdateKeyConstraints: Every 3 scenes
+        UpdateKeyConstraints --> [*]
+    }
+    
+    DraftingLoop --> ArchivistCheck: Scene count % 3 == 0
+    ArchivistCheck --> DraftingLoop
+    
+    OriginalityCheck --> ImpactAssessment: Originality verified
+    ImpactAssessment --> Polish: Impact score calculated
+    Polish --> [*]: Generation complete
+    
+    note right of DraftingLoop
+        Writer↔Critic loop
+        Max 2 revision iterations
+        Quality threshold: 7/10
+    end note
+    
+    note right of ArchivistCheck
+        Archivist runs every 3 scenes
+        Updates Key Constraints
+        Prevents context drift
+    end note
+```
+
+### Agent System & Data Dependencies
+
+Each of the 9 agents has specific data inputs and outputs:
+
+```mermaid
+flowchart TB
+    subgraph Inputs["Input Sources"]
+        Seed["Seed Idea<br/>(User Input)"]
+        Outline["Outline<br/>(Supabase)"]
+        KeyConstraints["Key Constraints<br/>(In-memory)"]
+        QdrantMem["Qdrant Memory<br/>(Characters, World, Scenes)"]
+        PrevDraft["Previous Draft<br/>(Supabase)"]
+        CritiqueData["Critique Feedback<br/>(In-memory)"]
+    end
+    
+    subgraph AgentLayer["Agent Layer"]
+        subgraph Planning["Planning Agents"]
+            A_Architect["🏛️ Architect<br/>Genesis + Outlining"]
+            A_Profiler["👤 Profiler<br/>Characters"]
+            A_Worldbuilder["🌍 Worldbuilder<br/>Worldbuilding"]
+            A_Strategist["📋 Strategist<br/>Advanced Planning"]
+        end
+        
+        subgraph Execution["Execution Agents"]
+            A_Writer["✍️ Writer<br/>Drafting + Revision"]
+            A_Critic["🔍 Critic<br/>Critique"]
+        end
+        
+        subgraph Quality["Quality Agents"]
+            A_Originality["🎯 Originality<br/>Plagiarism Check"]
+            A_Impact["💥 Impact<br/>Emotional Assessment"]
+            A_Archivist["📚 Archivist<br/>Constraint Resolution"]
+        end
+    end
+    
+    subgraph Outputs["Output Destinations"]
+        Supabase_Out[("Supabase<br/>run_artifacts")]
+        Qdrant_Out[("Qdrant<br/>3 collections")]
+        Redis_Out[("Redis Streams<br/>SSE events")]
+    end
+    
+    Seed --> A_Architect
+    A_Architect -->|"Narrative Possibility"| Supabase_Out
+    A_Architect -->|"phase_complete"| Redis_Out
+    
+    A_Profiler -->|"Character Profiles"| Supabase_Out
+    A_Profiler -->|"Embeddings"| Qdrant_Out
+    
+    A_Worldbuilder -->|"World Elements"| Supabase_Out
+    A_Worldbuilder -->|"Embeddings"| Qdrant_Out
+    
+    Outline --> A_Writer
+    KeyConstraints --> A_Writer
+    QdrantMem --> A_Writer
+    A_Writer -->|"Scene Draft"| Supabase_Out
+    A_Writer -->|"Scene Embedding"| Qdrant_Out
+    
+    PrevDraft --> A_Critic
+    A_Critic -->|"Critique + Score"| CritiqueData
+    
+    CritiqueData --> A_Writer
+    
+    A_Archivist -->|"Updated Constraints"| KeyConstraints
+    
+    A_Originality -->|"Originality Score"| Supabase_Out
+    A_Impact -->|"Impact Score"| Supabase_Out
+```
+
+### Data Model / Persistence
+
+```mermaid
+erDiagram
+    PROJECTS ||--o{ RUN_ARTIFACTS : "has many"
+    PROJECTS ||--o{ RESEARCH_RESULTS : "has many"
+    PROJECTS {
+        uuid id PK
+        uuid user_id FK
+        string seed_idea
+        string moral_compass
+        string target_audience
+        jsonb settings
+        timestamp created_at
+    }
+    
+    RUN_ARTIFACTS {
+        uuid id PK
+        uuid project_id FK
+        string run_id
+        string phase
+        string artifact_type
+        jsonb content
+        int scene_number
+        timestamp created_at
+    }
+    
+    RESEARCH_RESULTS {
+        uuid id PK
+        uuid project_id FK
+        uuid user_id FK
+        string provider
+        string query
+        text result
+        text prompt_context
+        jsonb citations
+        string qdrant_point_id
+        timestamp created_at
+    }
+    
+    CHARACTERS {
+        uuid id PK
+        uuid project_id FK
+        string name
+        string archetype
+        jsonb psychology
+        string qdrant_point_id
+    }
+    
+    WORLDBUILDING {
+        uuid id PK
+        uuid project_id FK
+        string element_type
+        jsonb content
+        string qdrant_point_id
+    }
+    
+    OUTLINES {
+        uuid id PK
+        uuid project_id FK
+        jsonb scenes
+        string structure_type
+    }
+    
+    DRAFTS {
+        uuid id PK
+        uuid project_id FK
+        int scene_number
+        text content
+        int revision_count
+        string qdrant_point_id
+    }
+    
+    CRITIQUES {
+        uuid id PK
+        uuid draft_id FK
+        float score
+        jsonb feedback
+        boolean passed
+    }
+    
+    PROJECTS ||--o{ CHARACTERS : "has many"
+    PROJECTS ||--o{ WORLDBUILDING : "has many"
+    PROJECTS ||--o{ OUTLINES : "has one"
+    PROJECTS ||--o{ DRAFTS : "has many"
+    DRAFTS ||--o{ CRITIQUES : "has many"
+```
+
+### Qdrant Vector Collections
 
 ```mermaid
 flowchart LR
-    G[Genesis] --> C[Characters]
-    C --> N[Narrator Design]
-    N --> W[Worldbuilding]
-    W --> O[Outlining]
-    O --> AP[Advanced Planning]
-    AP --> D[Drafting]
-    D --> P[Polish]
+    subgraph Qdrant["Qdrant Vector Database"]
+        subgraph Characters["characters collection"]
+            C1["Character Profile<br/>vector: 1536d<br/>payload: {name, archetype, psychology}"]
+        end
+        
+        subgraph World["worldbuilding collection"]
+            W1["World Element<br/>vector: 1536d<br/>payload: {type, content, location}"]
+        end
+        
+        subgraph Scenes["scenes collection"]
+            S1["Scene Content<br/>vector: 1536d<br/>payload: {scene_num, summary, characters}"]
+        end
+    end
+    
+    subgraph Usage["Usage by Agents"]
+        Writer["Writer Agent"]
+        Profiler["Profiler Agent"]
+        Worldbuilder["Worldbuilder Agent"]
+    end
+    
+    Profiler -->|"store"| Characters
+    Worldbuilder -->|"store"| World
+    Writer -->|"store"| Scenes
+    
+    Writer -->|"retrieve context"| Characters
+    Writer -->|"retrieve context"| World
+    Writer -->|"retrieve prev scenes"| Scenes
 ```
+
+### Repository Structure Map
+
+```mermaid
+flowchart TB
+    subgraph Root["manoe/"]
+        direction TB
+        
+        subgraph Frontend["frontend/"]
+            FE_src["src/"]
+            FE_pages["pages/<br/>GenerationPage.tsx<br/>DashboardPage.tsx<br/>ProjectPage.tsx"]
+            FE_components["components/<br/>AgentChat.tsx (2534 lines)<br/>Layout.tsx<br/>SettingsModal.tsx"]
+            FE_hooks["hooks/<br/>useGenerationStream.ts<br/>useProjects.ts<br/>useSettings.ts"]
+            FE_lib["lib/<br/>api.ts<br/>supabase.ts"]
+            FE_contexts["contexts/<br/>AuthContext.tsx<br/>SettingsContext.tsx"]
+        end
+        
+        subgraph APIGateway["api-gateway/"]
+            AG_src["src/"]
+            AG_controllers["controllers/<br/>OrchestrationController.ts<br/>HealthController.ts"]
+            AG_services["services/<br/>StorytellerOrchestrator.ts (1435 lines)<br/>LLMProviderService.ts<br/>LangfuseService.ts<br/>RedisStreamsService.ts<br/>QdrantMemoryService.ts<br/>SupabaseService.ts"]
+            AG_models["models/<br/>AgentModels.ts (9 agents, 12 phases)<br/>LLMModels.ts (6 providers)"]
+        end
+        
+        subgraph Infra["Infrastructure"]
+            Docker["docker-compose.yml<br/>(local dev)"]
+            DockerVPS["docker-compose.vps.yml<br/>(production)"]
+            Supabase_Dir["supabase/<br/>migrations/"]
+        end
+        
+        subgraph Legacy["_legacy/"]
+            LegacyOrch["orchestrator/<br/>(Python/FastAPI - archived)"]
+            LegacyBackend["backend/<br/>(Express.js - archived)"]
+        end
+    end
+    
+    FE_src --> FE_pages
+    FE_src --> FE_components
+    FE_src --> FE_hooks
+    FE_src --> FE_lib
+    FE_src --> FE_contexts
+    
+    AG_src --> AG_controllers
+    AG_src --> AG_services
+    AG_src --> AG_models
+```
+
+### SSE Event Types
+
+The orchestrator publishes these event types to Redis Streams for real-time frontend updates:
+
+```mermaid
+flowchart LR
+    subgraph Events["SSE Event Types"]
+        E1["generation_started<br/>Run initialized"]
+        E2["phase_start<br/>Phase beginning"]
+        E3["agent_start<br/>Agent activated"]
+        E4["agent_complete<br/>Agent output ready"]
+        E5["new_developments_collected<br/>Archivist update"]
+        E6["generation_complete<br/>All phases done"]
+        E7["generation_cancelled<br/>User cancelled"]
+        E8["generation_error<br/>Fatal error"]
+        E9["heartbeat<br/>Keep-alive (15s)"]
+    end
+    
+    E1 --> E2
+    E2 --> E3
+    E3 --> E4
+    E4 -->|"next phase"| E2
+    E4 -->|"every 3 scenes"| E5
+    E5 --> E4
+    E4 -->|"all done"| E6
+    E2 -->|"error"| E8
+    E2 -->|"cancelled"| E7
+```
+
+</details>
+
+## Generation Workflow
+
+MANOE implements a **12-phase narrative generation workflow** with revision loops and quality gates:
+
+```mermaid
+flowchart LR
+    subgraph Planning["Planning Phases"]
+        G[Genesis] --> C[Characters]
+        C --> N[Narrator Design]
+        N --> W[Worldbuilding]
+        W --> O[Outlining]
+        O --> AP[Advanced Planning]
+    end
+    
+    subgraph Execution["Execution Loop (per scene)"]
+        D[Drafting] --> CR[Critique]
+        CR -->|"needs work"| R[Revision]
+        R -->|"max 2 iterations"| CR
+        CR -->|"passed"| D2[Next Scene]
+    end
+    
+    subgraph Quality["Quality Gates"]
+        OC[Originality Check] --> IA[Impact Assessment]
+        IA --> P[Polish]
+    end
+    
+    AP --> D
+    D2 -->|"all scenes done"| OC
+    
+    style G fill:#e1f5fe
+    style P fill:#c8e6c9
+```
+
+The workflow is orchestrated by `StorytellerOrchestrator.ts` (1435 lines) which manages phase transitions, revision loops, and the Archivist agent that runs every 3 scenes to update Key Constraints for continuity.
 
 ### Phase 1: Genesis
 The Genesis agent accepts a "Seed Idea" from the user (What If? questions, image prompts) and configures the "Moral Compass" (Ethical, Unethical, Amoral, Ambiguous). It generates a structured "Narrative Possibility" JSON that defines the story's foundation, including plot summary, setting, main conflict, and thematic elements.
