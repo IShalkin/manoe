@@ -1,20 +1,91 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { UserSettings, ProviderConfig, AgentConfig, LLMProvider, AGENTS, MODELS, LLMModel, ResearchProvider, ResearchProviderConfig } from '../types';
 import { orchestratorFetch } from '../lib/api';
+import { encryptData, decryptData, isEncrypted } from '../lib/crypto';
 
 const STORAGE_KEY = 'manoe_settings';
 const MODELS_CACHE_KEY = 'manoe_models_cache';
 const RESEARCH_KEYS_STORAGE_KEY = 'manoe_research_keys';
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 
 const OLD_DEFAULT_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
+
+async function encryptApiKeys(providers: ProviderConfig[]): Promise<ProviderConfig[]> {
+  const encrypted: ProviderConfig[] = [];
+  for (const provider of providers) {
+    if (provider.apiKey && !isEncrypted(provider.apiKey)) {
+      try {
+        const encryptedKey = await encryptData(provider.apiKey);
+        encrypted.push({ ...provider, apiKey: encryptedKey });
+      } catch (e) {
+        console.error('[SettingsContext] Failed to encrypt API key:', e);
+        encrypted.push(provider);
+      }
+    } else {
+      encrypted.push(provider);
+    }
+  }
+  return encrypted;
+}
+
+async function decryptApiKeys(providers: ProviderConfig[]): Promise<ProviderConfig[]> {
+  const decrypted: ProviderConfig[] = [];
+  for (const provider of providers) {
+    if (provider.apiKey && isEncrypted(provider.apiKey)) {
+      try {
+        const decryptedKey = await decryptData(provider.apiKey);
+        decrypted.push({ ...provider, apiKey: decryptedKey });
+      } catch (e) {
+        console.error('[SettingsContext] Failed to decrypt API key, clearing:', e);
+        decrypted.push({ ...provider, apiKey: '' });
+      }
+    } else {
+      decrypted.push(provider);
+    }
+  }
+  return decrypted;
+}
+
+async function encryptResearchKeys(providers: ResearchProviderConfig[]): Promise<ResearchProviderConfig[]> {
+  const encrypted: ResearchProviderConfig[] = [];
+  for (const provider of providers) {
+    if (provider.apiKey && !isEncrypted(provider.apiKey)) {
+      try {
+        const encryptedKey = await encryptData(provider.apiKey);
+        encrypted.push({ ...provider, apiKey: encryptedKey });
+      } catch (e) {
+        console.error('[SettingsContext] Failed to encrypt research API key:', e);
+        encrypted.push(provider);
+      }
+    } else {
+      encrypted.push(provider);
+    }
+  }
+  return encrypted;
+}
+
+async function decryptResearchKeys(providers: ResearchProviderConfig[]): Promise<ResearchProviderConfig[]> {
+  const decrypted: ResearchProviderConfig[] = [];
+  for (const provider of providers) {
+    if (provider.apiKey && isEncrypted(provider.apiKey)) {
+      try {
+        const decryptedKey = await decryptData(provider.apiKey);
+        decrypted.push({ ...provider, apiKey: decryptedKey });
+      } catch (e) {
+        console.error('[SettingsContext] Failed to decrypt research API key, clearing:', e);
+        decrypted.push({ ...provider, apiKey: '' });
+      }
+    } else {
+      decrypted.push(provider);
+    }
+  }
+  return decrypted;
+}
 
 function migrateSettings(parsed: UserSettings & { schemaVersion?: number }): UserSettings & { schemaVersion: number } {
   const currentVersion = parsed.schemaVersion || 1;
   
   if (currentVersion < 3) {
-    // Clear outdated default models for ALL users
-    // Users should explicitly select their preferred model
     parsed.agents = parsed.agents.map(agent => ({
       ...agent,
       model: OLD_DEFAULT_MODELS.includes(agent.model) ? '' : agent.model,
@@ -75,52 +146,72 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
   const [researchProviders, setResearchProviders] = useState<ResearchProviderConfig[]>([]);
 
-  // Load settings from localStorage on mount
+  // Load settings from localStorage on mount (with decryption)
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    console.log('[SettingsContext] Loading settings from localStorage:', stored ? 'found' : 'empty');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        const migrated = migrateSettings(parsed);
-        setSettings(migrated);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-        console.log('[SettingsContext] Loaded providers:', migrated.providers?.length || 0);
-      } catch (e) {
-        console.error('[SettingsContext] Failed to parse settings:', e);
+    const loadSettings = async () => {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      console.log('[SettingsContext] Loading settings from localStorage:', stored ? 'found' : 'empty');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          const migrated = migrateSettings(parsed);
+          
+          // Decrypt API keys if they are encrypted
+          if (migrated.providers && migrated.providers.length > 0) {
+            migrated.providers = await decryptApiKeys(migrated.providers);
+          }
+          
+          setSettings(migrated);
+          console.log('[SettingsContext] Loaded providers:', migrated.providers?.length || 0);
+        } catch (e) {
+          console.error('[SettingsContext] Failed to parse settings:', e);
+        }
       }
-    }
-    
-    // Load models cache
-    const cachedModels = localStorage.getItem(MODELS_CACHE_KEY);
-    if (cachedModels) {
-      try {
-        setDynamicModels(JSON.parse(cachedModels));
-      } catch (e) {
-        console.error('[SettingsContext] Failed to parse models cache:', e);
+      
+      // Load models cache (not encrypted - no sensitive data)
+      const cachedModels = localStorage.getItem(MODELS_CACHE_KEY);
+      if (cachedModels) {
+        try {
+          setDynamicModels(JSON.parse(cachedModels));
+        } catch (e) {
+          console.error('[SettingsContext] Failed to parse models cache:', e);
+        }
       }
-    }
-    
-    // Load research provider keys
-    const storedResearchKeys = localStorage.getItem(RESEARCH_KEYS_STORAGE_KEY);
-    if (storedResearchKeys) {
-      try {
-        setResearchProviders(JSON.parse(storedResearchKeys));
-        console.log('[SettingsContext] Loaded research providers');
-      } catch (e) {
-        console.error('[SettingsContext] Failed to parse research keys:', e);
+      
+      // Load research provider keys (with decryption)
+      const storedResearchKeys = localStorage.getItem(RESEARCH_KEYS_STORAGE_KEY);
+      if (storedResearchKeys) {
+        try {
+          let researchKeys = JSON.parse(storedResearchKeys);
+          researchKeys = await decryptResearchKeys(researchKeys);
+          setResearchProviders(researchKeys);
+          console.log('[SettingsContext] Loaded research providers');
+        } catch (e) {
+          console.error('[SettingsContext] Failed to parse research keys:', e);
+        }
       }
-    }
+      
+      setLoading(false);
+    };
     
-    setLoading(false);
+    loadSettings();
   }, []);
 
-  // Persist settings to localStorage whenever they change
+  // Persist settings to localStorage whenever they change (with encryption)
   useEffect(() => {
-    if (!loading) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-      console.log('[SettingsContext] Saved settings to localStorage');
-    }
+    const saveSettings = async () => {
+      if (!loading) {
+        // Encrypt API keys before storing
+        const settingsToStore = { ...settings };
+        if (settingsToStore.providers && settingsToStore.providers.length > 0) {
+          settingsToStore.providers = await encryptApiKeys(settingsToStore.providers);
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(settingsToStore));
+        console.log('[SettingsContext] Saved settings to localStorage (encrypted)');
+      }
+    };
+    
+    saveSettings();
   }, [settings, loading]);
 
   const updateProvider = useCallback((provider: LLMProvider, apiKey: string) => {
@@ -240,8 +331,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         newProviders = [...prev, { provider, apiKey }];
       }
       
-      localStorage.setItem(RESEARCH_KEYS_STORAGE_KEY, JSON.stringify(newProviders));
-      console.log('[SettingsContext] Updated research provider:', provider, 'key length:', apiKey.length);
+      // Encrypt research keys before storing
+      encryptResearchKeys(newProviders).then(encrypted => {
+        localStorage.setItem(RESEARCH_KEYS_STORAGE_KEY, JSON.stringify(encrypted));
+        console.log('[SettingsContext] Updated research provider (encrypted):', provider, 'key length:', apiKey.length);
+      }).catch(e => {
+        console.error('[SettingsContext] Failed to encrypt research keys:', e);
+        localStorage.setItem(RESEARCH_KEYS_STORAGE_KEY, JSON.stringify(newProviders));
+      });
+      
       return newProviders;
     });
   }, []);

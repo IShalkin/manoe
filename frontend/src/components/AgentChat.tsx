@@ -5,11 +5,21 @@ import { orchestratorFetch, getAuthenticatedSSEUrl } from '../lib/api';
 import type { NarrativePossibility, NarrativePossibilitiesRecommendation } from '../types';
 import { NarrativePossibilitiesSelector } from './NarrativePossibilitiesSelector';
 
+// Maximum input length for JSON parsing to prevent ReDoS attacks
+const MAX_JSON_INPUT_LENGTH = 1_000_000; // 1MB limit
+
 // Tolerant JSON parser that handles common LLM output issues
+// Security: Input length is limited to prevent ReDoS attacks
 function tolerantJsonParse(str: string): unknown | null {
+  // Security: Reject excessively long inputs to prevent ReDoS
+  if (!str || str.length > MAX_JSON_INPUT_LENGTH) {
+    console.warn('[tolerantJsonParse] Input rejected: empty or exceeds max length');
+    return null;
+  }
+  
   const trimmed = str.trim();
   
-  // Try standard JSON.parse first
+  // Try standard JSON.parse first (fastest path)
   try {
     return JSON.parse(trimmed);
   } catch {
@@ -20,9 +30,11 @@ function tolerantJsonParse(str: string): unknown | null {
   let fixed = trimmed;
   
   // Remove trailing commas before } or ]
+  // Note: This regex is safe - linear time complexity
   fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
   
   // Replace Python-style booleans and None
+  // Note: These regexes are safe - word boundary matching is O(n)
   fixed = fixed.replace(/\bTrue\b/g, 'true');
   fixed = fixed.replace(/\bFalse\b/g, 'false');
   fixed = fixed.replace(/\bNone\b/g, 'null');
@@ -40,6 +52,7 @@ function tolerantJsonParse(str: string): unknown | null {
   }
   
   // Try to extract JSON from the string
+  // Note: This regex could be slow on pathological inputs, but we've limited input size
   const jsonMatch = fixed.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {

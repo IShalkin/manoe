@@ -114,19 +114,24 @@ services:
 
   # ==========================================================================
   # Qdrant - Vector Database for Memory
+  # SECURITY: Bind to localhost only. For production, set QDRANT_API_KEY!
   # ==========================================================================
   qdrant:
     image: qdrant/qdrant:v1.7.4
     container_name: manoe-qdrant
     restart: unless-stopped
     ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+      # Bind to localhost only to prevent external access
+      # For production with external access, ensure QDRANT_API_KEY is set
+      - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
       - qdrant-data:/qdrant/storage
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
       - QDRANT__SERVICE__HTTP_PORT=6333
+      # SECURITY: Set API key in production to prevent unauthorized access
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:-}
     networks:
       - manoe-network
     healthcheck:
