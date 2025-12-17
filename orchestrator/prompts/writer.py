@@ -58,9 +58,47 @@ Generate scene drafts as JSON:
   "subtext_layer": "Overall hidden meaning in this scene",
   "emotional_shift": "How emotional state changes",
   "word_count": 1500,
-  "show_dont_tell_ratio": 0.8
+  "show_dont_tell_ratio": 0.8,
+  "new_developments": [
+    {
+      "subject": "Elara",
+      "change": "Lost her sword in the river",
+      "category": "char"
+    },
+    {
+      "subject": "The Kingdom",
+      "change": "Border guards have been doubled",
+      "category": "world"
+    }
+  ]
 }
 ```
+
+## New Developments (IMPORTANT)
+
+After writing the scene, you MUST report any significant changes that occurred. This helps maintain story consistency across scenes.
+
+**What to report:**
+- Character state changes (injuries, emotional shifts, new knowledge)
+- Possession changes (gained/lost items, weapons, artifacts)
+- Location changes (where characters moved to)
+- World state changes (weather, political events, discoveries)
+- Relationship changes (alliances formed/broken, trust gained/lost)
+- Plot developments (quests started/completed, secrets revealed)
+
+**Format:**
+- `subject`: Who or what changed (character name, location, object)
+- `change`: What happened in natural language
+- `category`: "char" (character), "world" (setting/world), or "plot" (story events)
+
+**Examples:**
+```json
+{"subject": "Marcus", "change": "Broke his leg falling from the wall", "category": "char"}
+{"subject": "The Magic Sword", "change": "Started glowing when near the cave", "category": "plot"}
+{"subject": "Thornwood Forest", "change": "Fire has spread to the eastern edge", "category": "world"}
+```
+
+Do NOT overthink the keys - just describe what happened naturally. The Archivist will convert these to canonical format later.
 
 ## Writing Principles
 

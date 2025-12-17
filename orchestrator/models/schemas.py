@@ -757,22 +757,50 @@ class DeepeningCheckpointResult(BaseModel):
 
 class ConstraintCategory(str, Enum):
     """Categories for key constraints using semantic addressing."""
-    CHARACTER_STATE = "character_state"      # hero_health, villain_mood
-    CHARACTER_LOCATION = "character_location"  # hero_location, mentor_whereabouts
-    WORLD_STATE = "world_state"              # kingdom_status, weather
-    RELATIONSHIP = "relationship"            # hero_villain_relation, hero_mentor_trust
-    PLOT_POINT = "plot_point"                # macguffin_status, quest_progress
-    POSSESSION = "possession"                # hero_has_sword, villain_has_artifact
+    CHARACTER_STATE = "character_state"      # char_elara_health, char_hero_mood
+    CHARACTER_LOCATION = "character_location"  # char_elara_location, char_hero_whereabouts
+    WORLD_STATE = "world_state"              # world_kingdom_status, world_forest_weather
+    RELATIONSHIP = "relationship"            # rel_hero_villain, rel_elara_mentor_trust
+    PLOT_POINT = "plot_point"                # plot_macguffin_status, plot_quest_progress
+    POSSESSION = "possession"                # char_hero_has_sword, char_villain_has_artifact
+
+
+class FactCategory(str, Enum):
+    """Categories for raw facts from Writer (Lazy Writer Pattern)."""
+    CHAR = "char"    # Character-related changes
+    WORLD = "world"  # World/setting changes
+    PLOT = "plot"    # Plot-related developments
+
+
+class FactUpdate(BaseModel):
+    """
+    Raw fact update from Writer (Lazy Writer Pattern).
+    Writer generates these in natural language, Archivist converts to canonical keys.
+    """
+    subject: str = Field(
+        ...,
+        description="Who/What is this about? e.g., 'Elara', 'The Magic Sword', 'The Kingdom'"
+    )
+    change: str = Field(
+        ...,
+        description="What changed? e.g., 'Lost her arm', 'Started glowing', 'Fell into civil war'"
+    )
+    category: FactCategory = Field(
+        ...,
+        description="Category: 'char' for characters, 'world' for settings, 'plot' for story events"
+    )
 
 
 class KeyConstraint(BaseModel):
     """
     Canonical fact that must be preserved across revisions.
     Uses semantic addressing (key-value) for automatic supersedes logic.
+    Canonical key format: {category}_{subject}_{attribute}
+    Examples: char_elara_health, world_kingdom_status, plot_quest_progress
     """
     key: str = Field(
         ...,
-        description="Semantic key, e.g., 'hero_health', 'villain_location'"
+        description="Canonical key, e.g., 'char_elara_health', 'world_kingdom_status'"
     )
     value: str = Field(
         ...,
@@ -785,6 +813,14 @@ class KeyConstraint(BaseModel):
     category: ConstraintCategory = Field(
         ...,
         description="Category of the constraint for organization"
+    )
+    last_accessed_at_scene: int = Field(
+        default=0,
+        description="Last scene where this constraint was included in Writer context"
+    )
+    is_global: bool = Field(
+        default=False,
+        description="If True, always include in Writer context regardless of recency"
     )
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
