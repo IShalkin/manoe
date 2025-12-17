@@ -83,35 +83,50 @@ This sequence diagram shows the complete flow from when a user clicks "Generate"
 
 ```mermaid
 sequenceDiagram
-    participant User
+    participant U as User
     participant FE as Frontend
-    participant API
-    participant Orch as Orchestrator
-    participant Redis
-    participant LLM
-    participant DB as Supabase
-    participant Vec as Qdrant
+    participant GW as API Gateway
+    participant O as Orchestrator
+    participant R as Redis Streams
+    participant L as LLM Provider
+    participant S as Supabase
+    participant Q as Qdrant
 
-    User->>FE: Click Generate
-    FE->>API: POST /generate
-    API->>Orch: startGeneration
-    Orch-->>API: Return runId
-    API-->>FE: 202 Accepted
-    FE->>API: GET /stream SSE
-    API->>Redis: Subscribe
-    
-    Note over Orch,Redis: Background Generation Loop
-    Orch->>Redis: generation_started
-    Redis-->>FE: SSE event
-    Orch->>Vec: Retrieve context
-    Vec-->>Orch: Results
-    Orch->>LLM: Generate
-    LLM-->>Orch: Response
-    Orch->>DB: Save artifact
-    Orch->>Redis: agent_complete
-    Redis-->>FE: SSE event
-    Orch->>Redis: generation_complete
-    FE->>User: Display story
+    rect rgb(240, 248, 255)
+        Note over U,GW: 1. Request Initiation
+        U->>FE: Click Generate
+        FE->>GW: POST /orchestration/generate
+        GW->>O: startGeneration(options)
+        O-->>GW: runId
+        GW-->>FE: 202 Accepted + runId
+    end
+
+    rect rgb(255, 250, 240)
+        Note over FE,R: 2. SSE Connection
+        FE->>GW: GET /orchestration/stream/{runId}
+        GW->>R: Subscribe to run:{runId}
+    end
+
+    rect rgb(240, 255, 240)
+        Note over O,Q: 3. Generation Loop (12 phases)
+        O->>R: generation_started
+        R-->>FE: SSE event
+        O->>Q: Retrieve character/world context
+        Q-->>O: Vector search results
+        O->>L: Generate with context
+        L-->>O: AI response
+        O->>S: Save artifact to run_artifacts
+        O->>Q: Store embeddings
+        O->>R: agent_complete
+        R-->>FE: SSE event
+    end
+
+    rect rgb(255, 240, 245)
+        Note over O,FE: 4. Completion
+        O->>R: generation_complete
+        R-->>FE: Final SSE event
+        FE->>U: Display generated story
+    end
 ```
 
 ### Generation Workflow State Machine
@@ -119,204 +134,308 @@ sequenceDiagram
 MANOE implements a 12-phase generation workflow with revision loops and quality gates:
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Genesis
-    Genesis --> Characters
-    Characters --> NarratorDesign
-    NarratorDesign --> Worldbuilding
-    Worldbuilding --> Outlining
-    Outlining --> AdvancedPlanning
-    AdvancedPlanning --> Drafting
-    Drafting --> WriteDraft
-    WriteDraft --> Critique
-    Critique --> Revision
-    Revision --> WriteDraft
-    Critique --> OriginalityCheck
-    OriginalityCheck --> ImpactAssessment
-    ImpactAssessment --> Polish
-    Polish --> [*]
+flowchart LR
+    subgraph Planning["Phase 1-6: Planning"]
+        direction LR
+        G[Genesis] --> C[Characters]
+        C --> N[Narrator Design]
+        N --> W[Worldbuilding]
+        W --> O[Outlining]
+        O --> AP[Advanced Planning]
+    end
+    
+    subgraph Execution["Phase 7-9: Drafting Loop"]
+        direction LR
+        D[Drafting] --> CR[Critique]
+        CR -->|score < 7| R[Revision]
+        R --> CR
+        CR -->|score >= 7| PASS[Pass]
+    end
+    
+    subgraph Quality["Phase 10-12: Quality"]
+        direction LR
+        OC[Originality Check] --> IA[Impact Assessment]
+        IA --> P[Polish]
+    end
+    
+    AP --> D
+    PASS --> OC
+    P --> DONE((Done))
 ```
 
 **Workflow Details:**
-- **Genesis → AdvancedPlanning**: Planning phases (Architect, Profiler, Worldbuilder, Strategist agents)
-- **Drafting Loop**: Writer → Critic → Revision cycle (max 2 iterations, quality threshold 7/10)
+- **Planning (6 phases)**: Architect creates narrative possibility, Profiler builds characters, Worldbuilder creates setting, Strategist plans scenes
+- **Drafting Loop**: Writer drafts scene → Critic scores (threshold 7/10) → Revision if needed (max 2 iterations)
 - **Archivist**: Runs every 3 scenes to update Key Constraints and prevent context drift
-- **Quality Gates**: Originality check, Impact assessment, Polish
+- **Quality Gates**: Originality check (plagiarism), Impact assessment (emotional resonance), Polish (final refinement)
 
 ### Agent System & Data Dependencies
 
 Each of the 9 agents has specific data inputs and outputs:
 
 ```mermaid
-flowchart LR
-    subgraph Inputs
-        Seed[Seed Idea]
-        Outline[Outline]
-        Context[Qdrant Context]
+flowchart TB
+    subgraph Inputs["Data Sources"]
+        Seed[/"User Seed Idea"/]
+        Outline[("Outline from Supabase")]
+        Memory[("Vector Memory from Qdrant")]
+        Constraints["Key Constraints"]
     end
     
-    subgraph Agents
-        Architect
-        Profiler
-        Worldbuilder
-        Strategist
-        Writer
-        Critic
-        Originality
-        Impact
-        Archivist
+    subgraph PlanningAgents["Planning Agents"]
+        direction LR
+        Architect["Architect"]
+        Profiler["Profiler"]
+        Worldbuilder["Worldbuilder"]
+        Strategist["Strategist"]
     end
     
-    subgraph Outputs
-        Supabase[(Supabase)]
-        Qdrant[(Qdrant)]
-        Redis[(Redis SSE)]
+    subgraph ExecutionAgents["Execution Agents"]
+        direction LR
+        Writer["Writer"]
+        Critic["Critic"]
+    end
+    
+    subgraph QualityAgents["Quality Agents"]
+        direction LR
+        Originality["Originality"]
+        Impact["Impact"]
+        Archivist["Archivist"]
+    end
+    
+    subgraph Storage["Persistence Layer"]
+        DB[(Supabase)]
+        Vec[(Qdrant)]
+        Stream[(Redis Streams)]
     end
     
     Seed --> Architect
-    Architect --> Supabase
-    Architect --> Redis
-    Profiler --> Supabase
-    Profiler --> Qdrant
-    Worldbuilder --> Supabase
-    Worldbuilder --> Qdrant
+    Architect --> DB
+    Architect --> Stream
+    
+    Profiler --> DB
+    Profiler --> Vec
+    
+    Worldbuilder --> DB
+    Worldbuilder --> Vec
+    
     Outline --> Writer
-    Context --> Writer
-    Writer --> Supabase
-    Writer --> Qdrant
-    Writer --> Critic
-    Critic --> Writer
-    Archivist --> Writer
-    Originality --> Supabase
-    Impact --> Supabase
+    Memory --> Writer
+    Constraints --> Writer
+    Writer --> DB
+    Writer --> Vec
+    
+    Writer <--> Critic
+    Archivist --> Constraints
+    
+    Originality --> DB
+    Impact --> DB
 ```
 
 **Agent Responsibilities:**
-- **Planning**: Architect (Genesis, Outlining), Profiler (Characters), Worldbuilder, Strategist (Advanced Planning)
-- **Execution**: Writer (Drafting, Revision), Critic (Quality feedback)
-- **Quality**: Originality (Plagiarism check), Impact (Emotional assessment), Archivist (Key Constraints)
+
+| Agent | Phase | Input | Output |
+|-------|-------|-------|--------|
+| Architect | Genesis, Outlining | Seed idea | Narrative possibility, Scene outline |
+| Profiler | Characters | Seed idea | Character profiles + embeddings |
+| Worldbuilder | Worldbuilding | Characters | World elements + embeddings |
+| Strategist | Advanced Planning | Outline | Detailed scene plans |
+| Writer | Drafting, Revision | Outline, Context, Constraints | Scene drafts + embeddings |
+| Critic | Critique | Draft | Score (1-10) + feedback |
+| Originality | Originality Check | Full draft | Plagiarism score |
+| Impact | Impact Assessment | Full draft | Emotional resonance score |
+| Archivist | Every 3 scenes | Raw facts | Updated Key Constraints |
 
 ### Data Model / Persistence
 
 ```mermaid
 erDiagram
-    PROJECTS ||--o{ RUN_ARTIFACTS : has
+    USERS ||--o{ PROJECTS : owns
+    PROJECTS ||--o{ RUN_ARTIFACTS : contains
     PROJECTS ||--o{ CHARACTERS : has
     PROJECTS ||--o{ WORLDBUILDING : has
+    PROJECTS ||--o{ OUTLINES : has
     PROJECTS ||--o{ DRAFTS : has
-    DRAFTS ||--o{ CRITIQUES : has
+    PROJECTS ||--o{ RESEARCH_RESULTS : has
+    DRAFTS ||--o{ CRITIQUES : receives
+    
+    PROJECTS {
+        uuid id PK
+        uuid user_id FK
+        string seed_idea
+        jsonb settings
+        timestamp created_at
+    }
+    
+    RUN_ARTIFACTS {
+        uuid id PK
+        uuid project_id FK
+        string run_id
+        string phase
+        string artifact_type
+        jsonb content
+    }
+    
+    CHARACTERS {
+        uuid id PK
+        uuid project_id FK
+        string name
+        string archetype
+        string qdrant_point_id
+    }
+    
+    DRAFTS {
+        uuid id PK
+        uuid project_id FK
+        int scene_number
+        text content
+        int revision_count
+    }
+    
+    CRITIQUES {
+        uuid id PK
+        uuid draft_id FK
+        float score
+        jsonb feedback
+        boolean passed
+    }
 ```
 
-**Supabase Tables:**
-| Table | Key Fields |
-|-------|-----------|
-| `projects` | id, user_id, seed_idea, settings |
-| `run_artifacts` | project_id, run_id, phase, artifact_type, content |
-| `characters` | project_id, name, archetype, psychology, qdrant_point_id |
-| `worldbuilding` | project_id, element_type, content, qdrant_point_id |
-| `drafts` | project_id, scene_number, content, revision_count |
-| `critiques` | draft_id, score, feedback, passed |
-| `research_results` | project_id, provider, query, result, citations |
+**Key Tables:**
+- `projects` - User projects with seed idea and generation settings
+- `run_artifacts` - All phase outputs (JSONB content for flexibility)
+- `characters` / `worldbuilding` - Linked to Qdrant via `qdrant_point_id`
+- `drafts` / `critiques` - Scene content with revision tracking
+- `research_results` - "Eternal Memory" for cross-project reuse
 
 ### Qdrant Vector Collections
 
 ```mermaid
-flowchart LR
-    subgraph Agents
-        Profiler
-        Worldbuilder
-        Writer
+flowchart TB
+    subgraph Embedding["Embedding Pipeline"]
+        Text["Text Content"] --> Embed["text-embedding-3-small"]
+        Embed --> Vector["1536-dim Vector"]
     end
     
-    subgraph Qdrant
-        Characters[(characters)]
-        World[(worldbuilding)]
-        Scenes[(scenes)]
+    subgraph Collections["Qdrant Collections"]
+        Characters[("characters
+        Character profiles")]
+        World[("worldbuilding
+        World elements")]
+        Scenes[("scenes
+        Scene content")]
     end
     
-    Profiler -->|store| Characters
-    Worldbuilder -->|store| World
-    Writer -->|store| Scenes
-    Writer -->|retrieve| Characters
-    Writer -->|retrieve| World
-    Writer -->|retrieve| Scenes
+    subgraph Agents["Agent Operations"]
+        direction LR
+        Profiler["Profiler"] -->|store| Characters
+        Worldbuilder["Worldbuilder"] -->|store| World
+        Writer["Writer"] -->|store| Scenes
+    end
+    
+    subgraph Retrieval["Context Retrieval"]
+        Query["Scene Context Query"]
+        Query -->|similarity search| Characters
+        Query -->|similarity search| World
+        Query -->|similarity search| Scenes
+        Characters --> Context["Combined Context"]
+        World --> Context
+        Scenes --> Context
+        Context --> Writer
+    end
 ```
 
-All collections use 1536-dimensional vectors (OpenAI text-embedding-3-small).
+**Vector Memory Features:**
+- **Embedding Model**: OpenAI text-embedding-3-small (1536 dimensions)
+- **Similarity Search**: Cosine similarity for context retrieval
+- **Cross-Collection Queries**: Writer retrieves from all 3 collections for scene context
+- **Eternal Memory**: Embeddings persist across generation runs for continuity
 
 ### Repository Structure Map
 
 ```mermaid
-flowchart LR
-    subgraph Frontend
-        FE[frontend/src/]
-        Pages[pages/]
-        Components[components/]
-        Hooks[hooks/]
+flowchart TB
+    subgraph Root["manoe/"]
+        subgraph FE["frontend/ - React + Vite"]
+            FE_Pages["pages/
+            GenerationPage.tsx
+            DashboardPage.tsx"]
+            FE_Comp["components/
+            AgentChat.tsx
+            SettingsModal.tsx"]
+            FE_Hooks["hooks/
+            useGenerationStream.ts
+            useProjects.ts"]
+        end
+        
+        subgraph GW["api-gateway/ - ts.ed"]
+            GW_Ctrl["controllers/
+            OrchestrationController.ts"]
+            GW_Svc["services/
+            StorytellerOrchestrator.ts
+            LLMProviderService.ts
+            QdrantMemoryService.ts"]
+            GW_Models["models/
+            AgentModels.ts
+            LLMModels.ts"]
+        end
+        
+        subgraph Infra["Infrastructure"]
+            Docker["docker-compose.yml"]
+            Supabase["supabase/migrations/"]
+            GHA[".github/workflows/"]
+        end
     end
-    
-    subgraph APIGateway
-        AG[api-gateway/src/]
-        Controllers[controllers/]
-        Services[services/]
-        Models[models/]
-    end
-    
-    FE --> Pages
-    FE --> Components
-    FE --> Hooks
-    AG --> Controllers
-    AG --> Services
-    AG --> Models
 ```
 
 **Key Files:**
-- `frontend/src/pages/GenerationPage.tsx` - Main generation UI
-- `frontend/src/components/AgentChat.tsx` - Agent cards (2534 lines)
-- `frontend/src/hooks/useGenerationStream.ts` - SSE streaming hook
-- `api-gateway/src/services/StorytellerOrchestrator.ts` - Main orchestrator (1435 lines)
-- `api-gateway/src/models/AgentModels.ts` - 9 agents, 12 phases
-- `api-gateway/src/models/LLMModels.ts` - 6 LLM providers
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `frontend/src/components/AgentChat.tsx` | 2534 | Agent cards with real-time updates |
+| `api-gateway/src/services/StorytellerOrchestrator.ts` | 1435 | Main orchestration logic |
+| `api-gateway/src/models/AgentModels.ts` | - | 9 agents, 12 phases definitions |
+| `api-gateway/src/models/LLMModels.ts` | - | 6 LLM provider configurations |
 
 ### SSE Event Types
 
-The orchestrator publishes these event types to Redis Streams for real-time frontend updates:
+The orchestrator publishes events to Redis Streams for real-time frontend updates via Server-Sent Events:
 
 ```mermaid
-flowchart LR
-    subgraph Events["SSE Event Types"]
-        E1["generation_started"]
-        E2["phase_start"]
-        E3["agent_start"]
-        E4["agent_complete"]
-        E5["new_developments_collected"]
-        E6["generation_complete"]
-        E7["generation_cancelled"]
-        E8["generation_error"]
-        E9["heartbeat"]
+flowchart TB
+    subgraph Lifecycle["Generation Lifecycle Events"]
+        Start["generation_started"] --> Phase["phase_start"]
+        Phase --> Agent["agent_start"]
+        Agent --> Complete["agent_complete"]
+        Complete -->|next phase| Phase
+        Complete -->|all done| Done["generation_complete"]
     end
     
-    E1 --> E2
-    E2 --> E3
-    E3 --> E4
-    E4 -->|next phase| E2
-    E4 -->|every 3 scenes| E5
-    E5 --> E4
-    E4 -->|all done| E6
-    E2 -->|error| E8
-    E2 -->|cancelled| E7
+    subgraph Special["Special Events"]
+        Archivist["new_developments_collected"]
+        Heartbeat["heartbeat (15s)"]
+    end
+    
+    subgraph Errors["Error Events"]
+        Cancel["generation_cancelled"]
+        Error["generation_error"]
+    end
+    
+    Complete -->|every 3 scenes| Archivist
+    Archivist --> Complete
 ```
 
-**Event Descriptions:**
-- `generation_started` - Run initialized with runId
-- `phase_start` - New phase beginning
-- `agent_start` - Agent activated
-- `agent_complete` - Agent output ready
-- `new_developments_collected` - Archivist constraint update
-- `generation_complete` - All phases done
-- `generation_cancelled` - User cancelled
-- `generation_error` - Fatal error
-- `heartbeat` - Keep-alive every 15s
+**Event Payload Structure:**
+
+| Event | Key Fields | Description |
+|-------|-----------|-------------|
+| `generation_started` | runId, projectId | Run initialized |
+| `phase_start` | phase, phaseNumber | New phase beginning |
+| `agent_start` | agentName, phase | Agent activated |
+| `agent_complete` | agentName, output | Agent output ready |
+| `new_developments_collected` | constraints | Archivist update |
+| `generation_complete` | totalPhases, duration | All phases done |
+| `heartbeat` | timestamp | Keep-alive (15s interval) |
 
 ## Generation Workflow
 
