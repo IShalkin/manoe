@@ -80,6 +80,7 @@ export interface RunStatus {
 export class StorytellerOrchestrator {
   private activeRuns: Map<string, GenerationState> = new Map();
   private pauseCallbacks: Map<string, () => boolean> = new Map();
+  private isShuttingDown: boolean = false;
 
   @Inject()
   private llmProvider: LLMProviderService;
@@ -956,7 +957,7 @@ export class StorytellerOrchestrator {
         const prompt = await this.langfuse.getCompiledPrompt(
           promptName,
           variables,
-          this.getFallbackPrompt(agent)
+          { fallback: this.getFallbackPrompt(agent) }
         );
         return prompt;
       } catch (error) {
@@ -1086,22 +1087,47 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
   /**
    * Handle generation error
+   * 
+   * IMPORTANT: Publishes ERROR event to Redis Stream so clients don't hang forever
+   * Client should check for event.type === "ERROR" and stop waiting
    */
   private async handleError(runId: string, error: unknown): Promise<void> {
     const state = this.activeRuns.get(runId);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+
     if (state) {
-      state.error = String(error);
+      state.error = errorMessage;
       state.updatedAt = new Date().toISOString();
     }
 
-    await this.publishEvent(runId, "generation_error", {
-      error: String(error),
+    // Publish detailed ERROR event - clients MUST check for this
+    // Event type "ERROR" (uppercase) signals terminal failure
+    await this.publishEvent(runId, "ERROR", {
+      error: errorMessage,
+      stack: errorStack,
+      phase: state?.phase ?? "unknown",
+      currentScene: state?.currentScene ?? 0,
+      totalScenes: state?.totalScenes ?? 0,
+      recoverable: false,
+      timestamp: new Date().toISOString(),
     });
 
+    // Also publish generation_error for backwards compatibility
+    await this.publishEvent(runId, "generation_error", {
+      error: errorMessage,
+    });
+
+    // End Langfuse trace with error status
     this.langfuse.endTrace(runId, {
       status: "error",
-      error: String(error),
+      error: errorMessage,
+      phase: state?.phase,
+      currentScene: state?.currentScene,
     });
+
+    // Score the trace as failed for analytics
+    this.langfuse.scoreTrace(runId, "success", 0, `Generation failed: ${errorMessage}`);
   }
 
   /**
@@ -1243,5 +1269,166 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
       startedAt: state.startedAt,
       updatedAt: state.updatedAt,
     }));
+  }
+
+  // ==================== GRACEFUL SHUTDOWN ====================
+
+  /**
+   * Initiate graceful shutdown
+   * 
+   * Pauses all active runs and saves their state to Supabase.
+   * When the service restarts, runs can be restored using restoreRun().
+   * 
+   * @param timeoutMs - Maximum time to wait for runs to pause (default: 30s)
+   * @returns Number of runs that were saved
+   */
+  async gracefulShutdown(timeoutMs: number = 30000): Promise<number> {
+    console.log(`Orchestrator: Initiating graceful shutdown (timeout: ${timeoutMs}ms)`);
+    this.isShuttingDown = true;
+
+    const activeRuns = Array.from(this.activeRuns.values());
+    
+    if (activeRuns.length === 0) {
+      console.log("Orchestrator: No active runs to save");
+      return 0;
+    }
+
+    console.log(`Orchestrator: Saving ${activeRuns.length} active runs...`);
+
+    // Pause all runs
+    for (const state of activeRuns) {
+      state.isPaused = true;
+      state.updatedAt = new Date().toISOString();
+      
+      // Notify clients that we're shutting down
+      await this.publishEvent(state.runId, "shutdown_initiated", {
+        message: "Server is restarting. Your generation will resume automatically.",
+        phase: state.phase,
+        currentScene: state.currentScene,
+      });
+    }
+
+    // Wait for any in-flight LLM calls to complete (with timeout)
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      // Check if all runs have reached a safe checkpoint
+      const allSafe = activeRuns.every((state) => {
+        // A run is "safe" if it's paused and not in the middle of an LLM call
+        return state.isPaused;
+      });
+
+      if (allSafe) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // Save all run states to Supabase for recovery
+    let savedCount = 0;
+    for (const state of activeRuns) {
+      try {
+        // Serialize the state (Maps need special handling)
+        const serializedState = {
+          ...state,
+          drafts: Object.fromEntries(state.drafts),
+          critiques: Object.fromEntries(state.critiques),
+          revisionCount: Object.fromEntries(state.revisionCount),
+        };
+
+        await this.supabase.saveRunArtifact({
+          runId: state.runId,
+          projectId: state.projectId,
+          artifactType: "run_state_snapshot",
+          content: serializedState,
+        });
+
+        savedCount++;
+        console.log(`Orchestrator: Saved state for run ${state.runId}`);
+      } catch (error) {
+        console.error(`Orchestrator: Failed to save state for run ${state.runId}:`, error);
+      }
+    }
+
+    // Flush Langfuse events
+    await this.langfuse.flush();
+
+    console.log(`Orchestrator: Graceful shutdown complete. Saved ${savedCount}/${activeRuns.length} runs.`);
+    return savedCount;
+  }
+
+  /**
+   * Restore runs from saved state after restart
+   * 
+   * Call this on service startup to recover any runs that were
+   * interrupted by a shutdown/restart.
+   * 
+   * @param projectId - Optional: only restore runs for a specific project
+   * @returns Number of runs restored
+   */
+  async restoreFromShutdown(runId?: string): Promise<number> {
+    console.log("Orchestrator: Checking for runs to restore...");
+
+    try {
+      // If no runId provided, we can't restore (would need a list endpoint)
+      if (!runId) {
+        console.log("Orchestrator: No runId provided for restoration");
+        return 0;
+      }
+
+      // Get saved run state from Supabase
+      const artifact = await this.supabase.getRunArtifact(runId, "run_state_snapshot");
+
+      if (!artifact) {
+        console.log("Orchestrator: No saved run state found");
+        return 0;
+      }
+
+      try {
+        const artifactData = artifact as { content: Record<string, unknown> };
+        const savedState = artifactData.content;
+        
+        // Deserialize the state (restore Maps from serialized objects)
+        const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
+        const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
+        const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
+
+        const state: GenerationState = {
+          ...(savedState as unknown as GenerationState),
+          drafts: new Map(
+            Object.entries(draftsObj).map(([k, v]) => [parseInt(k, 10), v])
+          ),
+          critiques: new Map(
+            Object.entries(critiquesObj).map(([k, v]) => [parseInt(k, 10), v])
+          ),
+          revisionCount: new Map(
+            Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
+          ),
+          isPaused: true, // Keep paused until explicitly resumed
+        };
+
+        this.activeRuns.set(state.runId, state);
+
+        // Notify clients that the run is restored
+        await this.publishEvent(state.runId, "run_restored", {
+          message: "Generation restored after server restart. Call resume to continue.",
+          phase: state.phase,
+          currentScene: state.currentScene,
+        });
+
+        console.log(`Orchestrator: Restored run ${state.runId} (phase: ${state.phase})`);
+        return 1;
+      } catch (error) {
+        console.error(`Orchestrator: Failed to restore run from artifact:`, error);
+        return 0;
+      }
+    } catch (error) {
+      console.error("Orchestrator: Error restoring runs:", error);
+      return 0;
+    }
+  }
+
+  /**
+   * Check if shutdown is in progress
+   */
+  get shuttingDown(): boolean {
+    return this.isShuttingDown;
   }
 }

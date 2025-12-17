@@ -57,6 +57,15 @@ export interface PromptTemplate {
 }
 
 /**
+ * Prompt fetch options
+ */
+export interface PromptFetchOptions {
+  version?: number;
+  label?: string;
+  useCache?: boolean;
+}
+
+/**
  * Active trace context
  */
 interface TraceContext {
@@ -65,11 +74,25 @@ interface TraceContext {
   spans: Map<string, ReturnType<ReturnType<Langfuse["trace"]>["span"]>>;
 }
 
+/**
+ * Cached prompt with TTL
+ */
+interface CachedPrompt {
+  template: PromptTemplate;
+  cachedAt: number;
+}
+
 @Service()
 export class LangfuseService {
   private client: Langfuse | null = null;
   private activeTraces: Map<string, TraceContext> = new Map();
-  private promptCache: Map<string, PromptTemplate> = new Map();
+  private promptCache: Map<string, CachedPrompt> = new Map();
+
+  /**
+   * Prompt cache TTL in milliseconds (5 minutes)
+   * Reduces latency by avoiding API calls on every request
+   */
+  private readonly PROMPT_CACHE_TTL_MS = 5 * 60 * 1000;
 
   constructor() {
     this.initialize();
@@ -321,35 +344,68 @@ export class LangfuseService {
   // ==================== PROMPT MANAGEMENT ====================
 
   /**
+   * Default label for production prompts
+   * Use versioned prompts with labels for LLMOps best practices
+   */
+  private readonly DEFAULT_PROMPT_LABEL = "production";
+
+  /**
    * Get a prompt from Langfuse Prompt Management
    * 
-   * @param promptName - Name of the prompt in Langfuse
-   * @param version - Optional specific version (defaults to latest production)
-   * @param useCache - Whether to use cached prompt (default: true)
+   * Best Practice: Use labels (e.g., "production") instead of version numbers
+   * This allows updating prompts in Langfuse dashboard without code changes
+   * 
+   * @param promptName - Name of the prompt in Langfuse (e.g., "manoe-architect-v1")
+   * @param options - Fetch options (version, label, useCache)
    * @returns Prompt template or null if not found
+   * 
+   * @example
+   * // Fetch production-tagged prompt (recommended)
+   * const prompt = await langfuse.getPrompt("manoe-architect-v1", { label: "production" });
+   * 
+   * // Fetch specific version
+   * const prompt = await langfuse.getPrompt("manoe-architect-v1", { version: 3 });
    */
   async getPrompt(
     promptName: string,
-    version?: number,
-    useCache: boolean = true
+    options: PromptFetchOptions = {}
   ): Promise<PromptTemplate | null> {
     if (!this.client) {
       console.warn(`Langfuse: Cannot fetch prompt "${promptName}" - client not initialized`);
       return null;
     }
 
-    const cacheKey = version ? `${promptName}:${version}` : promptName;
+    const { version, label = this.DEFAULT_PROMPT_LABEL, useCache = true } = options;
 
-    // Check cache first
+    // Build cache key based on version or label
+    const cacheKey = version 
+      ? `${promptName}:v${version}` 
+      : `${promptName}:${label}`;
+
+    // Check cache first with TTL validation
     if (useCache && this.promptCache.has(cacheKey)) {
-      return this.promptCache.get(cacheKey)!;
+      const cached = this.promptCache.get(cacheKey)!;
+      const age = Date.now() - cached.cachedAt;
+      
+      if (age < this.PROMPT_CACHE_TTL_MS) {
+        // Cache hit - saves 200-500ms latency per request
+        return cached.template;
+      } else {
+        // Cache expired - remove stale entry
+        this.promptCache.delete(cacheKey);
+        console.log(`Langfuse: Cache expired for prompt "${promptName}" (age: ${Math.round(age / 1000)}s)`);
+      }
     }
 
     try {
-      const prompt = await this.client.getPrompt(promptName, version);
+      // Fetch prompt with version or label
+      // If version is specified, use it; otherwise use label
+      const prompt = version
+        ? await this.client.getPrompt(promptName, version)
+        : await this.client.getPrompt(promptName, undefined, { label });
       
       if (!prompt) {
-        console.warn(`Langfuse: Prompt "${promptName}" not found`);
+        console.warn(`Langfuse: Prompt "${promptName}" (${version ? `v${version}` : label}) not found`);
         return null;
       }
 
@@ -361,8 +417,13 @@ export class LangfuseService {
         labels: prompt.labels,
       };
 
-      // Cache the prompt
-      this.promptCache.set(cacheKey, template);
+      // Cache the prompt with timestamp for TTL
+      this.promptCache.set(cacheKey, {
+        template,
+        cachedAt: Date.now(),
+      });
+
+      console.log(`Langfuse: Loaded prompt "${promptName}" v${prompt.version} [${prompt.labels?.join(", ") || "no labels"}] (cached for ${this.PROMPT_CACHE_TTL_MS / 1000}s)`);
 
       return template;
     } catch (error) {
@@ -395,20 +456,31 @@ export class LangfuseService {
   /**
    * Get and compile a prompt in one call
    * 
+   * Best Practice: Always provide a fallback for resilience
+   * 
    * @param promptName - Name of the prompt in Langfuse
    * @param variables - Variables to substitute
-   * @param fallback - Fallback prompt if Langfuse fetch fails
+   * @param options - Fetch options and fallback
    * @returns Compiled prompt string
+   * 
+   * @example
+   * const prompt = await langfuse.getCompiledPrompt(
+   *   "manoe-architect-v1",
+   *   { seedIdea: "A story about..." },
+   *   { label: "production", fallback: "Default prompt..." }
+   * );
    */
   async getCompiledPrompt(
     promptName: string,
     variables: Record<string, string>,
-    fallback?: string
+    options: PromptFetchOptions & { fallback?: string } = {}
   ): Promise<string> {
-    const template = await this.getPrompt(promptName);
+    const { fallback, ...fetchOptions } = options;
+    const template = await this.getPrompt(promptName, fetchOptions);
 
     if (!template) {
       if (fallback) {
+        console.warn(`Langfuse: Using fallback for prompt "${promptName}"`);
         return this.compilePrompt(fallback, variables);
       }
       throw new Error(`Prompt "${promptName}" not found and no fallback provided`);
@@ -446,34 +518,43 @@ export class LangfuseService {
 
 /**
  * Agent prompt names in Langfuse
- * These should match the prompts configured in Langfuse dashboard
+ * 
+ * Naming convention: {project}-{agent}-v{version}
+ * Use "production" label in Langfuse dashboard to mark active prompts
+ * 
+ * LLMOps Best Practice:
+ * 1. Create prompt in Langfuse: "manoe-architect-v1"
+ * 2. Tag it with "production" label
+ * 3. Code fetches by name + label (not version number)
+ * 4. To update: create new version, move "production" tag
  */
 export const AGENT_PROMPTS = {
-  ARCHITECT: "manoe-architect",
-  PROFILER: "manoe-profiler",
-  WORLDBUILDER: "manoe-worldbuilder",
-  STRATEGIST: "manoe-strategist",
-  WRITER: "manoe-writer",
-  CRITIC: "manoe-critic",
-  ORIGINALITY: "manoe-originality",
-  IMPACT: "manoe-impact",
-  ARCHIVIST: "manoe-archivist",
+  ARCHITECT: "manoe-architect-v1",
+  PROFILER: "manoe-profiler-v1",
+  WORLDBUILDER: "manoe-worldbuilder-v1",
+  STRATEGIST: "manoe-strategist-v1",
+  WRITER: "manoe-writer-v1",
+  CRITIC: "manoe-critic-v1",
+  ORIGINALITY: "manoe-originality-v1",
+  IMPACT: "manoe-impact-v1",
+  ARCHIVIST: "manoe-archivist-v1",
 } as const;
 
 /**
  * Phase prompt names in Langfuse
+ * Same naming convention as agent prompts
  */
 export const PHASE_PROMPTS = {
-  GENESIS: "manoe-phase-genesis",
-  CHARACTERS: "manoe-phase-characters",
-  NARRATOR_DESIGN: "manoe-phase-narrator-design",
-  WORLDBUILDING: "manoe-phase-worldbuilding",
-  OUTLINING: "manoe-phase-outlining",
-  ADVANCED_PLANNING: "manoe-phase-advanced-planning",
-  DRAFTING: "manoe-phase-drafting",
-  CRITIQUE: "manoe-phase-critique",
-  REVISION: "manoe-phase-revision",
-  ORIGINALITY_CHECK: "manoe-phase-originality-check",
-  IMPACT_ASSESSMENT: "manoe-phase-impact-assessment",
-  POLISH: "manoe-phase-polish",
+  GENESIS: "manoe-phase-genesis-v1",
+  CHARACTERS: "manoe-phase-characters-v1",
+  NARRATOR_DESIGN: "manoe-phase-narrator-design-v1",
+  WORLDBUILDING: "manoe-phase-worldbuilding-v1",
+  OUTLINING: "manoe-phase-outlining-v1",
+  ADVANCED_PLANNING: "manoe-phase-advanced-planning-v1",
+  DRAFTING: "manoe-phase-drafting-v1",
+  CRITIQUE: "manoe-phase-critique-v1",
+  REVISION: "manoe-phase-revision-v1",
+  ORIGINALITY_CHECK: "manoe-phase-originality-check-v1",
+  IMPACT_ASSESSMENT: "manoe-phase-impact-assessment-v1",
+  POLISH: "manoe-phase-polish-v1",
 } as const;
