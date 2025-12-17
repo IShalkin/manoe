@@ -1061,7 +1061,7 @@ async def get_run_state(run_id: str, request: Request):
         # Owner found in Redis - verify it matches
         if owner != user_id:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=403,
                 detail="You don't have permission to access this run",
             )
     else:
@@ -1070,12 +1070,12 @@ async def get_run_state(run_id: str, request: Request):
             supabase_owner = await worker.persistence_service.get_run_owner_via_project(run_id)
             if supabase_owner is None:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=404,
                     detail="Run not found or access denied",
                 )
             if supabase_owner != user_id:
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
+                    status_code=403,
                     detail="You don't have permission to access this run",
                 )
             # Self-healing: store ownership in Redis for future requests
@@ -1083,7 +1083,7 @@ async def get_run_state(run_id: str, request: Request):
             print(f"[get_run_state] Restored ownership for legacy run {run_id} -> {user_id}")
         else:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=404,
                 detail="Run not found or access denied",
             )
 
