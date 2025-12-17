@@ -5,13 +5,15 @@
 #   1. Copy .env.example to .env and configure your API keys
 #   2. Run: docker-compose up -d
 #   3. Access frontend at http://localhost:5173
-#   4. Access orchestrator API at http://localhost:8001
 #
 # Services:
 #   - frontend: React + TypeScript + Vite (port 5173)
-#   - orchestrator: Python FastAPI AI orchestrator (port 8001)
 #   - redis: Message broker for SSE events
 #   - qdrant: Vector database for character/worldbuilding memory
+#
+# Note: The Python orchestrator has been deprecated in favor of the
+# TypeScript api-gateway implementation. For production deployments,
+# use docker-compose.vps.yml which includes the api-gateway service.
 
 version: "3.8"
 
@@ -30,67 +32,12 @@ services:
     environment:
       - VITE_SUPABASE_URL=${VITE_SUPABASE_URL:-}
       - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY:-}
-      - VITE_ORCHESTRATOR_URL=${VITE_ORCHESTRATOR_URL:-http://localhost:8001}
-    depends_on:
-      - orchestrator
-    networks:
-      - manoe-network
-
-  # ==========================================================================
-  # AI Orchestrator - Python/FastAPI
-  # ==========================================================================
-  orchestrator:
-    build:
-      context: ./orchestrator
-      dockerfile: Dockerfile
-    container_name: manoe-orchestrator
-    restart: unless-stopped
-    ports:
-      - "${ORCHESTRATOR_PORT:-8001}:8001"
-    environment:
-      # LLM Provider API Keys (BYOK - Bring Your Own Key)
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_ORG_ID=${OPENAI_ORG_ID:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - VENICE_API_KEY=${VENICE_API_KEY:-}
-      # Agent Model Configuration
-      - ARCHITECT_PROVIDER=${ARCHITECT_PROVIDER:-openai}
-      - ARCHITECT_MODEL=${ARCHITECT_MODEL:-gpt-4o}
-      - PROFILER_PROVIDER=${PROFILER_PROVIDER:-openai}
-      - PROFILER_MODEL=${PROFILER_MODEL:-gpt-4o}
-      - STRATEGIST_PROVIDER=${STRATEGIST_PROVIDER:-openai}
-      - STRATEGIST_MODEL=${STRATEGIST_MODEL:-gpt-4o}
-      - WRITER_PROVIDER=${WRITER_PROVIDER:-openai}
-      - WRITER_MODEL=${WRITER_MODEL:-gpt-4o-mini}
-      - CRITIC_PROVIDER=${CRITIC_PROVIDER:-openai}
-      - CRITIC_MODEL=${CRITIC_MODEL:-gpt-4o}
-      # Infrastructure
-      - REDIS_URL=redis://redis:6379
-      - QDRANT_URL=http://qdrant:6333
-      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
-      - SUPABASE_URL=${SUPABASE_URL:-}
-      - SUPABASE_KEY=${SUPABASE_KEY:-}
-      # Settings
-      - DEFAULT_TEMPERATURE=${DEFAULT_TEMPERATURE:-0.7}
-      - MAX_RETRIES=${MAX_RETRIES:-3}
-      - TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-120}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3000/api}
     depends_on:
       redis:
         condition: service_healthy
-      qdrant:
-        condition: service_healthy
     networks:
       - manoe-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   # ==========================================================================
   # Redis - Message Broker for SSE Events
@@ -114,19 +61,24 @@ services:
 
   # ==========================================================================
   # Qdrant - Vector Database for Memory
+  # SECURITY: Bind to localhost only. For production, set QDRANT_API_KEY!
   # ==========================================================================
   qdrant:
     image: qdrant/qdrant:v1.7.4
     container_name: manoe-qdrant
     restart: unless-stopped
     ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+      # Bind to localhost only to prevent external access
+      # For production with external access, ensure QDRANT_API_KEY is set
+      - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
       - qdrant-data:/qdrant/storage
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
       - QDRANT__SERVICE__HTTP_PORT=6333
+      # SECURITY: Set API key in production to prevent unauthorized access
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:-}
     networks:
       - manoe-network
     healthcheck:
