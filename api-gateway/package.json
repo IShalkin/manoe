@@ -20,6 +20,7 @@
     "@tsed/platform-express": "^7.53.0",
     "@tsed/schema": "^7.53.0",
     "@tsed/socketio": "^7.53.0",
+    "@tsed/swagger": "^7.53.0",
     "@anthropic-ai/sdk": "^0.32.0",
     "@google/generative-ai": "^0.21.0",
     "@qdrant/js-client-rest": "^1.12.0",
