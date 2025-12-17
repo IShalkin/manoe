@@ -160,6 +160,71 @@ export function GenerationPage() {
     }
   }, [project, updateProject]);
 
+  // Handle resume interrupted generation (after redeploy)
+  const handleResume = useCallback(async (previousRunId: string, startFromPhase: string) => {
+    if (!project || isRegenerating) return;
+    
+    if (!hasAnyApiKey()) {
+      setError('Please configure an API key in Settings first');
+      return;
+    }
+
+    setIsRegenerating(true);
+    setError(null);
+
+    try {
+      const agentConfig = getAgentConfig('architect');
+      
+      if (!agentConfig) {
+        throw new Error('No agent configuration found. Please configure a provider in Settings.');
+      }
+      
+      const apiKey = getProviderKey(agentConfig.provider);
+      
+      if (!apiKey) {
+        throw new Error(`No API key configured for ${agentConfig.provider}`);
+      }
+
+      // Call orchestrator with resume parameters
+      const response = await orchestratorFetch('/generate', {
+        method: 'POST',
+        body: JSON.stringify({
+          seed_idea: project.seedIdea,
+          moral_compass: project.moralCompass,
+          target_audience: project.targetAudience,
+          themes: project.themes,
+          provider: agentConfig.provider,
+          model: agentConfig.model,
+          api_key: apiKey,
+          generation_mode: 'full',
+          start_from_phase: startFromPhase,
+          previous_run_id: previousRunId,
+          supabase_project_id: project.id,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const newRunId = data.run_id;
+      
+      // Update project with new runId and mark as generating
+      await startGeneration(project.id, newRunId);
+      setRunId(newRunId);
+      
+      // Update URL with runId for bookmarking/sharing
+      window.history.replaceState(null, '', `/generate/${project.id}?runId=${newRunId}`);
+    } catch (err) {
+      console.error('[GenerationPage] Failed to resume generation:', err);
+      setError(err instanceof Error ? err.message : 'Failed to resume generation');
+    } finally {
+      setIsRegenerating(false);
+    }
+  }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration]);
+
   const startNewGeneration = async () => {
     if (!project || isStarting) return;
     
@@ -384,6 +449,7 @@ export function GenerationPage() {
             projectResult={project?.result}
             onUpdateResult={handleUpdateResult}
             onRegenerate={handleRegenerate}
+            onResume={handleResume}
             onNarrativePossibilitySelected={async (possibility) => {
               // User selected a narrative possibility, start full generation with it
               setSelectedNarrative(possibility);

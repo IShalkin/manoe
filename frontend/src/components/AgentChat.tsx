@@ -423,6 +423,7 @@ interface AgentChatProps {
   onUpdateResult?: (result: ProjectResult) => void;
   onRegenerate?: (constraints: RegenerationConstraints) => void;
   onNarrativePossibilitySelected?: (possibility: NarrativePossibility) => void;
+  onResume?: (previousRunId: string, startFromPhase: string) => void;
 }
 
 export interface RegenerationConstraints {
@@ -539,7 +540,7 @@ interface AgentState {
   lastUpdate: string;
 }
 
-export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate, onNarrativePossibilitySelected }: AgentChatProps) {
+export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate, onNarrativePossibilitySelected, onResume }: AgentChatProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -609,6 +610,13 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   }>>({});
   const [activeDiagnosticScene, setActiveDiagnosticScene] = useState<number | null>(null);
 
+  // Interrupted run state (for resume after redeploy)
+  const [isInterrupted, setIsInterrupted] = useState(false);
+  const [canResume, setCanResume] = useState(false);
+  const [resumeFromPhase, setResumeFromPhase] = useState<string | null>(null);
+  const [lastCompletedPhase, setLastCompletedPhase] = useState<string | null>(null);
+  const [isLoadingResumeState, setIsLoadingResumeState] = useState(false);
+
   useEffect(() => {
     if (projectResult?.locks) {
       setLockedAgents(projectResult.locks);
@@ -654,6 +662,12 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       // Reset diagnostic state
       setDiagnosticResults({});
       setActiveDiagnosticScene(null);
+      // Reset interrupted state
+      setIsInterrupted(false);
+      setCanResume(false);
+      setResumeFromPhase(null);
+      setLastCompletedPhase(null);
+      setIsLoadingResumeState(false);
     }
   }, [runId]);
 
@@ -716,6 +730,39 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       setIsResuming(false);
     }
   }, [runId, orchestratorUrl, isResuming, isCancelled]);
+
+  // Handle resume interrupted generation (after redeploy)
+  const handleResumeInterrupted = useCallback(async () => {
+    if (!runId || !onResume || isLoadingResumeState) return;
+    
+    setIsLoadingResumeState(true);
+    
+    try {
+      // Fetch run state to get resume parameters
+      const response = await orchestratorFetch(`/runs/${runId}/state`, {
+        method: 'GET',
+      });
+      
+      if (response.ok) {
+        const state = await response.json();
+        if (state.can_resume && state.resume_from_phase) {
+          // Call parent's onResume with the parameters
+          onResume(runId, state.resume_from_phase);
+        } else {
+          setError('This run cannot be resumed. Please start a new generation.');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        console.error('Failed to get run state:', errorData);
+        setError(`Failed to get run state: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Failed to resume interrupted generation:', err);
+      setError('Failed to resume generation. Please try again.');
+    } finally {
+      setIsLoadingResumeState(false);
+    }
+  }, [runId, onResume, isLoadingResumeState]);
 
   const getAgentContent = useCallback((agent: string): string => {
     if (projectResult?.edits?.[agent]) {
@@ -1061,10 +1108,27 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         
         // Close connection when generation is complete or errored
         if (data.type === 'generation_complete' || data.type === 'generation_error') {
-          setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : 'Error');
+          const isInterruptedRun = data.type === 'generation_error' && data.data.status === 'interrupted';
+          setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : (isInterruptedRun ? 'Interrupted' : 'Error'));
           setIsComplete(true);
           if (eventSource) eventSource.close();
           setIsConnected(false);
+          
+          // Set interrupted state for resume functionality
+          if (isInterruptedRun) {
+            setIsInterrupted(true);
+            // Fetch run state to check if resume is possible
+            orchestratorFetch(`/runs/${runId}/state`, { method: 'GET' })
+              .then(response => response.ok ? response.json() : null)
+              .then(state => {
+                if (state && state.can_resume) {
+                  setCanResume(true);
+                  setResumeFromPhase(state.resume_from_phase);
+                  setLastCompletedPhase(state.last_completed_phase);
+                }
+              })
+              .catch(err => console.error('Failed to fetch run state:', err));
+          }
           
           // Call onComplete callback with result
           if (onComplete) {
@@ -1766,8 +1830,47 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
 
       {/* Error Display */}
       {(error || generationError) && (
-        <div className="bg-red-500/10 border-b border-red-500/30 px-4 py-3">
-          <p className="text-sm text-red-400">{error || generationError}</p>
+        <div className={`border-b px-4 py-3 ${isInterrupted ? 'bg-amber-500/10 border-amber-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1">
+              <p className={`text-sm ${isInterrupted ? 'text-amber-400' : 'text-red-400'}`}>
+                {error || generationError}
+              </p>
+              {isInterrupted && lastCompletedPhase && (
+                <p className="text-xs text-slate-400 mt-1">
+                  Last completed phase: <span className="text-amber-300 font-medium">{lastCompletedPhase}</span>
+                  {resumeFromPhase && (
+                    <span> - Will resume from: <span className="text-emerald-300 font-medium">{resumeFromPhase}</span></span>
+                  )}
+                </p>
+              )}
+            </div>
+            {isInterrupted && canResume && onResume && (
+              <button
+                onClick={handleResumeInterrupted}
+                disabled={isLoadingResumeState}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                {isLoadingResumeState ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Loading...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Resume</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
