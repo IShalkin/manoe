@@ -5,7 +5,8 @@
  * Active in: Outlining, Advanced Planning phases
  */
 
-import { AgentType, GenerationPhase } from "../models/AgentModels";
+import { AgentType } from "../models/AgentModels";
+import { GenerationPhase } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService, AGENT_PROMPTS } from "../services/LangfuseService";
 import { BaseAgent } from "./BaseAgent";
@@ -47,15 +48,15 @@ export class StrategistAgent extends BaseAgent {
     
     if (phase === GenerationPhase.OUTLINING) {
       const validated = this.validateOutput(parsed, OutlineSchema, runId);
-      return { content: validated };
+      return { content: validated as Record<string, unknown> };
     }
     
     if (phase === GenerationPhase.ADVANCED_PLANNING) {
       const validated = this.validateOutput(parsed, AdvancedPlanSchema, runId);
-      return { content: validated };
+      return { content: validated as Record<string, unknown> };
     }
 
-    return { content: parsed };
+    return { content: parsed as Record<string, unknown> };
   }
 
   private async getSystemPrompt(

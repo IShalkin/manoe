@@ -5,7 +5,8 @@
  * Active in: Drafting, Revision, Polish phases
  */
 
-import { AgentType, GenerationPhase, KeyConstraint } from "../models/AgentModels";
+import { AgentType, KeyConstraint } from "../models/AgentModels";
+import { GenerationPhase } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService, AGENT_PROMPTS } from "../services/LangfuseService";
 import { BaseAgent } from "./BaseAgent";
@@ -70,7 +71,7 @@ export class WriterAgent extends BaseAgent {
 
     // For other phases, parse as JSON
     const content = this.parseJSON(response);
-    return { content };
+    return { content: content as Record<string, unknown> };
   }
 
   /**

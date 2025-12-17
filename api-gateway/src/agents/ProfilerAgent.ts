@@ -5,7 +5,8 @@
  * Active in: Characters, Narrator Design phases
  */
 
-import { AgentType, GenerationPhase } from "../models/AgentModels";
+import { AgentType } from "../models/AgentModels";
+import { GenerationPhase } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService, AGENT_PROMPTS } from "../services/LangfuseService";
 import { BaseAgent } from "./BaseAgent";
@@ -46,12 +47,12 @@ export class ProfilerAgent extends BaseAgent {
     if (phase === GenerationPhase.CHARACTERS) {
       const parsed = this.parseJSONArray(response);
       const validated = this.validateOutput(parsed, CharactersArraySchema, runId);
-      return { content: validated };
+      return { content: validated as Record<string, unknown>[] };
     }
 
     // For NARRATOR_DESIGN, return as-is (simple object)
     const content = this.parseJSON(response);
-    return { content };
+    return { content: content as Record<string, unknown> };
   }
 
   private async getSystemPrompt(

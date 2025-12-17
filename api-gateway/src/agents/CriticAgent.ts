@@ -5,7 +5,8 @@
  * Active in: Critique, Revision phases
  */
 
-import { AgentType, GenerationPhase } from "../models/AgentModels";
+import { AgentType } from "../models/AgentModels";
+import { GenerationPhase } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService, AGENT_PROMPTS } from "../services/LangfuseService";
 import { BaseAgent } from "./BaseAgent";
@@ -55,11 +56,11 @@ export class CriticAgent extends BaseAgent {
     const validated = this.validateOutput(parsed, CritiqueSchema, runId);
     
     // Determine if revision is needed
-    const revisionNeeded = this.isRevisionNeeded(validated);
+    const revisionNeeded = this.isRevisionNeeded(validated as Record<string, unknown>);
 
     return {
       content: {
-        ...validated,
+        ...(validated as Record<string, unknown>),
         revision_needed: revisionNeeded,
       },
     };

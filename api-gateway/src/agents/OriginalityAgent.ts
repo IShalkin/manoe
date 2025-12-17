@@ -5,7 +5,8 @@
  * Active in: Originality Check phase
  */
 
-import { AgentType, GenerationPhase } from "../models/AgentModels";
+import { AgentType } from "../models/AgentModels";
+import { GenerationPhase } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService, AGENT_PROMPTS } from "../services/LangfuseService";
 import { BaseAgent } from "./BaseAgent";
@@ -44,7 +45,7 @@ export class OriginalityAgent extends BaseAgent {
 
     const parsed = this.parseJSON(response);
     const validated = this.validateOutput(parsed, OriginalityReportSchema, runId);
-    return { content: validated };
+    return { content: validated as Record<string, unknown> };
   }
 
   private async getSystemPrompt(
