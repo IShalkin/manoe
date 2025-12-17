@@ -30,6 +30,8 @@ from models import (
 )
 from prompts import (
     ARCHITECT_SYSTEM_PROMPT,
+    ARCHIVIST_SYSTEM_PROMPT,
+    ARCHIVIST_USER_PROMPT_TEMPLATE,
     COMPLEXITY_CHECKLIST_PROMPT,
     CONTRADICTION_MAPS_PROMPT,
     CRITIC_SYSTEM_PROMPT,
@@ -126,6 +128,10 @@ class GenerationState:
     revision_count: Dict[int, int] = field(default_factory=dict)
     messages: List[AgentMessage] = field(default_factory=list)
     max_revisions: int = 2
+    # Constraint Resolution (Archivist Agent)
+    key_constraints: Dict[str, Dict] = field(default_factory=dict)  # key -> KeyConstraint dict
+    raw_facts_log: List[Dict] = field(default_factory=list)  # Append-only log of raw facts
+    last_archivist_scene: int = 0  # Last scene where Archivist ran
 
 
 def _safe_join(items: List[Any], separator: str = ", ") -> str:
@@ -217,6 +223,7 @@ class StorytellerGroupChat:
         self.critic: Optional[AssistantAgent] = None
         self.originality: Optional[AssistantAgent] = None
         self.impact: Optional[AssistantAgent] = None
+        self.archivist: Optional[AssistantAgent] = None
 
         # Qdrant memory service (optional)
         self.qdrant_memory: Optional[QdrantMemoryService] = None
@@ -442,6 +449,7 @@ class StorytellerGroupChat:
             "polish": (agent_configs.polish_provider, agent_configs.polish_model),
             "originality": (agent_configs.critic_provider, agent_configs.critic_model),
             "impact": (agent_configs.critic_provider, agent_configs.critic_model),
+            "archivist": (agent_configs.critic_provider, agent_configs.critic_model),
         }
 
         provider, model = provider_map[agent_name]
@@ -575,6 +583,19 @@ Evaluate emotional impact against intended beats.
 Always output impact assessment as valid JSON wrapped in ```json``` blocks.
 """
 
+        archivist_prompt = ARCHIVIST_SYSTEM_PROMPT + """
+
+## Communication Protocol
+
+You can communicate with other agents:
+- ARTIFACT: Output your constraint resolution as final artifact
+- QUESTION to Writer: Ask about specific facts from recent scenes
+- QUESTION to Critic: Ask about consistency issues noted in critiques
+
+Your role is to maintain narrative consistency by resolving contradictory facts.
+Always output constraint resolution as valid JSON wrapped in ```json``` blocks.
+"""
+
         # Create agent instances with enhanced prompts
         # Note: We'll use custom message handling instead of AutoGen's built-in
         self.architect = self._create_agent("Architect", architect_prompt)
@@ -586,6 +607,7 @@ Always output impact assessment as valid JSON wrapped in ```json``` blocks.
         self.polish = self._create_agent("Polish", polish_prompt)
         self.originality = self._create_agent("Originality", originality_prompt)
         self.impact = self._create_agent("Impact", impact_prompt)
+        self.archivist = self._create_agent("Archivist", archivist_prompt)
 
     def _create_agent(self, name: str, system_prompt: str) -> Dict[str, Any]:
         """Create an agent configuration (not AutoGen agent directly due to async requirements)."""
@@ -1784,6 +1806,19 @@ Output ONLY the JSON, starting with {{ and ending with }}. No other text."""
                         memory_context_str += f"- Content Preview: {scene_mem.get('narrative_content', '')[:300]}...\n"
                     memory_context_str += "\n"
 
+        # Format key constraints context (immutable facts from Archivist)
+        # These are canonical truths that MUST be preserved across revisions
+        constraints_context_str = ""
+        constraints_context = self.get_current_constraints_context()
+        if constraints_context and constraints_context != "No constraints established yet.":
+            constraints_context_str = """
+## Key Constraints (IMMUTABLE - DO NOT CONTRADICT)
+
+These are canonical facts established in previous scenes. You MUST preserve these truths in your writing. Do not contradict or ignore them.
+
+"""
+            constraints_context_str += constraints_context + "\n"
+
         # Format narrator design for the prompt (prefer comprehensive narrator_design over basic narrator_config)
         narrator_str = ""
         if narrator_design:
@@ -2084,6 +2119,7 @@ IMPORTANT: Weave these symbolic elements naturally into your scene. Motifs shoul
 
 {previous_scene_summary}
 {memory_context_str}
+{constraints_context_str}
 {narrator_str}
 {sensory_str}
 {subtext_str}
@@ -4195,6 +4231,170 @@ Generate the complexity layer checklist as valid JSON.
 
         return results
 
+    # =========================================================================
+    # Constraint Resolution (Archivist Agent)
+    # =========================================================================
+
+    ARCHIVIST_SNAPSHOT_INTERVAL = 5  # Run Archivist every N scenes
+
+    def should_run_archivist(self, current_scene: int) -> bool:
+        """Check if Archivist should run based on scene interval.
+        
+        Args:
+            current_scene: Current scene number being processed
+            
+        Returns:
+            True if Archivist should run (enough scenes since last snapshot)
+        """
+        if not self.state:
+            return False
+        last_snapshot = self.state.last_archivist_scene
+        return current_scene - last_snapshot >= self.ARCHIVIST_SNAPSHOT_INTERVAL
+
+    def add_raw_fact(self, fact: str, scene_number: int, source_agent: str = "writer") -> None:
+        """Add a raw fact to the append-only log for later processing by Archivist.
+        
+        Args:
+            fact: The raw fact extracted from scene content
+            scene_number: Scene where this fact was established
+            source_agent: Agent that produced this fact (writer, critic)
+        """
+        if not self.state:
+            return
+        
+        from datetime import datetime
+        self.state.raw_facts_log.append({
+            "fact": fact,
+            "scene_number": scene_number,
+            "source_agent": source_agent,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+
+    def get_current_constraints_context(self) -> str:
+        """Get formatted string of current key constraints for agent context.
+        
+        Returns:
+            Formatted string of current constraints for inclusion in prompts
+        """
+        if not self.state or not self.state.key_constraints:
+            return "No constraints established yet."
+        
+        constraints_list = []
+        for key, constraint in self.state.key_constraints.items():
+            constraints_list.append(
+                f"- {key}: {constraint.get('value')} (scene {constraint.get('scene_number')})"
+            )
+        
+        return "\n".join(constraints_list)
+
+    async def run_archivist_snapshot(
+        self,
+        current_scene: int,
+        characters: List[Dict[str, Any]],
+        plot_phase: str = "drafting",
+    ) -> Dict[str, Any]:
+        """
+        Run the Archivist agent to resolve constraints and create a snapshot.
+        
+        This method:
+        1. Collects current constraints and new raw facts
+        2. Calls the Archivist agent to resolve conflicts
+        3. Updates the canonical constraint state
+        4. Clears processed raw facts
+        
+        Args:
+            current_scene: Current scene number
+            characters: Character profiles for context
+            plot_phase: Current plot phase for context
+            
+        Returns:
+            Dict with archivist results including resolved constraints
+        """
+        if not self.state:
+            return {"error": "No generation state available"}
+
+        self._emit_event("phase_start", {"phase": "archivist_snapshot", "scene": current_scene})
+
+        # Format current constraints
+        current_constraints_str = "None" if not self.state.key_constraints else json.dumps(
+            [
+                {
+                    "key": key,
+                    "value": c.get("value"),
+                    "scene_number": c.get("scene_number"),
+                    "category": c.get("category"),
+                }
+                for key, c in self.state.key_constraints.items()
+            ],
+            indent=2
+        )
+
+        # Format new facts log
+        new_facts_str = "None" if not self.state.raw_facts_log else json.dumps(
+            self.state.raw_facts_log,
+            indent=2
+        )
+
+        # Get character names for context
+        character_names = ", ".join([c.get("name", "Unknown") for c in characters])
+
+        # Build user prompt
+        user_prompt = ARCHIVIST_USER_PROMPT_TEMPLATE.format(
+            current_scene=current_scene,
+            last_snapshot_scene=self.state.last_archivist_scene,
+            current_constraints=current_constraints_str,
+            new_facts_log=new_facts_str,
+            character_names=character_names,
+            plot_phase=plot_phase,
+        )
+
+        # Call Archivist agent
+        response = await self._call_agent(self.archivist, user_prompt)
+        msg = self._parse_agent_message("Archivist", response)
+        self.state.messages.append(msg)
+
+        # Process the response
+        result = msg.content if isinstance(msg.content, dict) else {}
+        
+        # Update canonical constraints from Archivist output
+        final_constraints = result.get("final_constraints", [])
+        if final_constraints:
+            # Clear and rebuild key_constraints dict
+            new_constraints = {}
+            for constraint in final_constraints:
+                key = constraint.get("key")
+                if key:
+                    new_constraints[key] = {
+                        "key": key,
+                        "value": constraint.get("value"),
+                        "scene_number": constraint.get("scene_number", current_scene),
+                        "category": constraint.get("category", "plot_point"),
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+            self.state.key_constraints = new_constraints
+
+        # Update last snapshot scene
+        self.state.last_archivist_scene = current_scene
+
+        # Clear processed raw facts
+        processed_count = len(self.state.raw_facts_log)
+        self.state.raw_facts_log = []
+
+        self._emit_event("phase_complete", {
+            "phase": "archivist_snapshot",
+            "scene": current_scene,
+            "constraints_count": len(self.state.key_constraints),
+            "conflicts_resolved": result.get("conflicts_resolved", 0),
+            "facts_discarded": result.get("facts_discarded", 0),
+            "facts_processed": processed_count,
+        })
+
+        return {
+            "archivist_result": result,
+            "constraints_count": len(self.state.key_constraints),
+            "snapshot_scene": current_scene,
+        }
+
     async def run_demo_generation(
         self,
         project: StoryProject,
@@ -5212,6 +5412,26 @@ Apply these insights naturally without explicitly referencing "market research" 
                     draft = draft_result["draft"]
                     await self._store_scene_in_memory(memory_project_id, scene_number, draft)
                     previous_summary = draft.get("narrative_content", "")[:500] + "..."
+
+                # Run Archivist snapshot if enough scenes have accumulated
+                # This resolves contradictory constraints and maintains narrative consistency
+                if self.should_run_archivist(scene_number):
+                    logger.info(f"[run_full_generation] Running Archivist snapshot at scene {scene_number}")
+                    archivist_result = await self.run_archivist_snapshot(
+                        current_scene=scene_number,
+                        characters=characters_result["characters"],
+                        plot_phase="drafting",
+                    )
+                    # Store archivist snapshot as artifact
+                    if persistence_service and run_id and persistence_service.is_connected:
+                        await persistence_service.store_run_artifact(
+                            project_id=supabase_project_id,
+                            run_id=run_id,
+                            phase=f"archivist_snapshot_{scene_number}",
+                            artifact_type="constraint_snapshot",
+                            content=archivist_result,
+                        )
+                    logger.info(f"[run_full_generation] Archivist resolved {archivist_result.get('constraints_count', 0)} constraints")
 
             # Store all drafts as a single artifact (for backward compatibility)
             await store_artifact("drafting", "drafts", {"scenes": drafts})

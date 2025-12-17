@@ -749,3 +749,100 @@ class DeepeningCheckpointResult(BaseModel):
     criteria: List[CheckpointCriterion] = Field(default_factory=list)
     recommendations: List[str] = Field(default_factory=list)
     evaluated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ============================================================================
+# Constraint Resolution Models (Archivist Agent)
+# ============================================================================
+
+class ConstraintCategory(str, Enum):
+    """Categories for key constraints using semantic addressing."""
+    CHARACTER_STATE = "character_state"      # hero_health, villain_mood
+    CHARACTER_LOCATION = "character_location"  # hero_location, mentor_whereabouts
+    WORLD_STATE = "world_state"              # kingdom_status, weather
+    RELATIONSHIP = "relationship"            # hero_villain_relation, hero_mentor_trust
+    PLOT_POINT = "plot_point"                # macguffin_status, quest_progress
+    POSSESSION = "possession"                # hero_has_sword, villain_has_artifact
+
+
+class KeyConstraint(BaseModel):
+    """
+    Canonical fact that must be preserved across revisions.
+    Uses semantic addressing (key-value) for automatic supersedes logic.
+    """
+    key: str = Field(
+        ...,
+        description="Semantic key, e.g., 'hero_health', 'villain_location'"
+    )
+    value: str = Field(
+        ...,
+        description="Current value of the constraint"
+    )
+    scene_number: int = Field(
+        ...,
+        description="Scene where this constraint was established/updated"
+    )
+    category: ConstraintCategory = Field(
+        ...,
+        description="Category of the constraint for organization"
+    )
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RawFact(BaseModel):
+    """
+    Raw fact extracted from scene generation (append-only log).
+    These are processed by the Archivist into KeyConstraints.
+    """
+    fact: str = Field(
+        ...,
+        description="The raw fact as extracted from scene content"
+    )
+    scene_number: int = Field(
+        ...,
+        description="Scene where this fact was established"
+    )
+    source_agent: str = Field(
+        default="writer",
+        description="Agent that produced this fact (writer, critic)"
+    )
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConstraintSnapshot(BaseModel):
+    """
+    Snapshot of constraints at a point in time (for debugging/rollback).
+    """
+    snapshot_scene: int = Field(
+        ...,
+        description="Scene number when snapshot was taken"
+    )
+    constraints: List[KeyConstraint] = Field(default_factory=list)
+    raw_facts_processed: int = Field(
+        default=0,
+        description="Number of raw facts that were processed into this snapshot"
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ArchivistResult(BaseModel):
+    """
+    Result from the Archivist agent's constraint resolution.
+    """
+    reasoning: str = Field(
+        ...,
+        description="Chain of thought explaining conflict resolution"
+    )
+    final_constraints: List[KeyConstraint] = Field(
+        default_factory=list,
+        description="Resolved canonical constraints"
+    )
+    conflicts_resolved: int = Field(
+        default=0,
+        description="Number of conflicts that were resolved"
+    )
+    facts_discarded: int = Field(
+        default=0,
+        description="Number of irrelevant facts that were discarded"
+    )
+    processed_at: datetime = Field(default_factory=datetime.utcnow)
