@@ -14,7 +14,7 @@
  * 7. Background: Langfuse logs everything asynchronously
  */
 
-import { Controller, Post, Get, PathParams, BodyParams, Req, Res } from "@tsed/common";
+import { Controller, Post, Get, PathParams, BodyParams, Req, Res, AcceptMime } from "@tsed/common";
 import { 
   Description, 
   Returns, 
@@ -267,6 +267,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
    * SSE Stream endpoint for real-time events
    */
   @Get("/stream/:runId")
+  @AcceptMime("text/event-stream", "application/json", "*/*")
   @Summary("Subscribe to generation events (SSE)")
   @Description(`
 Server-Sent Events (SSE) endpoint for real-time generation updates.
