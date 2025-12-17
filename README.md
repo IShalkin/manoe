@@ -36,6 +36,7 @@ flowchart TB
         Redis[(Redis Streams)]
         Supabase[(Supabase)]
         Qdrant[(Qdrant Vector DB)]
+        Langfuse[(Langfuse Observability)]
     end
 
     subgraph LLMProviders["LLM Providers (BYOK)"]
@@ -59,6 +60,7 @@ flowchart TB
     
     Worker -->|Store Artifacts| Supabase
     Agents -->|Vector Memory| Qdrant
+    ModelClient -->|Trace LLM Calls| Langfuse
 ```
 
 ## Generation Workflow
@@ -142,6 +144,28 @@ MANOE includes an optional **Marketing Researcher** feature that uses AI-powered
 3. Select your preferred provider and click "Start Research"
 4. View research history in Settings > Research History
 
+### LLM Observability (Langfuse)
+
+MANOE includes self-hosted **Langfuse** for complete LLM observability:
+
+- **Langfuse Dashboard**: https://langfuse.iliashalkin.com
+- **Trace Visualization**: See the full trace tree for each generation run
+- **Token Usage Tracking**: Monitor input/output tokens per agent call
+- **Latency Metrics**: Track response times across different LLM providers
+- **Error Debugging**: Inspect failed LLM calls with full request/response data
+
+**Self-Hosted Stack:**
+| Service | Description |
+|---------|-------------|
+| langfuse-web | Web UI and API (Next.js) |
+| langfuse-worker | Background job processor |
+| langfuse-postgres | PostgreSQL database |
+| langfuse-clickhouse | Analytics database |
+| langfuse-redis | Caching and queues |
+| langfuse-minio | S3-compatible blob storage |
+
+Tracing is automatically enabled when `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are configured in the orchestrator environment.
+
 ### State Recovery & Retry Mechanism
 
 MANOE includes robust error handling for long-running generations:
@@ -184,6 +208,7 @@ The docker-compose.yml includes the following services:
 | **orchestrator** | 8001 | Python FastAPI AI orchestrator with SSE |
 | **redis** | 6379 | Message broker for real-time SSE events |
 | **qdrant** | 6333 | Vector database for character/worldbuilding memory |
+| **langfuse-web** | 3000 | Langfuse observability UI and API |
 
 ### Environment Variables for Docker
 
@@ -256,7 +281,8 @@ manoe/
 │   │   ├── redis_streams.py         # SSE event streaming
 │   │   ├── model_client.py          # Multi-provider LLM client
 │   │   ├── research_service.py      # Perplexity & OpenAI Deep Research integration
-│   │   └── research_memory.py       # Research vector memory for "Eternal Memory"
+│   │   ├── research_memory.py       # Research vector memory for "Eternal Memory"
+│   │   └── tracing.py               # Langfuse LLM observability integration
 │   ├── autogen_orchestrator.py      # Main orchestrator with phase functions
 │   ├── multi_agent_worker.py        # API endpoints and SSE streaming
 │   └── pyproject.toml
@@ -333,6 +359,9 @@ The following tables are used for persistence:
 - `SUPABASE_URL` - Supabase project URL
 - `SUPABASE_KEY` - Supabase service key (required for artifact persistence)
 - `QDRANT_URL` - Qdrant server URL (required for memory context features)
+- `LANGFUSE_PUBLIC_KEY` - Langfuse public key (enables tracing)
+- `LANGFUSE_SECRET_KEY` - Langfuse secret key (enables tracing)
+- `LANGFUSE_HOST` - Langfuse host URL (default: http://langfuse-web:3000 for self-hosted)
 
 ## Development Setup
 
