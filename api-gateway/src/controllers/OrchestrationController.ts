@@ -431,15 +431,19 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       return;
     }
 
-    // Set SSE headers
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+    // Set SSE headers - avoid Connection and Transfer-Encoding headers for HTTP/2 compatibility
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("X-Accel-Buffering", "no"); // Disable Nginx buffering
+    // Note: Do NOT set Connection or Transfer-Encoding headers - they are forbidden in HTTP/2
+    // and will cause ERR_HTTP2_PROTOCOL_ERROR in browsers behind Cloudflare
     res.flushHeaders();
 
-    // Send initial connection event
-    res.write(`event: connected\ndata: ${JSON.stringify({ runId, status: status.phase })}\n\n`);
+    // Send initial comment to force immediate flush through proxies
+    res.write(":\n\n");
+
+    // Send initial connection event as default message type
+    res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase })}\n\n`);
 
     // First, send all existing events from the stream (catch up)
     try {

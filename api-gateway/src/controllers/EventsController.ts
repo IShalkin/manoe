@@ -46,12 +46,16 @@ export class EventsController {
     @Req() req: Request,
     @Res() res: Response
   ): Promise<void> {
-    // Set SSE headers
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+    // Set SSE headers - avoid Connection and Transfer-Encoding headers for HTTP/2 compatibility
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+    // Note: Do NOT set Connection or Transfer-Encoding headers - they are forbidden in HTTP/2
+    // and will cause ERR_HTTP2_PROTOCOL_ERROR in browsers behind Cloudflare
     res.flushHeaders();
+
+    // Send initial comment to force immediate flush through proxies
+    res.write(":\n\n");
 
     const client = this.getClient();
     const streamKey = `manoe:events:${runId}`;
