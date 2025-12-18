@@ -14,7 +14,7 @@
  * 7. Background: Langfuse logs everything asynchronously
  */
 
-import { Controller, Post, Get, PathParams, BodyParams, Req, Res, AcceptMime } from "@tsed/common";
+import { Controller, Post, Get, PathParams, BodyParams, Req, Res, AcceptMime, $log } from "@tsed/common";
 import { 
   Description, 
   Returns, 
@@ -241,7 +241,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
   async startGeneration(
     @BodyParams() @Groups("!internal") request: GenerateRequestDTO
   ): Promise<GenerateResponseDTO> {
-    console.log(`[OrchestrationController] startGeneration called, projectId: ${request.projectId}, seedIdea: ${request.seedIdea?.substring(0, 50)}...`);
+    $log.info(`[OrchestrationController] startGeneration called, projectId: ${request.projectId}, seedIdea: ${request.seedIdea?.substring(0, 50)}...`);
     const options: GenerationOptions = {
       projectId: request.projectId,
       seedIdea: request.seedIdea,
@@ -255,9 +255,9 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
       settings: request.settings,
     };
 
-    console.log(`[OrchestrationController] startGeneration: calling orchestrator.startGeneration, projectId: ${options.projectId}`);
+    $log.info(`[OrchestrationController] startGeneration: calling orchestrator.startGeneration, projectId: ${options.projectId}`);
     const runId = await this.orchestrator.startGeneration(options);
-    console.log(`[OrchestrationController] startGeneration: orchestrator.startGeneration returned runId: ${runId}`);
+    $log.info(`[OrchestrationController] startGeneration: orchestrator.startGeneration returned runId: ${runId}`);
 
     return {
       runId,
