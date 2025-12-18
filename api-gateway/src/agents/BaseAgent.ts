@@ -195,13 +195,18 @@ export abstract class BaseAgent {
     targetAgent?: AgentType
   ): Promise<void> {
     if (this.redisStreams) {
-      console.log(`[${this.agentType}] Emitting thought:`, thought);
-      await this.redisStreams.publishEvent(runId, "agent_thought", {
-        agent: this.agentType,
-        thought,
-        sentiment,
-        targetAgent,
-      });
+      console.log(`[${this.agentType}] Emitting thought:`, thought, `runId: ${runId}`);
+      try {
+        const eventId = await this.redisStreams.publishEvent(runId, "agent_thought", {
+          agent: this.agentType,
+          thought,
+          sentiment,
+          targetAgent,
+        });
+        console.log(`[${this.agentType}] Published event with ID:`, eventId);
+      } catch (error) {
+        console.error(`[${this.agentType}] Error publishing thought event:`, error);
+      }
     } else {
       console.warn(`[${this.agentType}] RedisStreams not available, cannot emit thought`);
     }
@@ -217,13 +222,18 @@ export abstract class BaseAgent {
     dialogueType: "question" | "objection" | "approval" | "suggestion" = "suggestion"
   ): Promise<void> {
     if (this.redisStreams) {
-      console.log(`[${this.agentType}] Emitting dialogue to ${to}:`, message);
-      await this.redisStreams.publishEvent(runId, "agent_dialogue", {
-        from: this.agentType,
-        to,
-        message,
-        dialogueType,
-      });
+      console.log(`[${this.agentType}] Emitting dialogue to ${to}:`, message, `runId: ${runId}`);
+      try {
+        const eventId = await this.redisStreams.publishEvent(runId, "agent_dialogue", {
+          from: this.agentType,
+          to,
+          message,
+          dialogueType,
+        });
+        console.log(`[${this.agentType}] Published dialogue event with ID:`, eventId);
+      } catch (error) {
+        console.error(`[${this.agentType}] Error publishing dialogue event:`, error);
+      }
     } else {
       console.warn(`[${this.agentType}] RedisStreams not available, cannot emit dialogue`);
     }
