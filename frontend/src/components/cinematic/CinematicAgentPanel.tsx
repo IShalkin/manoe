@@ -58,18 +58,18 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
         const recentDialogue = cinematicMessages
           .slice(-5)
           .find((msg) => {
-            if (msg.type === "agent_dialogue") {
+            if (msg.type === "agent_dialogue" && msg.data) {
               const data = msg.data as any;
-              return data.from === agent || data.to === agent;
+              return data?.from === agent || data?.to === agent;
             }
             return false;
           });
         
-        if (recentDialogue) {
+        if (recentDialogue && recentDialogue.data) {
           const data = (recentDialogue.data as any);
-          if (data.from === agent) {
+          if (data?.from === agent) {
             statuses[agent] = "speaking";
-          } else if (data.to === agent) {
+          } else if (data?.to === agent) {
             statuses[agent] = "listening";
           } else {
             statuses[agent] = "idle";
