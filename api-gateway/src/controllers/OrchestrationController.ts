@@ -337,7 +337,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           type: event.type,
           runId: event.runId,
           timestamp: event.timestamp,
-          ...event.data,
+          data: event.data,
         });
 
         res.write(`event: ${event.type}\ndata: ${sseData}\n\n`);
