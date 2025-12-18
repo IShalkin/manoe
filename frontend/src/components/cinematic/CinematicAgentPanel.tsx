@@ -5,11 +5,10 @@
  * Inspired by Quentin Tarantino dialogue films
  */
 
-import { useState, useEffect, useMemo } from "react";
-import { motion } from "framer-motion";
+import { useMemo } from "react";
 import { AgentAvatar } from "./AgentAvatar";
 import { DialogueBubble } from "./DialogueBubble";
-import { useGenerationStream, AgentMessage } from "../../hooks/useGenerationStream";
+import { useGenerationStream } from "../../hooks/useGenerationStream";
 import { AgentType } from "../../types/agent";
 
 interface CinematicAgentPanelProps {

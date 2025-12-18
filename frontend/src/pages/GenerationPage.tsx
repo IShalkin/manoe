@@ -4,7 +4,7 @@ import { useSettings } from '../hooks/useSettings';
 import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
 import { useGenerationStream } from '../hooks/useGenerationStream';
 import { AgentChat, RegenerationConstraints } from '../components/AgentChat';
-import { AgentGraph, WorldStatePanel } from '../components/observability';
+import { WorldStatePanel } from '../components/observability';
 import { CinematicAgentPanel } from '../components/cinematic/CinematicAgentPanel';
 import { orchestratorFetch, getOrchestratorUrl } from '../lib/api';
 import type { NarrativePossibility } from '../types';
@@ -37,8 +37,6 @@ export function GenerationPage() {
 
   // Glass Brain: SSE stream for observability panels
   const {
-    currentPhase,
-    activeAgent,
     rawFacts,
   } = useGenerationStream({
     runId,
