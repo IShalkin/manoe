@@ -63,22 +63,23 @@ class LLMConfigDTO {
 }
 
 /**
- * Generation Request DTO
+ * Generation Request DTO - supports both new TypeScript format and legacy Python format
  */
 class GenerateRequestDTO {
-  @Required()
+  // New TypeScript format
+  @Property()
   @Description("Project ID from Supabase")
   @Example("550e8400-e29b-41d4-a716-446655440000")
-  projectId: string;
+  projectId?: string;
 
-  @Required()
+  @Property()
   @Description("Seed idea for the narrative")
   @Example("A story about a detective who can see ghosts")
-  seedIdea: string;
+  seedIdea?: string;
 
-  @Required()
+  @Property()
   @Description("LLM configuration")
-  llmConfig: LLMConfigDTO;
+  llmConfig?: LLMConfigDTO;
 
   @Property()
   @Enum("full", "branching")
@@ -90,16 +91,51 @@ class GenerateRequestDTO {
   @Groups("internal")
   @Description("Additional settings")
   settings?: Record<string, unknown>;
+
+  // Legacy Python format (snake_case)
+  @Property()
+  @Description("Supabase project ID (legacy)")
+  supabase_project_id?: string;
+
+  @Property()
+  @Description("Seed idea (legacy)")
+  seed_idea?: string;
+
+  @Property()
+  @Description("LLM provider (legacy)")
+  provider?: string;
+
+  @Property()
+  @Description("LLM model (legacy)")
+  model?: string;
+
+  @Property()
+  @Description("API key (legacy)")
+  api_key?: string;
+
+  @Property()
+  @Description("Generation mode (legacy)")
+  generation_mode?: "full" | "branching";
 }
 
 /**
- * Generation Response DTO
+ * Generation Response DTO - includes both camelCase and snake_case for compatibility
  */
 class GenerateResponseDTO {
   @Required()
   @Description("Unique run identifier")
   @Example("run-550e8400-e29b-41d4-a716-446655440000")
   runId: string;
+
+  @Required()
+  @Description("Unique run identifier (legacy)")
+  @Example("run-550e8400-e29b-41d4-a716-446655440000")
+  run_id: string;
+
+  @Required()
+  @Description("Success status")
+  @Example(true)
+  success: boolean;
 
   @Required()
   @Description("Status message")
@@ -241,19 +277,28 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
   async startGeneration(
     @BodyParams() @Groups("!internal") request: GenerateRequestDTO
   ): Promise<GenerateResponseDTO> {
+    // Support both new TypeScript format and legacy Python format
+    const projectId = request.projectId || request.supabase_project_id || `generated-${Date.now()}`;
+    const seedIdea = request.seedIdea || request.seed_idea || "";
+    const provider = request.llmConfig?.provider || request.provider as LLMProvider;
+    const model = request.llmConfig?.model || request.model || "";
+    const apiKey = request.llmConfig?.apiKey || request.api_key || "";
+    const mode = request.mode || request.generation_mode || "full";
+
     // Force immediate output to ensure logs are visible
-    process.stdout.write(`[OrchestrationController] startGeneration called, projectId: ${request.projectId}\n`);
-    $log.info(`[OrchestrationController] startGeneration called, projectId: ${request.projectId}, seedIdea: ${request.seedIdea?.substring(0, 50)}...`);
+    process.stdout.write(`[OrchestrationController] startGeneration called, projectId: ${projectId}, provider: ${provider}\n`);
+    $log.info(`[OrchestrationController] startGeneration called, projectId: ${projectId}, seedIdea: ${seedIdea?.substring(0, 50)}...`);
+    
     const options: GenerationOptions = {
-      projectId: request.projectId,
-      seedIdea: request.seedIdea,
+      projectId,
+      seedIdea,
       llmConfig: {
-        provider: request.llmConfig.provider,
-        model: request.llmConfig.model,
-        apiKey: request.llmConfig.apiKey,
-        temperature: request.llmConfig.temperature,
+        provider,
+        model,
+        apiKey,
+        temperature: request.llmConfig?.temperature,
       },
-      mode: request.mode || "full",
+      mode,
       settings: request.settings,
     };
 
@@ -265,8 +310,10 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
 
     return {
       runId,
+      run_id: runId,
+      success: true,
       message: "Generation started",
-      streamUrl: `/orchestrate/stream/${runId}`,
+      streamUrl: `/stream/${runId}`,
     };
   }
 
@@ -394,6 +441,33 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
   }
 
   /**
+   * SSE Stream endpoint (legacy route for Python orchestrator compatibility)
+   */
+  @Get("/runs/:runId/events")
+  @AcceptMime("text/event-stream", "application/json", "*/*")
+  @Summary("Subscribe to generation events (SSE) - legacy route")
+  @Description("Legacy route for Python orchestrator compatibility. Redirects to /stream/:runId.")
+  @Responses([
+    { status: 200, description: "SSE stream established", type: SSEEventDTO },
+    { status: 404, description: "Run not found" },
+  ])
+  @Header({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+  })
+  async streamEventsLegacy(
+    @PathParams("runId") runId: string,
+    @QueryParams("token") token: string,
+    @Req() req: any,
+    @Res() res: any
+  ): Promise<void> {
+    // Delegate to the main streamEvents method
+    return this.streamEvents(runId, token, req, res);
+  }
+
+  /**
    * Get run status
    */
   @Get("/status/:runId")
@@ -468,6 +542,34 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       success,
       message: success ? "Run cancelled" : "Run not found",
     };
+  }
+
+  /**
+   * Pause a running generation (legacy route)
+   */
+  @Post("/runs/:runId/pause")
+  @Summary("Pause generation (legacy)")
+  @Description("Legacy route for Python orchestrator compatibility.")
+  @Returns(200)
+  @Returns(404)
+  pauseRunLegacy(
+    @PathParams("runId") runId: string
+  ): { success: boolean; message: string } {
+    return this.pauseRun(runId);
+  }
+
+  /**
+   * Resume a paused generation (legacy route)
+   */
+  @Post("/runs/:runId/resume")
+  @Summary("Resume generation (legacy)")
+  @Description("Legacy route for Python orchestrator compatibility.")
+  @Returns(200)
+  @Returns(404)
+  resumeRunLegacy(
+    @PathParams("runId") runId: string
+  ): { success: boolean; message: string } {
+    return this.resumeRun(runId);
   }
 
   /**

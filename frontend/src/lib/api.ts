@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-orchestrator.iliashalkin.com';
+const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || 'https://manoe-gateway.iliashalkin.com/orchestrate';
 
 /**
  * Get the current user's JWT access token from Supabase
