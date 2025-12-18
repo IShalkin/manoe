@@ -14,7 +14,7 @@
  * 7. Background: Langfuse logs everything asynchronously
  */
 
-import { Controller, Post, Get, PathParams, BodyParams, Req, Res, AcceptMime, $log } from "@tsed/common";
+import { Controller, Post, Get, PathParams, BodyParams, QueryParams, Req, Res, AcceptMime, $log } from "@tsed/common";
 import { 
   Description, 
   Returns, 
@@ -446,25 +446,17 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
   @Get("/runs/:runId/events")
   @AcceptMime("text/event-stream", "application/json", "*/*")
   @Summary("Subscribe to generation events (SSE) - legacy route")
-  @Description("Legacy route for Python orchestrator compatibility. Redirects to /stream/:runId.")
-  @Responses([
-    { status: 200, description: "SSE stream established", type: SSEEventDTO },
-    { status: 404, description: "Run not found" },
-  ])
-  @Header({
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    "Connection": "keep-alive",
-    "X-Accel-Buffering": "no",
-  })
+  @Description("Legacy route for Python orchestrator compatibility.")
+  @Returns(200, SSEEventDTO)
+  @Returns(404)
   async streamEventsLegacy(
     @PathParams("runId") runId: string,
     @QueryParams("token") token: string,
-    @Req() req: any,
-    @Res() res: any
+    @Req() req: Request,
+    @Res() res: Response
   ): Promise<void> {
     // Delegate to the main streamEvents method
-    return this.streamEvents(runId, token, req, res);
+    return this.streamEvents(runId, req, res);
   }
 
   /**
