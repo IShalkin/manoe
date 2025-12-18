@@ -225,21 +225,30 @@ export class StorytellerOrchestrator {
     runId: string,
     options: GenerationOptions
   ): Promise<void> {
+    console.log(`[StorytellerOrchestrator] runGenesisPhase called, runId: ${runId}`);
     const state = this.activeRuns.get(runId);
-    if (!state) return;
+    if (!state) {
+      console.error(`[StorytellerOrchestrator] runGenesisPhase: state not found for runId: ${runId}`);
+      return;
+    }
 
     state.phase = GenerationPhase.GENESIS;
+    console.log(`[StorytellerOrchestrator] runGenesisPhase: phase set to GENESIS, runId: ${runId}`);
     await this.publishPhaseStart(runId, GenerationPhase.GENESIS);
 
     // Use ArchitectAgent through AgentFactory
+    console.log(`[StorytellerOrchestrator] runGenesisPhase: getting ArchitectAgent from factory, runId: ${runId}`);
     const agent = this.agentFactory.getAgent(AgentType.ARCHITECT);
+    console.log(`[StorytellerOrchestrator] runGenesisPhase: ArchitectAgent obtained, runId: ${runId}`);
     const context: AgentContext = {
       runId,
       state,
       projectId: options.projectId,
     };
 
+    console.log(`[StorytellerOrchestrator] runGenesisPhase: calling agent.execute, runId: ${runId}, phase: ${state.phase}`);
     const output = await agent.execute(context, options);
+    console.log(`[StorytellerOrchestrator] runGenesisPhase: agent.execute completed, runId: ${runId}`);
     state.narrative = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
