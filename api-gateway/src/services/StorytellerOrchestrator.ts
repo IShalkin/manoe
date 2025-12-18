@@ -238,10 +238,10 @@ export class StorytellerOrchestrator {
     runId: string,
     options: GenerationOptions
   ): Promise<void> {
-    console.log(`[StorytellerOrchestrator] runGenesisPhase called, runId: ${runId}`);
+    $log.info(`[StorytellerOrchestrator] runGenesisPhase called, runId: ${runId}`);
     const state = this.activeRuns.get(runId);
     if (!state) {
-      console.error(`[StorytellerOrchestrator] runGenesisPhase: state not found for runId: ${runId}`);
+      $log.error(`[StorytellerOrchestrator] runGenesisPhase: state not found for runId: ${runId}`);
       return;
     }
 
