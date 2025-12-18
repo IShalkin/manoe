@@ -892,7 +892,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       return projectResult.agentOutputs[agent];
     }
     const agentMessages = messages.filter(
-      m => m.type === 'agent_message' && m.data.agent === agent && m.data.content?.trim()
+      m => m.type === 'agent_message' && m.data && m.data.agent === agent && m.data.content?.trim()
     );
     if (agentMessages.length > 0) {
       return agentMessages[agentMessages.length - 1].data.content || '';
@@ -996,7 +996,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
 
   const handleOpenSceneModal = useCallback(() => {
     const writerMessages = messages.filter(
-      m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
+      m => m.type === 'agent_message' && m.data && m.data.agent === 'Writer' && m.data.content?.trim()
     );
     setSceneCount(writerMessages.length);
     setSelectedScenes([]);
@@ -1260,10 +1260,11 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
               
               // Collect all agent outputs for persistence
               const agentMessages = allMessages.filter(
-                m => m.type === 'agent_message' && m.data.content?.trim()
+                m => m.type === 'agent_message' && m.data && m.data.content?.trim()
               );
               const agentOutputs: Record<string, string> = {};
               agentMessages.forEach(m => {
+                if (!m.data) return;
                 const agent = m.data.agent || 'Unknown';
                 if (m.data.content) {
                   agentOutputs[agent] = m.data.content;
@@ -1294,7 +1295,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
               
               // Use Writer's last message as the story content
               const writerMessages = allMessages.filter(
-                m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
+                m => m.type === 'agent_message' && m.data && m.data.agent === 'Writer' && m.data.content?.trim()
               );
               if (writerMessages.length > 0) {
                 onComplete({
@@ -1400,6 +1401,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     });
     
     messages.forEach(msg => {
+      if (!msg.data) return;
       const agent = msg.data.agent;
       if (!agent || !states[agent]) return;
       
@@ -1436,7 +1438,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const finalResult = useMemo(() => {
     // Collect all Polish agent messages and extract clean story text from each
     const polishMessages = messages.filter(
-      m => m.type === 'agent_message' && m.data.agent === 'Polish' && m.data.content?.trim()
+      m => m.type === 'agent_message' && m.data && m.data.agent === 'Polish' && m.data.content?.trim()
     );
     if (polishMessages.length > 0) {
       // Extract story text from all Polish messages and concatenate
@@ -1452,7 +1454,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     
     // Fall back to Writer's messages (draft story content)
     const writerMessages = messages.filter(
-      m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
+      m => m.type === 'agent_message' && m.data && m.data.agent === 'Writer' && m.data.content?.trim()
     );
     if (writerMessages.length > 0) {
       // Extract story text from all Writer messages and concatenate
@@ -2197,9 +2199,9 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
               <h4 className="font-semibold text-cyan-400">Conversation Timeline</h4>
               <span className="text-xs text-slate-500 ml-auto">
                 {(() => {
-                  const agentMsgs = messages.filter(m => m.type === 'agent_message' && m.data.content);
+                  const agentMsgs = messages.filter(m => m.type === 'agent_message' && m.data && m.data.content);
                   const filtered = selectedRound !== null 
-                    ? agentMsgs.filter(m => m.data.round === selectedRound)
+                    ? agentMsgs.filter(m => m.data && m.data.round === selectedRound)
                     : agentMsgs;
                   return `${filtered.length} messages`;
                 })()}
@@ -2212,10 +2214,10 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                 
                 <div className="space-y-4">
                   {messages
-                    .filter(m => m.type === 'agent_message' && m.data.content)
-                    .filter(m => selectedRound === null || m.data.round === selectedRound)
+                    .filter(m => m.type === 'agent_message' && m.data && m.data.content)
+                    .filter(m => selectedRound === null || (m.data && m.data.round === selectedRound))
                     .map((msg, idx) => {
-                      const agent = msg.data.agent || 'System';
+                      const agent = (msg.data && msg.data.agent) || 'System';
                       const color = AGENT_COLORS[agent] || AGENT_COLORS.System;
                       const textColor = AGENT_TEXT_COLORS[agent] || AGENT_TEXT_COLORS.System;
                       const content = msg.data.content || '';
