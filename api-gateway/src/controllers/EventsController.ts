@@ -212,8 +212,9 @@ export class EventsController {
   }
 
   private sendEvent(res: Response, event: StreamEvent): void {
+    // Send as default "message" event so frontend onmessage handler receives it
+    // The event type is included in the JSON payload
     res.write(`id: ${event.id}\n`);
-    res.write(`event: ${event.type}\n`);
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   }
 

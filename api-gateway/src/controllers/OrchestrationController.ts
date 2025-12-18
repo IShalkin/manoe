@@ -460,7 +460,9 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           timestamp: event.timestamp,
           data: event.data,
         });
-        res.write(`event: ${event.type}\ndata: ${sseData}\n\n`);
+        // Send as default "message" event so frontend onmessage handler receives it
+        // The event type is included in the JSON payload
+        res.write(`data: ${sseData}\n\n`);
       }
     } catch (error) {
       console.error(`[OrchestrationController] Error getting existing events:`, error, error instanceof Error ? error.stack : '');
@@ -484,7 +486,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           console.log(`[OrchestrationController] Streaming cinematic event:`, event.type, `runId: ${runId}`, event.data);
         }
 
-        // Format as SSE
+        // Format as SSE - send as default "message" event so frontend onmessage handler receives it
         const sseData = JSON.stringify({
           id: event.id,
           type: event.type,
@@ -493,7 +495,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           data: event.data,
         });
 
-        res.write(`event: ${event.type}\ndata: ${sseData}\n\n`);
+        res.write(`data: ${sseData}\n\n`);
 
         // Stop streaming on terminal events
         if (event.type === "ERROR" || event.type === "generation_completed") {
