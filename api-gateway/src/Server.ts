@@ -115,7 +115,24 @@ export class Server {
   protected settings: Configuration;
 
   $beforeRoutesInit(): void {
-    // Add any pre-route initialization here
+    // Handle CORS preflight requests explicitly before any routes
+    const corsOrigin = process.env.CORS_ORIGIN || "*";
+    
+    this.app.use((req: any, res: any, next: any) => {
+      // Set CORS headers for all requests
+      res.header("Access-Control-Allow-Origin", corsOrigin);
+      res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+      res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin");
+      res.header("Access-Control-Allow-Credentials", "true");
+      res.header("Access-Control-Max-Age", "86400");
+      
+      // Handle preflight requests immediately
+      if (req.method === "OPTIONS") {
+        return res.status(204).end();
+      }
+      
+      next();
+    });
   }
 
   $afterRoutesInit(): void {
