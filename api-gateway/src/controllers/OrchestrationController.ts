@@ -241,6 +241,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
   async startGeneration(
     @BodyParams() @Groups("!internal") request: GenerateRequestDTO
   ): Promise<GenerateResponseDTO> {
+    console.log(`[OrchestrationController] startGeneration called, projectId: ${request.projectId}, seedIdea: ${request.seedIdea?.substring(0, 50)}...`);
     const options: GenerationOptions = {
       projectId: request.projectId,
       seedIdea: request.seedIdea,
@@ -254,7 +255,9 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
       settings: request.settings,
     };
 
+    console.log(`[OrchestrationController] startGeneration: calling orchestrator.startGeneration, projectId: ${options.projectId}`);
     const runId = await this.orchestrator.startGeneration(options);
+    console.log(`[OrchestrationController] startGeneration: orchestrator.startGeneration returned runId: ${runId}`);
 
     return {
       runId,
@@ -318,7 +321,32 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     // Send initial connection event
     res.write(`event: connected\ndata: ${JSON.stringify({ runId, status: status.phase })}\n\n`);
 
-    // Stream events from Redis
+    // First, send all existing events from the stream (catch up)
+    try {
+      const existingEvents = await this.redisStreams.getEvents(runId, "0", 1000);
+      console.log(`[OrchestrationController] Sending ${existingEvents.length} existing events for runId: ${runId}`);
+      const cinematicCount = existingEvents.filter(e => e.type === "agent_thought" || e.type === "agent_dialogue").length;
+      console.log(`[OrchestrationController] Found ${cinematicCount} cinematic events in existing events`);
+      for (const event of existingEvents) {
+        // Log cinematic events
+        if (event.type === "agent_thought" || event.type === "agent_dialogue") {
+          console.log(`[OrchestrationController] Streaming existing cinematic event:`, event.type, `runId: ${runId}`, event.data);
+        }
+        
+        const sseData = JSON.stringify({
+          id: event.id,
+          type: event.type,
+          runId: event.runId,
+          timestamp: event.timestamp,
+          data: event.data,
+        });
+        res.write(`event: ${event.type}\ndata: ${sseData}\n\n`);
+      }
+    } catch (error) {
+      console.error(`[OrchestrationController] Error getting existing events:`, error, error instanceof Error ? error.stack : '');
+    }
+
+    // Then stream new events from Redis (starting from the end)
     const eventGenerator = this.redisStreams.streamEvents(runId, "$", 15000);
 
     // Handle client disconnect
@@ -330,6 +358,11 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     try {
       for await (const event of eventGenerator) {
         if (!isConnected) break;
+
+        // Log cinematic events
+        if (event.type === "agent_thought" || event.type === "agent_dialogue") {
+          console.log(`[OrchestrationController] Streaming cinematic event:`, event.type, `runId: ${runId}`, event.data);
+        }
 
         // Format as SSE
         const sseData = JSON.stringify({
