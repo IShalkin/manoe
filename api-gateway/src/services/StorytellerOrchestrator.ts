@@ -139,27 +139,8 @@ export class StorytellerOrchestrator {
     this.activeRuns.set(runId, state);
     $log.info(`[StorytellerOrchestrator] startGeneration: state initialized and stored, runId: ${runId}`);
 
-    // Initialize Qdrant memory with API key for embeddings
-    await this.qdrantMemory.connect(
-      options.llmConfig.provider === LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined,
-      options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined
-    );
-
-    // Start Langfuse trace
-    this.langfuse.startTrace({
-      projectId: options.projectId,
-      runId,
-      phase: GenerationPhase.GENESIS,
-    });
-
-    // Publish start event
-    await this.publishEvent(runId, "generation_started", {
-      projectId: options.projectId,
-      mode: options.mode,
-      phase: GenerationPhase.GENESIS,
-    });
-
-    // Start generation in background
+    // Start generation in background - all slow initialization moved here
+    // This ensures POST /generate returns quickly (< 1s) to avoid proxy timeouts
     $log.info(`[StorytellerOrchestrator] startGeneration: starting async runGeneration, runId: ${runId}`);
     this.runGeneration(runId, options).catch((error) => {
       $log.error(`[StorytellerOrchestrator] startGeneration: runGeneration error, runId: ${runId}`, error);
@@ -184,6 +165,26 @@ export class StorytellerOrchestrator {
     }
 
     try {
+      // Initialize Qdrant memory with API key for embeddings (moved from startGeneration for fast response)
+      await this.qdrantMemory.connect(
+        options.llmConfig.provider === LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined,
+        options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined
+      );
+
+      // Start Langfuse trace
+      this.langfuse.startTrace({
+        projectId: options.projectId,
+        runId,
+        phase: GenerationPhase.GENESIS,
+      });
+
+      // Publish start event
+      await this.publishEvent(runId, "generation_started", {
+        projectId: options.projectId,
+        mode: options.mode,
+        phase: GenerationPhase.GENESIS,
+      });
+
       // Phase 1: Genesis
       $log.info(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
       await this.runGenesisPhase(runId, options);
