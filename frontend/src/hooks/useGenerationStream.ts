@@ -92,7 +92,9 @@ export function useGenerationStream({
           if (!isMounted) return;
 
           try {
-            const data = JSON.parse(event.data) as AgentMessage;
+            const rawData = JSON.parse(event.data);
+            console.log('[useGenerationStream] Raw SSE event:', rawData);
+            const data = rawData as AgentMessage;
 
             // Update phase
             if (data.type === 'phase_start' && data.data.phase) {
@@ -164,6 +166,7 @@ export function useGenerationStream({
               data.type === "agent_consensus"
             ) {
               // These are handled specially in CinematicAgentPanel
+              console.log('[useGenerationStream] Cinematic event received:', data.type, data);
             }
 
             // Store message
