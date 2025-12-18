@@ -93,6 +93,11 @@ All endpoints require a valid API key passed via the \`x-api-key\` header or Bea
     cors({
       origin: process.env.CORS_ORIGIN || "*",
       credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+      exposedHeaders: ["Content-Length", "X-Request-Id"],
+      preflightContinue: false,
+      optionsSuccessStatus: 204,
     }),
     cookieParser(),
     compress(),
