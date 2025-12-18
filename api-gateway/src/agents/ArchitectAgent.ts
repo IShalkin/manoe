@@ -39,6 +39,13 @@ export class ArchitectAgent extends BaseAgent {
     // Build user prompt based on phase
     const userPrompt = this.buildUserPrompt(context, options, phase);
 
+    // Emit thought for Cinematic UI
+    if (phase === GenerationPhase.GENESIS) {
+      await this.emitThought(runId, "Analyzing seed idea and designing narrative structure...", "excited");
+    } else if (phase === GenerationPhase.ADVANCED_PLANNING) {
+      await this.emitThought(runId, "Creating detailed scene-by-scene plan...", "neutral");
+    }
+
     // Call LLM
     const response = await this.callLLM(
       runId,
@@ -53,6 +60,7 @@ export class ArchitectAgent extends BaseAgent {
     
     if (phase === GenerationPhase.GENESIS) {
       const validated = this.validateOutput(parsed, NarrativeSchema, runId);
+      await this.emitThought(runId, "Narrative structure complete. Ready for character development.", "neutral", AgentType.PROFILER);
       return { content: validated as Record<string, unknown> };
     }
     

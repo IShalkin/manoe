@@ -36,6 +36,13 @@ export class ProfilerAgent extends BaseAgent {
     const systemPrompt = await this.getSystemPrompt(context, options);
     const userPrompt = this.buildUserPrompt(context, options, phase);
 
+    // Emit thought for Cinematic UI
+    if (phase === GenerationPhase.CHARACTERS) {
+      await this.emitThought(runId, "Analyzing character psychology and motivations...", "neutral");
+    } else if (phase === GenerationPhase.NARRATOR_DESIGN) {
+      await this.emitThought(runId, "Designing narrative voice and perspective...", "neutral");
+    }
+
     const response = await this.callLLM(
       runId,
       systemPrompt,

@@ -35,6 +35,9 @@ export class WorldbuilderAgent extends BaseAgent {
     const systemPrompt = await this.getSystemPrompt(context, options);
     const userPrompt = this.buildUserPrompt(context, options);
 
+    // Emit thought for Cinematic UI
+    await this.emitThought(runId, "Building world rules and establishing setting...", "neutral");
+
     const response = await this.callLLM(
       runId,
       systemPrompt,

@@ -36,6 +36,13 @@ export class StrategistAgent extends BaseAgent {
     const systemPrompt = await this.getSystemPrompt(context, options);
     const userPrompt = this.buildUserPrompt(context, options, phase);
 
+    // Emit thought for Cinematic UI
+    if (phase === GenerationPhase.OUTLINING) {
+      await this.emitThought(runId, "Creating narrative outline and scene structure...", "neutral");
+    } else if (phase === GenerationPhase.ADVANCED_PLANNING) {
+      await this.emitThought(runId, "Developing detailed scene-by-scene strategy...", "neutral");
+    }
+
     const response = await this.callLLM(
       runId,
       systemPrompt,
