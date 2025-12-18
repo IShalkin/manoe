@@ -5,6 +5,7 @@ import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects'
 import { useGenerationStream } from '../hooks/useGenerationStream';
 import { AgentChat, RegenerationConstraints } from '../components/AgentChat';
 import { AgentGraph, WorldStatePanel } from '../components/observability';
+import { CinematicAgentPanel } from '../components/cinematic/CinematicAgentPanel';
 import { orchestratorFetch, getOrchestratorUrl } from '../lib/api';
 import type { NarrativePossibility } from '../types';
 
@@ -511,9 +512,9 @@ export function GenerationPage() {
                 />
               </div>
               
-              {/* Right: Agent Graph (30%) */}
-              <div className="w-[30%] min-w-[300px] border-l border-slate-700 h-full">
-                <AgentGraph activeAgent={activeAgent} currentPhase={currentPhase} />
+              {/* Right: Cinematic Agent Panel (30%) */}
+              <div className="w-[30%] min-w-[300px] border-l border-slate-700 h-full overflow-hidden">
+                <CinematicAgentPanel runId={runId} />
               </div>
             </div>
           ): (
