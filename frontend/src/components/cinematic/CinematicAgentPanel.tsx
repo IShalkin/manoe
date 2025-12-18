@@ -34,13 +34,15 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
 
   // Filter cinematic events
   const cinematicMessages = useMemo(() => {
-    return messages.filter(
+    const filtered = messages.filter(
       (msg) =>
         msg.type === "agent_thought" ||
         msg.type === "agent_dialogue" ||
         msg.type === "agent_conflict" ||
         msg.type === "agent_consensus"
     );
+    console.log('[CinematicAgentPanel] Total messages:', messages.length, 'Cinematic messages:', filtered.length, filtered);
+    return filtered;
   }, [messages]);
 
   // Get agent statuses

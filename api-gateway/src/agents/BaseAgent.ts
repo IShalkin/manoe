@@ -195,12 +195,15 @@ export abstract class BaseAgent {
     targetAgent?: AgentType
   ): Promise<void> {
     if (this.redisStreams) {
+      console.log(`[${this.agentType}] Emitting thought:`, thought);
       await this.redisStreams.publishEvent(runId, "agent_thought", {
         agent: this.agentType,
         thought,
         sentiment,
         targetAgent,
       });
+    } else {
+      console.warn(`[${this.agentType}] RedisStreams not available, cannot emit thought`);
     }
   }
 
@@ -214,12 +217,15 @@ export abstract class BaseAgent {
     dialogueType: "question" | "objection" | "approval" | "suggestion" = "suggestion"
   ): Promise<void> {
     if (this.redisStreams) {
+      console.log(`[${this.agentType}] Emitting dialogue to ${to}:`, message);
       await this.redisStreams.publishEvent(runId, "agent_dialogue", {
         from: this.agentType,
         to,
         message,
         dialogueType,
       });
+    } else {
+      console.warn(`[${this.agentType}] RedisStreams not available, cannot emit dialogue`);
     }
   }
 
