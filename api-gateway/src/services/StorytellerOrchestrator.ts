@@ -13,6 +13,7 @@
  */
 
 import { Service, Inject } from "@tsed/di";
+import { $log } from "@tsed/common";
 import { v4 as uuidv4 } from "uuid";
 import {
   GenerationPhase,
@@ -110,7 +111,7 @@ export class StorytellerOrchestrator {
    */
   async startGeneration(options: GenerationOptions): Promise<string> {
     const runId = uuidv4();
-    console.log(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}`);
+    $log.info(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}`);
 
     // Initialize generation state
     const state: GenerationState = {
@@ -135,7 +136,7 @@ export class StorytellerOrchestrator {
     };
 
     this.activeRuns.set(runId, state);
-    console.log(`[StorytellerOrchestrator] startGeneration: state initialized and stored, runId: ${runId}`);
+    $log.info(`[StorytellerOrchestrator] startGeneration: state initialized and stored, runId: ${runId}`);
 
     // Initialize Qdrant memory with API key for embeddings
     await this.qdrantMemory.connect(
@@ -158,9 +159,9 @@ export class StorytellerOrchestrator {
     });
 
     // Start generation in background
-    console.log(`[StorytellerOrchestrator] startGeneration: starting async runGeneration, runId: ${runId}`);
+    $log.info(`[StorytellerOrchestrator] startGeneration: starting async runGeneration, runId: ${runId}`);
     this.runGeneration(runId, options).catch((error) => {
-      console.error(`[StorytellerOrchestrator] startGeneration: runGeneration error, runId: ${runId}`, error);
+      $log.error(`[StorytellerOrchestrator] startGeneration: runGeneration error, runId: ${runId}`, error);
       this.handleError(runId, error);
     });
 
@@ -174,20 +175,20 @@ export class StorytellerOrchestrator {
     runId: string,
     options: GenerationOptions
   ): Promise<void> {
-    console.log(`[StorytellerOrchestrator] runGeneration started, runId: ${runId}`);
+    $log.info(`[StorytellerOrchestrator] runGeneration started, runId: ${runId}`);
     const state = this.activeRuns.get(runId);
     if (!state) {
-      console.error(`[StorytellerOrchestrator] runGeneration: state not found, runId: ${runId}`);
+      $log.error(`[StorytellerOrchestrator] runGeneration: state not found, runId: ${runId}`);
       return;
     }
 
     try {
       // Phase 1: Genesis
-      console.log(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
+      $log.info(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
       await this.runGenesisPhase(runId, options);
-      console.log(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
+      $log.info(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
       if (this.shouldStop(runId)) {
-        console.log(`[StorytellerOrchestrator] runGeneration: shouldStop after Genesis, exiting, runId: ${runId}`);
+        $log.info(`[StorytellerOrchestrator] runGeneration: shouldStop after Genesis, exiting, runId: ${runId}`);
         return;
       }
 
@@ -245,22 +246,22 @@ export class StorytellerOrchestrator {
     }
 
     state.phase = GenerationPhase.GENESIS;
-    console.log(`[StorytellerOrchestrator] runGenesisPhase: phase set to GENESIS, runId: ${runId}`);
+    $log.info(`[StorytellerOrchestrator] runGenesisPhase: phase set to GENESIS, runId: ${runId}`);
     await this.publishPhaseStart(runId, GenerationPhase.GENESIS);
 
     // Use ArchitectAgent through AgentFactory
-    console.log(`[StorytellerOrchestrator] runGenesisPhase: getting ArchitectAgent from factory, runId: ${runId}`);
+    $log.info(`[StorytellerOrchestrator] runGenesisPhase: getting ArchitectAgent from factory, runId: ${runId}`);
     const agent = this.agentFactory.getAgent(AgentType.ARCHITECT);
-    console.log(`[StorytellerOrchestrator] runGenesisPhase: ArchitectAgent obtained, runId: ${runId}`);
+    $log.info(`[StorytellerOrchestrator] runGenesisPhase: ArchitectAgent obtained, runId: ${runId}`);
     const context: AgentContext = {
       runId,
       state,
       projectId: options.projectId,
     };
 
-    console.log(`[StorytellerOrchestrator] runGenesisPhase: calling agent.execute, runId: ${runId}, phase: ${state.phase}`);
+    $log.info(`[StorytellerOrchestrator] runGenesisPhase: calling agent.execute, runId: ${runId}, phase: ${state.phase}`);
     const output = await agent.execute(context, options);
-    console.log(`[StorytellerOrchestrator] runGenesisPhase: agent.execute completed, runId: ${runId}`);
+    $log.info(`[StorytellerOrchestrator] runGenesisPhase: agent.execute completed, runId: ${runId}`);
     state.narrative = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
