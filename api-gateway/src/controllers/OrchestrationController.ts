@@ -241,6 +241,8 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
   async startGeneration(
     @BodyParams() @Groups("!internal") request: GenerateRequestDTO
   ): Promise<GenerateResponseDTO> {
+    // Force immediate output to ensure logs are visible
+    process.stdout.write(`[OrchestrationController] startGeneration called, projectId: ${request.projectId}\n`);
     $log.info(`[OrchestrationController] startGeneration called, projectId: ${request.projectId}, seedIdea: ${request.seedIdea?.substring(0, 50)}...`);
     const options: GenerationOptions = {
       projectId: request.projectId,
@@ -255,8 +257,10 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
       settings: request.settings,
     };
 
+    process.stdout.write(`[OrchestrationController] calling orchestrator.startGeneration, projectId: ${options.projectId}\n`);
     $log.info(`[OrchestrationController] startGeneration: calling orchestrator.startGeneration, projectId: ${options.projectId}`);
     const runId = await this.orchestrator.startGeneration(options);
+    process.stdout.write(`[OrchestrationController] orchestrator.startGeneration returned runId: ${runId}\n`);
     $log.info(`[OrchestrationController] startGeneration: orchestrator.startGeneration returned runId: ${runId}`);
 
     return {
