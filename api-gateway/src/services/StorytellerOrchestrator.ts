@@ -110,6 +110,7 @@ export class StorytellerOrchestrator {
    */
   async startGeneration(options: GenerationOptions): Promise<string> {
     const runId = uuidv4();
+    console.log(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}`);
 
     // Initialize generation state
     const state: GenerationState = {
@@ -134,6 +135,7 @@ export class StorytellerOrchestrator {
     };
 
     this.activeRuns.set(runId, state);
+    console.log(`[StorytellerOrchestrator] startGeneration: state initialized and stored, runId: ${runId}`);
 
     // Initialize Qdrant memory with API key for embeddings
     await this.qdrantMemory.connect(
