@@ -111,6 +111,7 @@ export class StorytellerOrchestrator {
    */
   async startGeneration(options: GenerationOptions): Promise<string> {
     const runId = uuidv4();
+    process.stdout.write(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}\n`);
     $log.info(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}`);
 
     // Initialize generation state
