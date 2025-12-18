@@ -32,14 +32,15 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
     runId,
   });
 
-  // Filter cinematic events
+  // Filter cinematic events - ensure data property exists and has required fields
   const cinematicMessages = useMemo(() => {
     const filtered = messages.filter(
       (msg) =>
-        msg.type === "agent_thought" ||
+        msg.data && // Ensure data exists
+        (msg.type === "agent_thought" ||
         msg.type === "agent_dialogue" ||
         msg.type === "agent_conflict" ||
-        msg.type === "agent_consensus"
+        msg.type === "agent_consensus")
     );
     console.log('[CinematicAgentPanel] Total messages:', messages.length, 'Cinematic messages:', filtered.length, filtered);
     return filtered;
@@ -118,6 +119,7 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
             cinematicMessages.map((msg, idx) => {
               if (msg.type === "agent_thought") {
                 const data = msg.data as any;
+                if (!data?.agent || !data?.thought) return null;
                 return (
                   <DialogueBubble
                     key={idx}
@@ -130,6 +132,7 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
               }
               if (msg.type === "agent_dialogue") {
                 const data = msg.data as any;
+                if (!data?.from || !data?.message) return null;
                 return (
                   <DialogueBubble
                     key={idx}
