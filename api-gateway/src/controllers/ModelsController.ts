@@ -1,4 +1,4 @@
-import { Controller, Get, QueryParams } from "@tsed/common";
+import { Controller, Get, Post, BodyParams, QueryParams } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
 
 // Model definitions matching the Python orchestrator
@@ -188,15 +188,60 @@ export class ModelsController {
     gemini: typeof GEMINI_MODELS;
     claude: typeof CLAUDE_MODELS;
   }> {
-    return {
-      openai: OPENAI_MODELS,
-      openrouter: OPENROUTER_MODELS,
-      gemini: GEMINI_MODELS,
-      claude: CLAUDE_MODELS,
-    };
-  }
+      return {
+        openai: OPENAI_MODELS,
+        openrouter: OPENROUTER_MODELS,
+        gemini: GEMINI_MODELS,
+        claude: CLAUDE_MODELS,
+      };
+    }
 
-  @Get("/providers")
+    @Post("/")
+    @Summary("Validate API key and get models for provider")
+    @Description("Validates an API key for a provider and returns available models")
+    async validateAndGetModels(
+      @BodyParams() body: { provider: string; api_key: string }
+    ): Promise<{ success: boolean; models?: Record<string, unknown>; error?: string }> {
+      const { provider, api_key } = body;
+
+      if (!provider || !api_key) {
+        return { success: false, error: "Provider and API key are required" };
+      }
+
+      // Log without exposing the API key
+      console.log(`[ModelsController] Validating API key for provider: ${provider}`);
+
+      const providerModels: Record<string, Record<string, unknown>> = {
+        openai: OPENAI_MODELS,
+        openrouter: OPENROUTER_MODELS,
+        gemini: GEMINI_MODELS,
+        claude: CLAUDE_MODELS,
+        anthropic: CLAUDE_MODELS, // alias for claude
+      };
+
+      const models = providerModels[provider.toLowerCase()];
+
+      if (!models) {
+        return { success: false, error: `Unknown provider: ${provider}` };
+      }
+
+      // For now, we return the static models list
+      // In the future, this could validate the API key by making a test call to the provider
+      // and return dynamically fetched models
+      try {
+        // Basic validation - check if API key looks valid (non-empty, reasonable length)
+        if (api_key.length < 10) {
+          return { success: false, error: "API key appears to be invalid (too short)" };
+        }
+
+        return { success: true, models };
+      } catch (error) {
+        console.error(`[ModelsController] Error validating API key:`, error);
+        return { success: false, error: "Failed to validate API key" };
+      }
+    }
+
+    @Get("/providers")
   @Summary("Get available providers")
   @Description("List all supported LLM providers")
   async getProviders(): Promise<{

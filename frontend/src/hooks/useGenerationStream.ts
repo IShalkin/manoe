@@ -96,38 +96,38 @@ export function useGenerationStream({
             console.log('[useGenerationStream] Raw SSE event:', rawData);
             const data = rawData as AgentMessage;
 
-            // Update phase
-            if (data.type === 'phase_start' && data.data.phase) {
+            // Update phase - add null check for data.data
+            if (data.type === 'phase_start' && data.data?.phase) {
               const phase = data.data.phase as string;
               setCurrentPhase(phase.charAt(0).toUpperCase() + phase.slice(1));
             }
 
-            // Update active agent
-            if (data.type === 'agent_start') {
+            // Update active agent - add null check for data.data
+            if (data.type === 'agent_start' && data.data?.agent) {
               setActiveAgent(data.data.agent as string);
             }
             if (data.type === 'agent_complete') {
               setActiveAgent(null);
             }
             
-            // Update active agent from cinematic events
-            if (data.type === 'agent_thought' || data.type === 'agent_dialogue') {
+            // Update active agent from cinematic events - add null check
+            if ((data.type === 'agent_thought' || data.type === 'agent_dialogue') && data.data) {
               const agentData = data.data as any;
-              if (agentData.agent || agentData.from) {
+              if (agentData?.agent || agentData?.from) {
                 setActiveAgent(agentData.agent || agentData.from);
               }
             }
 
-            // Collect new developments (raw facts from Writer)
-            if (data.type === 'new_developments_collected') {
+            // Collect new developments (raw facts from Writer) - add null check
+            if (data.type === 'new_developments_collected' && data.data?.developments) {
               const developments = data.data.developments as FactUpdate[];
               if (developments && Array.isArray(developments)) {
                 setRawFacts((prev) => [...prev, ...developments]);
               }
             }
 
-            // Handle archivist snapshot complete (canonical facts)
-            if (data.type === 'phase_complete' && data.data.phase === 'archivist_snapshot') {
+            // Handle archivist snapshot complete (canonical facts) - add null check
+            if (data.type === 'phase_complete' && data.data?.phase === 'archivist_snapshot') {
               const constraints = data.data.constraints_count as number;
               if (constraints !== undefined) {
                 // Could fetch canonical state here if needed
@@ -151,9 +151,9 @@ export function useGenerationStream({
               return;
             }
 
-            // Handle errors
+            // Handle errors - add null check for data.data
             if (data.type === 'generation_error') {
-              const errorMsg = data.data.error as string || 'Unknown error';
+              const errorMsg = (data.data?.error as string) || 'Unknown error';
               setError(errorMsg);
               onError?.(errorMsg);
             }
