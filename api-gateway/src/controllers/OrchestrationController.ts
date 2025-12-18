@@ -223,7 +223,7 @@ class SSEEventDTO {
 
 // ==================== Controller ====================
 
-@Controller("/")
+@Controller("/orchestrate")
 @Tags("Orchestration")
 @Description(`
 Narrative generation orchestration endpoints.
