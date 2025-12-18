@@ -38,11 +38,12 @@ const rootDir = __dirname;
       ModelsController,
       HealthController,
     ],
-    "/orchestrate": [
-      OrchestrationController,
-      StateController,
-      TracesController,
-    ],
+        "/orchestrate": [
+          OrchestrationController,
+          StateController,
+          TracesController,
+          ModelsController,
+        ],
   },
   swagger: [
     {
