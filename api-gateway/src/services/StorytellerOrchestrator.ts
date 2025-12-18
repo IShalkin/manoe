@@ -158,8 +158,9 @@ export class StorytellerOrchestrator {
     });
 
     // Start generation in background
+    console.log(`[StorytellerOrchestrator] startGeneration: starting async runGeneration, runId: ${runId}`);
     this.runGeneration(runId, options).catch((error) => {
-      console.error(`Generation error for run ${runId}:`, error);
+      console.error(`[StorytellerOrchestrator] startGeneration: runGeneration error, runId: ${runId}`, error);
       this.handleError(runId, error);
     });
 
@@ -173,13 +174,22 @@ export class StorytellerOrchestrator {
     runId: string,
     options: GenerationOptions
   ): Promise<void> {
+    console.log(`[StorytellerOrchestrator] runGeneration started, runId: ${runId}`);
     const state = this.activeRuns.get(runId);
-    if (!state) return;
+    if (!state) {
+      console.error(`[StorytellerOrchestrator] runGeneration: state not found, runId: ${runId}`);
+      return;
+    }
 
     try {
       // Phase 1: Genesis
+      console.log(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
       await this.runGenesisPhase(runId, options);
-      if (this.shouldStop(runId)) return;
+      console.log(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
+      if (this.shouldStop(runId)) {
+        console.log(`[StorytellerOrchestrator] runGeneration: shouldStop after Genesis, exiting, runId: ${runId}`);
+        return;
+      }
 
       // Phase 2: Characters
       await this.runCharactersPhase(runId, options);
