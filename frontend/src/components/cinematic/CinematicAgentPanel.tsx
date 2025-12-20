@@ -58,15 +58,20 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
           .slice(-5)
           .find((msg) => {
             if (msg.type === "agent_dialogue") {
-              const data = msg.data as any;
+              const data = msg.data as Record<string, unknown> | undefined;
+              // Defensive check for malformed data
+              if (!data || typeof data !== 'object') return false;
               return data.from === agent || data.to === agent;
             }
             return false;
           });
         
         if (recentDialogue) {
-          const data = (recentDialogue.data as any);
-          if (data.from === agent) {
+          const data = recentDialogue.data as Record<string, unknown> | undefined;
+          // Defensive check for malformed data
+          if (!data || typeof data !== 'object') {
+            statuses[agent] = "idle";
+          } else if (data.from === agent) {
             statuses[agent] = "speaking";
           } else if (data.to === agent) {
             statuses[agent] = "listening";
