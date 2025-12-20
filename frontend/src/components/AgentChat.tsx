@@ -1055,7 +1055,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     
     const connectSSE = async () => {
       try {
-        const sseUrl = await getAuthenticatedSSEUrl(`/runs/${runId}/events`);
+        const sseUrl = await getAuthenticatedSSEUrl(`/stream/${runId}`);
         eventSource = new EventSource(sseUrl);
         eventSourceRef.current = eventSource;
 
