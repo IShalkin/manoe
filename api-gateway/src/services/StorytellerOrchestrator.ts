@@ -260,9 +260,15 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.ARCHITECT);
+
     $log.info(`[StorytellerOrchestrator] runGenesisPhase: calling agent.execute, runId: ${runId}, phase: ${state.phase}`);
     const output = await agent.execute(context, options);
     $log.info(`[StorytellerOrchestrator] runGenesisPhase: agent.execute completed, runId: ${runId}`);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.ARCHITECT);
     state.narrative = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
@@ -293,7 +299,14 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.PROFILER);
+
     const output = await agent.execute(context, options);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.PROFILER);
+
     state.characters = output.content as Record<string, unknown>[];
     state.updatedAt = new Date().toISOString();
 
@@ -327,7 +340,14 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.WORLDBUILDER);
+
     const output = await agent.execute(context, options);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.WORLDBUILDER);
+
     state.worldbuilding = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
@@ -368,7 +388,14 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.STRATEGIST);
+
     const output = await agent.execute(context, options);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.STRATEGIST);
+
     state.outline = output.content as Record<string, unknown>;
     const scenes = (state.outline as Record<string, unknown>)?.scenes;
     state.totalScenes = Array.isArray(scenes) ? scenes.length : 0;
@@ -399,7 +426,14 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.STRATEGIST);
+
     const output = await agent.execute(context, options);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.STRATEGIST);
+
     const advancedPlan = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
@@ -499,7 +533,14 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.WRITER);
+
     const output = await agent.execute(context, options);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.WRITER);
+
     const response = output.content as string;
 
     const draft = {
@@ -549,7 +590,14 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.CRITIC);
+
     const output = await agent.execute(context, options);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.CRITIC);
+
     const critique = output.content as Record<string, unknown>;
     
     if (!state.critiques.has(sceneNum)) {
@@ -591,7 +639,14 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.WRITER);
+
     const output = await agent.execute(context, options);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.WRITER);
+
     const response = output.content as string;
 
     const revision = {
@@ -639,7 +694,14 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.WRITER);
+
     const output = await agent.execute(context, options);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.WRITER);
+
     const response = output.content as string;
 
     const polished = {
@@ -688,7 +750,14 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    // Emit agent_start event for UI
+    await this.publishAgentStart(runId, AgentType.ARCHIVIST);
+
     const output = await agent.execute(context, options);
+
+    // Emit agent_complete event for UI
+    await this.publishAgentComplete(runId, AgentType.ARCHIVIST);
+
     const result = output.content as Record<string, unknown>;
     
     if (result.constraints && Array.isArray(result.constraints)) {
@@ -938,6 +1007,22 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
   ): Promise<void> {
     await this.publishEvent(runId, "phase_complete", { phase, artifact });
     this.langfuse.addEvent(runId, "phase_complete", { phase });
+  }
+
+  /**
+   * Publish agent start event (for UI to show agent as active)
+   */
+  private async publishAgentStart(runId: string, agent: string): Promise<void> {
+    await this.publishEvent(runId, "agent_start", { agent });
+    this.langfuse.addEvent(runId, "agent_start", { agent });
+  }
+
+  /**
+   * Publish agent complete event (for UI to show agent as done)
+   */
+  private async publishAgentComplete(runId: string, agent: string): Promise<void> {
+    await this.publishEvent(runId, "agent_complete", { agent });
+    this.langfuse.addEvent(runId, "agent_complete", { agent });
   }
 
   /**
