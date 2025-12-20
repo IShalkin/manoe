@@ -95,6 +95,10 @@ class GenerateRequestDTO {
 
   // Legacy Python format (snake_case)
   @Property()
+  @Description("Project ID (snake_case)")
+  project_id?: string;
+
+  @Property()
   @Description("Supabase project ID (legacy)")
   supabase_project_id?: string;
 
@@ -280,7 +284,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
   ): Promise<GenerateResponseDTO> {
     // Support both new TypeScript format and legacy Python format
     // Generate a proper UUID if no projectId is provided (required for Supabase FK constraint)
-    const projectId = request.projectId || request.supabase_project_id || uuidv4();
+    const projectId = request.projectId || request.project_id || request.supabase_project_id || uuidv4();
     const seedIdea = request.seedIdea || request.seed_idea || "";
     const provider = request.llmConfig?.provider || request.provider as LLMProvider;
     const model = request.llmConfig?.model || request.model || "";
