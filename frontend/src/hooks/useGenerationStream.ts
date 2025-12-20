@@ -169,6 +169,16 @@ export function useGenerationStream({
               return;
             }
 
+            // Handle run not found (after server restart)
+            if (data.type === 'run_not_found') {
+              const errorMsg = data.data?.error as string || rawData.error as string || 'Run not found. Please start a new generation.';
+              setError(errorMsg);
+              eventSource.close();
+              setIsConnected(false);
+              onError?.(errorMsg);
+              return;
+            }
+
             // Handle errors (support both old and new event names)
             if (data.type === 'generation_error' || data.type === 'ERROR') {
               const errorMsg = data.data.error as string || 'Unknown error';

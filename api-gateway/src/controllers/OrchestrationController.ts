@@ -437,7 +437,23 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     // Check if run exists
     const status = this.orchestrator.getRunStatus(runId);
     if (!status) {
-      res.status(404).json({ error: "Run not found" });
+      // IMPORTANT: Don't return 404 for SSE endpoints!
+      // EventSource auto-retries on non-200 responses, causing endless loops.
+      // Instead, return 200 with an error event, then close the stream.
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      
+      // Send error event that frontend can handle
+      res.write(`data: ${JSON.stringify({ 
+        type: "run_not_found", 
+        runId, 
+        error: "Run not found. The generation may have been lost after a server restart. Please start a new generation.",
+        timestamp: new Date().toISOString()
+      })}\n\n`);
+      
+      res.end();
       return;
     }
 
