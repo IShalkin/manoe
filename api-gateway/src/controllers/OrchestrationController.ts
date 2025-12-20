@@ -438,8 +438,8 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     res.setHeader("X-Accel-Buffering", "no"); // Disable Nginx buffering
     res.flushHeaders();
 
-    // Send initial connection event
-    res.write(`event: connected\ndata: ${JSON.stringify({ runId, status: status.phase })}\n\n`);
+    // Send initial connection event (no event: header so onmessage receives it)
+    res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase })}\n\n`);
 
     // First, send all existing events from the stream (catch up)
     try {
@@ -453,6 +453,8 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           console.log(`[OrchestrationController] Streaming existing cinematic event:`, event.type, `runId: ${runId}`, event.data);
         }
         
+        // Send as generic message (no event: header) so onmessage receives it
+        // The type is included in the data payload
         const sseData = JSON.stringify({
           id: event.id,
           type: event.type,
@@ -460,7 +462,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           timestamp: event.timestamp,
           data: event.data,
         });
-        res.write(`event: ${event.type}\ndata: ${sseData}\n\n`);
+        res.write(`data: ${sseData}\n\n`);
       }
     } catch (error) {
       console.error(`[OrchestrationController] Error getting existing events:`, error, error instanceof Error ? error.stack : '');
@@ -484,7 +486,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           console.log(`[OrchestrationController] Streaming cinematic event:`, event.type, `runId: ${runId}`, event.data);
         }
 
-        // Format as SSE
+        // Format as SSE (no event: header so onmessage receives it)
         const sseData = JSON.stringify({
           id: event.id,
           type: event.type,
@@ -493,7 +495,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           data: event.data,
         });
 
-        res.write(`event: ${event.type}\ndata: ${sseData}\n\n`);
+        res.write(`data: ${sseData}\n\n`);
 
         // Stop streaming on terminal events
         if (event.type === "ERROR" || event.type === "generation_completed") {
@@ -502,7 +504,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       }
     } catch (error) {
       if (isConnected) {
-        res.write(`event: ERROR\ndata: ${JSON.stringify({ error: String(error) })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "ERROR", error: String(error) })}\n\n`);
       }
     } finally {
       res.end();

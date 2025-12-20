@@ -7,16 +7,48 @@
 import { z } from "zod";
 
 /**
+ * Theme schema - can be a string or an object with name/description
+ */
+const ThemeSchema = z.union([
+  z.string(),
+  z.object({
+    name: z.string().optional(),
+    theme: z.string().optional(),
+    description: z.string().optional(),
+    exploration: z.string().optional(),
+  }).passthrough(),
+]);
+
+/**
+ * Arc schema - can be a string or a structured object
+ */
+const ArcSchema = z.union([
+  z.string(),
+  z.object({
+    structure: z.string().optional(),
+    type: z.string().optional(),
+    acts: z.array(z.unknown()).optional(),
+    setup: z.string().optional(),
+    confrontation: z.string().optional(),
+    resolution: z.string().optional(),
+  }).passthrough(),
+]);
+
+/**
  * Narrative schema (from ArchitectAgent - Genesis phase)
+ * Flexible to handle various LLM output formats
  */
 export const NarrativeSchema = z.object({
   premise: z.string().min(1),
   hook: z.string().min(1),
-  themes: z.array(z.string()).min(1),
-  arc: z.string().min(1),
-  tone: z.string().min(1),
-  audience: z.string().optional(),
-  genre: z.string().optional(),
+  themes: z.union([
+    z.array(ThemeSchema).min(1),
+    z.object({}).passthrough(), // Allow object format for themes
+  ]),
+  arc: ArcSchema,
+  tone: z.union([z.string(), z.object({}).passthrough()]),
+  audience: z.union([z.string(), z.object({}).passthrough()]).optional(),
+  genre: z.union([z.string(), z.object({}).passthrough()]).optional(),
 });
 
 /**
