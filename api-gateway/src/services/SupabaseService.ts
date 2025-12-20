@@ -424,6 +424,7 @@ export class SupabaseService {
   async saveRunArtifact(params: {
     runId: string;
     projectId: string;
+    phase: string;
     artifactType: string;
     content: unknown;
   }): Promise<void> {
@@ -431,6 +432,7 @@ export class SupabaseService {
     const { error } = await client.from("run_artifacts").upsert({
       run_id: params.runId,
       project_id: params.projectId,
+      phase: params.phase,
       artifact_type: params.artifactType,
       content: params.content,
       created_at: new Date().toISOString(),
