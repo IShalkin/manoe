@@ -52,23 +52,45 @@ export const NarrativeSchema = z.object({
 });
 
 /**
+ * Psychology schema - flexible to handle various LLM output formats
+ */
+const PsychologySchema = z.object({
+  wound: z.string().optional(),
+  innerTrap: z.string().optional(),
+  inner_trap: z.string().optional(),
+  arc: z.string().optional(),
+  motivation: z.string().optional(),
+  desire: z.string().optional(),
+  fears: z.array(z.string()).optional(),
+}).passthrough().optional();
+
+/**
  * Character schema (from ProfilerAgent - Characters phase)
+ * Flexible to handle various LLM output formats - LLM may return:
+ * - role as descriptive string like "Protagonist — description" instead of enum
+ * - motivation under different field names (core_motivation, desire, goal)
+ * - extra fields not in the schema
  */
 export const CharacterSchema = z.object({
   name: z.string().min(1),
-  role: z.enum(["protagonist", "antagonist", "supporting"]),
+  // Accept any string for role - LLM returns descriptive strings like "Protagonist — description"
+  role: z.string().optional(),
   archetype: z.string().optional(),
-  motivation: z.string().min(1),
-  psychology: z.object({
-    wound: z.string().optional(),
-    innerTrap: z.string().optional(),
-    arc: z.string().optional(),
-  }).optional(),
+  // Make motivation optional - LLM may use different field names
+  motivation: z.string().optional(),
+  core_motivation: z.string().optional(),
+  desire: z.string().optional(),
+  goal: z.string().optional(),
+  psychology: PsychologySchema,
   backstory: z.string().optional(),
   visual: z.string().optional(),
   voice: z.string().optional(),
-  relationships: z.array(z.string()).optional(),
-});
+  relationships: z.union([
+    z.array(z.string()),
+    z.array(z.object({}).passthrough()),
+    z.string(),
+  ]).optional(),
+}).passthrough();
 
 /**
  * Characters array schema
