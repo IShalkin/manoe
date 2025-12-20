@@ -524,6 +524,13 @@ interface AgentMessage {
     result?: Record<string, unknown>;
     result_summary?: string;
     round?: number;
+    // Cinematic event fields
+    thought?: string;      // Used in agent_thought events
+    from?: string;         // Used in agent_dialogue events (sender agent)
+    to?: string;           // Used in agent_dialogue events (receiver agent)
+    message?: string;      // Used in agent_dialogue events (dialogue content)
+    sentiment?: string;    // Used in agent_thought events
+    dialogueType?: string; // Used in agent_dialogue events
   };
 }
 
@@ -1463,7 +1470,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       // Defensive check: msg.data may be undefined for some event types
       if (!msg.data || typeof msg.data !== 'object') return;
       // Normalize agent name from backend (lowercase) to frontend (TitleCase)
-      const rawAgent = msg.data.agent as string | undefined;
+      // Handle both 'agent' field and 'from' field (used in agent_dialogue)
+      const rawAgent = (msg.data.agent || msg.data.from) as string | undefined;
       const agent = normalizeAgentName(rawAgent);
       if (!agent || !states[agent]) return;
       
@@ -1475,8 +1483,28 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         states[agent].lastUpdate = msg.timestamp;
       } else if (msg.type === 'agent_message' && msg.data.content) {
         states[agent].messages.push({
-          content: msg.data.content,
-          round: msg.data.round || 1,
+          content: msg.data.content as string,
+          round: (msg.data.round as number) || 1,
+          timestamp: msg.timestamp,
+        });
+        states[agent].lastUpdate = msg.timestamp;
+      } else if (msg.type === 'agent_thought' && msg.data.thought) {
+        // Handle cinematic agent_thought events - these contain the agent's thinking process
+        states[agent].messages.push({
+          content: msg.data.thought as string,
+          round: (msg.data.round as number) || 1,
+          timestamp: msg.timestamp,
+        });
+        states[agent].lastUpdate = msg.timestamp;
+        // Also update status to thinking if not already complete
+        if (states[agent].status !== 'complete') {
+          states[agent].status = 'thinking';
+        }
+      } else if (msg.type === 'agent_dialogue' && msg.data.message) {
+        // Handle cinematic agent_dialogue events - these contain agent-to-agent communication
+        states[agent].messages.push({
+          content: msg.data.message as string,
+          round: (msg.data.round as number) || 1,
           timestamp: msg.timestamp,
         });
         states[agent].lastUpdate = msg.timestamp;
