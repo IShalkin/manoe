@@ -28,7 +28,7 @@ const ALL_AGENTS: AgentType[] = [
 ];
 
 export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
-  const { messages, currentPhase, activeAgent, isConnected, isPaused, isComplete, error } = useGenerationStream({
+  const { messages, currentPhase, activeAgent, isConnected, isPaused, isComplete, isReplay, error } = useGenerationStream({
     runId,
   });
 
@@ -38,7 +38,8 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
     if (!isConnected) return { text: "Disconnected", color: "bg-gray-500" };
     if (isComplete) return { text: "Completed", color: "bg-blue-500" };
     if (isPaused) return { text: "Paused", color: "bg-yellow-500" };
-    return { text: "Running", color: "bg-green-500" };
+    if (isReplay) return { text: "Replaying History...", color: "bg-purple-500" };
+    return { text: "Generating", color: "bg-green-500" };
   };
   const statusDisplay = getStatusDisplay();
 

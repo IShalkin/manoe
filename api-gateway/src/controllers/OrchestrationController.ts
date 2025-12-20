@@ -490,39 +490,57 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       }
     }, 15000); // Every 15 seconds
 
-    // First, send all existing events from the stream (catch up)
+    // First, send all existing events from the stream (catch up / replay)
     // Track the last event ID to avoid race condition when switching to live streaming
     let lastEventId = "0";
     try {
       const existingEvents = await this.redisStreams.getEvents(runId, "0", 1000);
-      console.log(`[OrchestrationController] Sending ${existingEvents.length} existing events for runId: ${runId}`);
+      console.log(`[OrchestrationController] Replaying ${existingEvents.length} existing events for runId: ${runId}`);
       const cinematicCount = existingEvents.filter(e => e.type === "agent_thought" || e.type === "agent_dialogue").length;
       console.log(`[OrchestrationController] Found ${cinematicCount} cinematic events in existing events`);
       for (const event of existingEvents) {
         if (!isConnected) break;
         
+        // Track the last event ID for seamless transition to live streaming
+        lastEventId = event.id;
+        
         // Log cinematic events
         if (event.type === "agent_thought" || event.type === "agent_dialogue") {
-          console.log(`[OrchestrationController] Streaming existing cinematic event:`, event.type, `runId: ${runId}`, event.data);
+          console.log(`[OrchestrationController] Replaying cinematic event:`, event.type, `runId: ${runId}`, event.data);
         }
         
         // Send as generic message (no event: header) so onmessage receives it
         // The type is included in the data payload
+        // Mark as replay so UI knows this is historical data
         const sseData = JSON.stringify({
           id: event.id,
           type: event.type,
           runId: event.runId,
           timestamp: event.timestamp,
           data: event.data,
+          isReplay: true,
         });
         res.write(`data: ${sseData}\n\n`);
       }
+      
+      // Send replay_complete event to signal transition to live streaming
+      res.write(`data: ${JSON.stringify({ 
+        type: "replay_complete", 
+        runId, 
+        replayedCount: existingEvents.length,
+        lastEventId,
+        message: status.isPaused 
+          ? "Replay complete. Run is paused - resume to continue generation." 
+          : "Replay complete. Now streaming live events."
+      })}\n\n`);
+      console.log(`[OrchestrationController] Replay complete for runId: ${runId}, lastEventId: ${lastEventId}, isPaused: ${status.isPaused}`);
     } catch (error) {
       console.error(`[OrchestrationController] Error getting existing events:`, error, error instanceof Error ? error.stack : '');
     }
 
-    // Then stream new events from Redis (starting from the end)
-    const eventGenerator = this.redisStreams.streamEvents(runId, "$", 15000);
+    // Then stream new events from Redis (starting from last replayed event to avoid missing events)
+    // Use lastEventId instead of "$" to prevent race condition where events are missed
+    const eventGenerator = this.redisStreams.streamEvents(runId, lastEventId, 15000);
 
     try {
       for await (const event of eventGenerator) {

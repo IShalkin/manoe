@@ -26,6 +26,7 @@ export interface WorldStateFact {
 export interface GenerationStreamState {
   isConnected: boolean;
   isPaused: boolean;
+  isReplay: boolean;
   currentPhase: string;
   activeAgent: string | null;
   messages: AgentMessage[];
@@ -57,7 +58,8 @@ export function useGenerationStream({
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [rawFacts, setRawFacts] = useState<FactUpdate[]>([]);
-  const [worldState] = useState<WorldStateFact[]>([]);
+  const [worldState, setWorldState] = useState<WorldStateFact[]>([]);
+  const [isReplay, setIsReplay] = useState(true); // Start as replay until we receive replay_complete
   const [error, setError] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
@@ -132,12 +134,22 @@ export function useGenerationStream({
               if (rawData.error) {
                 setError(rawData.error as string);
               }
+              // If run is paused or completed, we're not in replay mode - we're just showing final state
+              if (rawData.isPaused || rawData.isCompleted) {
+                setIsReplay(false);
+              }
               console.log('[useGenerationStream] Connected with status:', {
                 isPaused: rawData.isPaused,
                 isCompleted: rawData.isCompleted,
                 phase: rawData.status,
                 error: rawData.error
               });
+            }
+
+            // Handle replay_complete event - transition from replay to live
+            if (rawData.type === 'replay_complete') {
+              setIsReplay(false);
+              console.log('[useGenerationStream] Replay complete, now streaming live events');
             }
 
             // Update phase
@@ -263,6 +275,7 @@ export function useGenerationStream({
   return {
     isConnected,
     isPaused,
+    isReplay,
     currentPhase,
     activeAgent,
     messages,
