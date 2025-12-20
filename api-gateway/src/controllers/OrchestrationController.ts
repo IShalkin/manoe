@@ -465,8 +465,17 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     res.setHeader("Content-Encoding", "identity"); // Prevent compression which breaks SSE
     res.flushHeaders();
 
-    // Send initial connection event (no event: header so onmessage receives it)
-    res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase })}\n\n`);
+    // Send initial connection event with full run status (no event: header so onmessage receives it)
+    // Include isPaused, isCompleted, error so UI can show accurate status
+    res.write(`data: ${JSON.stringify({ 
+      type: "connected", 
+      runId, 
+      status: status.phase,
+      isPaused: status.isPaused,
+      isCompleted: status.isCompleted,
+      error: status.error,
+      updatedAt: status.updatedAt
+    })}\n\n`);
 
     // Handle client disconnect
     let isConnected = true;

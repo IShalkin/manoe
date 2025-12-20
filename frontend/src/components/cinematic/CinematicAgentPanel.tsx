@@ -28,9 +28,19 @@ const ALL_AGENTS: AgentType[] = [
 ];
 
 export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
-  const { messages, currentPhase, activeAgent, isConnected } = useGenerationStream({
+  const { messages, currentPhase, activeAgent, isConnected, isPaused, isComplete, error } = useGenerationStream({
     runId,
   });
+
+  // Determine status text and color
+  const getStatusDisplay = () => {
+    if (error) return { text: "Error", color: "bg-red-500" };
+    if (!isConnected) return { text: "Disconnected", color: "bg-gray-500" };
+    if (isComplete) return { text: "Completed", color: "bg-blue-500" };
+    if (isPaused) return { text: "Paused", color: "bg-yellow-500" };
+    return { text: "Running", color: "bg-green-500" };
+  };
+  const statusDisplay = getStatusDisplay();
 
   // Filter cinematic events
   const cinematicMessages = useMemo(() => {
@@ -92,8 +102,8 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">{currentPhase || "Waiting..."}</h2>
-        <div className={`px-3 py-1 rounded ${isConnected ? "bg-green-500" : "bg-red-500"}`}>
-          {isConnected ? "Connected" : "Disconnected"}
+        <div className={`px-3 py-1 rounded ${statusDisplay.color}`}>
+          {statusDisplay.text}
         </div>
       </div>
 

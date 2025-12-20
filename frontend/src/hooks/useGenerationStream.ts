@@ -25,6 +25,7 @@ export interface WorldStateFact {
 
 export interface GenerationStreamState {
   isConnected: boolean;
+  isPaused: boolean;
   currentPhase: string;
   activeAgent: string | null;
   messages: AgentMessage[];
@@ -51,6 +52,7 @@ export function useGenerationStream({
   disconnect: () => void;
 } {
   const [isConnected, setIsConnected] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [currentPhase, setCurrentPhase] = useState('');
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -113,6 +115,30 @@ export function useGenerationStream({
             }
             
             const data = normalizedData;
+
+            // Handle connected event with run status
+            if (rawData.type === 'connected') {
+              // Extract run status from connected event
+              if (rawData.isPaused !== undefined) {
+                setIsPaused(rawData.isPaused);
+              }
+              if (rawData.isCompleted !== undefined) {
+                setIsComplete(rawData.isCompleted);
+              }
+              if (rawData.status) {
+                const phase = rawData.status as string;
+                setCurrentPhase(phase.charAt(0).toUpperCase() + phase.slice(1));
+              }
+              if (rawData.error) {
+                setError(rawData.error as string);
+              }
+              console.log('[useGenerationStream] Connected with status:', {
+                isPaused: rawData.isPaused,
+                isCompleted: rawData.isCompleted,
+                phase: rawData.status,
+                error: rawData.error
+              });
+            }
 
             // Update phase
             if (data.type === 'phase_start' && data.data.phase) {
@@ -236,6 +262,7 @@ export function useGenerationStream({
 
   return {
     isConnected,
+    isPaused,
     currentPhase,
     activeAgent,
     messages,
