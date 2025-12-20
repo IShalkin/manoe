@@ -15,6 +15,8 @@ import { CharactersArraySchema } from "../schemas/AgentSchemas";
 import { ContentGuardrail, ConsistencyGuardrail } from "../guardrails";
 import { RedisStreamsService } from "../services/RedisStreamsService";
 
+type CharacterRole = "protagonist" | "antagonist" | "supporting";
+
 export class ProfilerAgent extends BaseAgent {
   constructor(
     llmProvider: LLMProviderService,
@@ -53,13 +55,108 @@ export class ProfilerAgent extends BaseAgent {
 
     if (phase === GenerationPhase.CHARACTERS) {
       const parsed = this.parseJSONArray(response);
-      const validated = this.validateOutput(parsed, CharactersArraySchema, runId);
+      const normalized = this.normalizeCharacters(parsed);
+      const validated = this.validateOutput(normalized, CharactersArraySchema, runId);
       return { content: validated as Record<string, unknown>[] };
     }
 
     // For NARRATOR_DESIGN, return as-is (simple object)
     const content = this.parseJSON(response);
     return { content: content as Record<string, unknown> };
+  }
+
+  /**
+   * Normalize character data from LLM output
+   * Extracts the role type from descriptive strings like "Protagonist — description"
+   * Also handles field name variations from LLM output
+   */
+  private normalizeCharacters(characters: Record<string, unknown>[]): Record<string, unknown>[] {
+    return characters.map((char) => ({
+      ...char,
+      role: this.normalizeRole(char.role),
+      // Handle motivation field variations - LLM might use different field names
+      motivation: this.extractMotivation(char),
+    }));
+  }
+
+  /**
+   * Extract motivation from character data, handling various field name variations
+   */
+  private extractMotivation(char: Record<string, unknown>): string {
+    // Direct motivation field
+    if (typeof char.motivation === "string" && char.motivation.length > 0) {
+      return char.motivation;
+    }
+
+    // Common variations
+    const motivationFields = [
+      "core_motivation",
+      "coreMotivation",
+      "desire",
+      "goal",
+      "objective",
+      "drive",
+    ];
+
+    for (const field of motivationFields) {
+      if (typeof char[field] === "string" && (char[field] as string).length > 0) {
+        return char[field] as string;
+      }
+    }
+
+    // Check nested psychology object
+    if (char.psychology && typeof char.psychology === "object") {
+      const psych = char.psychology as Record<string, unknown>;
+      if (typeof psych.motivation === "string" && psych.motivation.length > 0) {
+        return psych.motivation;
+      }
+      if (typeof psych.desire === "string" && psych.desire.length > 0) {
+        return psych.desire;
+      }
+    }
+
+    // Fallback - generate from role if available
+    const role = this.normalizeRole(char.role);
+    return `Character with ${role} role`;
+  }
+
+  /**
+   * Extract the role type from a potentially descriptive role string
+   * Handles formats like:
+   * - "protagonist" -> "protagonist"
+   * - "Protagonist" -> "protagonist"
+   * - "Protagonist — description" -> "protagonist"
+   * - "Supporting/Shadow-Antagonist — description" -> "supporting"
+   */
+  private normalizeRole(role: unknown): CharacterRole {
+    if (typeof role !== "string") {
+      return "supporting"; // Default fallback
+    }
+
+    const roleLower = role.toLowerCase();
+
+    // Check for protagonist
+    if (roleLower.startsWith("protagonist")) {
+      return "protagonist";
+    }
+
+    // Check for antagonist (but not "shadow-antagonist" which is supporting)
+    if (roleLower.startsWith("antagonist")) {
+      return "antagonist";
+    }
+
+    // Check for supporting or any other role
+    if (roleLower.startsWith("supporting") || roleLower.includes("supporting")) {
+      return "supporting";
+    }
+
+    // Check if antagonist appears anywhere (for cases like "Shadow-Antagonist")
+    if (roleLower.includes("antagonist") && !roleLower.includes("supporting")) {
+      return "antagonist";
+    }
+
+    // Default to supporting for any unrecognized role
+    return "supporting";
   }
 
   private async getSystemPrompt(

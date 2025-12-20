@@ -44,6 +44,9 @@ export class LLMProviderService {
    */
   async createCompletion(options: CompletionOptions): Promise<LLMResponse> {
     const startTime = Date.now();
+    
+    // Log model being used for debugging
+    console.log(`[LLMProviderService] Creating completion: provider=${options.provider}, model=${options.model}, maxTokens=${options.maxTokens}`);
 
     let response: LLMResponse;
 

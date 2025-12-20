@@ -37,6 +37,8 @@ services:
       - SUPABASE_KEY=${SUPABASE_KEY:-}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Qdrant vector database - uses existing qdrant container on the network
+      - QDRANT_URL=http://qdrant:6333
       # nginx-proxy configuration - use subdomain to avoid conflict with frontend
       - VIRTUAL_HOST=manoe-gateway.iliashalkin.com
       - VIRTUAL_PORT=3000

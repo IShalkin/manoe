@@ -29,8 +29,10 @@ import {
 } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { Request, Response } from "express";
+import { v4 as uuidv4 } from "uuid";
 import { StorytellerOrchestrator, GenerationOptions, RunStatus, LLMConfiguration } from "../services/StorytellerOrchestrator";
 import { RedisStreamsService } from "../services/RedisStreamsService";
+import { SupabaseService } from "../services/SupabaseService";
 import { LLMProvider, GenerationPhase } from "../models/LLMModels";
 
 // ==================== DTOs ====================
@@ -93,6 +95,10 @@ class GenerateRequestDTO {
   settings?: Record<string, unknown>;
 
   // Legacy Python format (snake_case)
+  @Property()
+  @Description("Project ID (snake_case)")
+  project_id?: string;
+
   @Property()
   @Description("Supabase project ID (legacy)")
   supabase_project_id?: string;
@@ -250,6 +256,9 @@ export class OrchestrationController {
   @Inject()
   private redisStreams: RedisStreamsService;
 
+  @Inject()
+  private supabase: SupabaseService;
+
   /**
    * Start a new narrative generation
    */
@@ -278,7 +287,8 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
     @BodyParams() @Groups("!internal") request: GenerateRequestDTO
   ): Promise<GenerateResponseDTO> {
     // Support both new TypeScript format and legacy Python format
-    const projectId = request.projectId || request.supabase_project_id || `generated-${Date.now()}`;
+    // Generate a proper UUID if no projectId is provided (required for Supabase FK constraint)
+    const projectId = request.projectId || request.project_id || request.supabase_project_id || uuidv4();
     const seedIdea = request.seedIdea || request.seed_idea || "";
     const provider = request.llmConfig?.provider || request.provider as LLMProvider;
     const model = request.llmConfig?.model || request.model || "";
@@ -361,7 +371,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
         run_id: runId,
         success: true,
         message: "Generation started",
-        streamUrl: `/stream/${runId}`,
+        streamUrl: `/orchestrate/stream/${runId}`,
       };
     } catch (error) {
       // #region debug instrumentation
@@ -427,7 +437,23 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     // Check if run exists
     const status = this.orchestrator.getRunStatus(runId);
     if (!status) {
-      res.status(404).json({ error: "Run not found" });
+      // IMPORTANT: Don't return 404 for SSE endpoints!
+      // EventSource auto-retries on non-200 responses, causing endless loops.
+      // Instead, return 200 with an error event, then close the stream.
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      
+      // Send error event that frontend can handle
+      res.write(`data: ${JSON.stringify({ 
+        type: "run_not_found", 
+        runId, 
+        error: "Run not found. The generation may have been lost after a server restart. Please start a new generation.",
+        timestamp: new Date().toISOString()
+      })}\n\n`);
+      
+      res.end();
       return;
     }
 
@@ -439,8 +465,17 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     res.setHeader("Content-Encoding", "identity"); // Prevent compression which breaks SSE
     res.flushHeaders();
 
-    // Send initial connection event (no event: header so onmessage receives it)
-    res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase })}\n\n`);
+    // Send initial connection event with full run status (no event: header so onmessage receives it)
+    // Include isPaused, isCompleted, error so UI can show accurate status
+    res.write(`data: ${JSON.stringify({ 
+      type: "connected", 
+      runId, 
+      status: status.phase,
+      isPaused: status.isPaused,
+      isCompleted: status.isCompleted,
+      error: status.error,
+      updatedAt: status.updatedAt
+    })}\n\n`);
 
     // Handle client disconnect
     let isConnected = true;
@@ -455,39 +490,57 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       }
     }, 15000); // Every 15 seconds
 
-    // First, send all existing events from the stream (catch up)
+    // First, send all existing events from the stream (catch up / replay)
     // Track the last event ID to avoid race condition when switching to live streaming
     let lastEventId = "0";
     try {
       const existingEvents = await this.redisStreams.getEvents(runId, "0", 1000);
-      console.log(`[OrchestrationController] Sending ${existingEvents.length} existing events for runId: ${runId}`);
+      console.log(`[OrchestrationController] Replaying ${existingEvents.length} existing events for runId: ${runId}`);
       const cinematicCount = existingEvents.filter(e => e.type === "agent_thought" || e.type === "agent_dialogue").length;
       console.log(`[OrchestrationController] Found ${cinematicCount} cinematic events in existing events`);
       for (const event of existingEvents) {
         if (!isConnected) break;
         
+        // Track the last event ID for seamless transition to live streaming
+        lastEventId = event.id;
+        
         // Log cinematic events
         if (event.type === "agent_thought" || event.type === "agent_dialogue") {
-          console.log(`[OrchestrationController] Streaming existing cinematic event:`, event.type, `runId: ${runId}`, event.data);
+          console.log(`[OrchestrationController] Replaying cinematic event:`, event.type, `runId: ${runId}`, event.data);
         }
         
         // Send as generic message (no event: header) so onmessage receives it
         // The type is included in the data payload
+        // Mark as replay so UI knows this is historical data
         const sseData = JSON.stringify({
           id: event.id,
           type: event.type,
           runId: event.runId,
           timestamp: event.timestamp,
           data: event.data,
+          isReplay: true,
         });
         res.write(`data: ${sseData}\n\n`);
       }
+      
+      // Send replay_complete event to signal transition to live streaming
+      res.write(`data: ${JSON.stringify({ 
+        type: "replay_complete", 
+        runId, 
+        replayedCount: existingEvents.length,
+        lastEventId,
+        message: status.isPaused 
+          ? "Replay complete. Run is paused - resume to continue generation." 
+          : "Replay complete. Now streaming live events."
+      })}\n\n`);
+      console.log(`[OrchestrationController] Replay complete for runId: ${runId}, lastEventId: ${lastEventId}, isPaused: ${status.isPaused}`);
     } catch (error) {
       console.error(`[OrchestrationController] Error getting existing events:`, error, error instanceof Error ? error.stack : '');
     }
 
-    // Then stream new events from Redis (starting from the end)
-    const eventGenerator = this.redisStreams.streamEvents(runId, "$", 15000);
+    // Then stream new events from Redis (starting from last replayed event to avoid missing events)
+    // Use lastEventId instead of "$" to prevent race condition where events are missed
+    const eventGenerator = this.redisStreams.streamEvents(runId, lastEventId, 15000);
 
     try {
       for await (const event of eventGenerator) {
@@ -657,5 +710,28 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
   @Returns(200, Array)
   listRuns(): RunStatus[] {
     return this.orchestrator.listActiveRuns();
+  }
+
+  /**
+   * Get research history (Eternal Memory)
+   */
+  @Get("/research/history")
+  @Summary("Get research history")
+  @Description("Returns the most recent research results from Eternal Memory.")
+  @Returns(200)
+  @Returns(500)
+  async getResearchHistory(
+    @QueryParams("limit") limit: number = 20
+  ): Promise<{ success: boolean; research?: unknown[]; error?: string }> {
+    try {
+      const research = await this.supabase.getResearchHistory(limit);
+      return { success: true, research };
+    } catch (error) {
+      $log.error("[OrchestrationController] Failed to get research history:", error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : "Failed to get research history" 
+      };
+    }
   }
 }

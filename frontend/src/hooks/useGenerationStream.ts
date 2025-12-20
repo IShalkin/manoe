@@ -25,6 +25,8 @@ export interface WorldStateFact {
 
 export interface GenerationStreamState {
   isConnected: boolean;
+  isPaused: boolean;
+  isReplay: boolean;
   currentPhase: string;
   activeAgent: string | null;
   messages: AgentMessage[];
@@ -51,11 +53,13 @@ export function useGenerationStream({
   disconnect: () => void;
 } {
   const [isConnected, setIsConnected] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [currentPhase, setCurrentPhase] = useState('');
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [rawFacts, setRawFacts] = useState<FactUpdate[]>([]);
-  const [worldState] = useState<WorldStateFact[]>([]);
+  const [worldState, setWorldState] = useState<WorldStateFact[]>([]);
+  const [isReplay, setIsReplay] = useState(true); // Start as replay until we receive replay_complete
   const [error, setError] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
@@ -77,7 +81,7 @@ export function useGenerationStream({
 
     const connectSSE = async () => {
       try {
-        const sseUrl = await getAuthenticatedSSEUrl(`/runs/${runId}/events`);
+        const sseUrl = await getAuthenticatedSSEUrl(`/stream/${runId}`);
         const eventSource = new EventSource(sseUrl);
         eventSourceRef.current = eventSource;
 
@@ -113,6 +117,40 @@ export function useGenerationStream({
             }
             
             const data = normalizedData;
+
+            // Handle connected event with run status
+            if (rawData.type === 'connected') {
+              // Extract run status from connected event
+              if (rawData.isPaused !== undefined) {
+                setIsPaused(rawData.isPaused);
+              }
+              if (rawData.isCompleted !== undefined) {
+                setIsComplete(rawData.isCompleted);
+              }
+              if (rawData.status) {
+                const phase = rawData.status as string;
+                setCurrentPhase(phase.charAt(0).toUpperCase() + phase.slice(1));
+              }
+              if (rawData.error) {
+                setError(rawData.error as string);
+              }
+              // If run is paused or completed, we're not in replay mode - we're just showing final state
+              if (rawData.isPaused || rawData.isCompleted) {
+                setIsReplay(false);
+              }
+              console.log('[useGenerationStream] Connected with status:', {
+                isPaused: rawData.isPaused,
+                isCompleted: rawData.isCompleted,
+                phase: rawData.status,
+                error: rawData.error
+              });
+            }
+
+            // Handle replay_complete event - transition from replay to live
+            if (rawData.type === 'replay_complete') {
+              setIsReplay(false);
+              console.log('[useGenerationStream] Replay complete, now streaming live events');
+            }
 
             // Update phase
             if (data.type === 'phase_start' && data.data.phase) {
@@ -152,6 +190,14 @@ export function useGenerationStream({
               }
             }
 
+            // Handle world state updates
+            if (data.type === 'world_state_updated' || data.type === 'constraints_updated') {
+              const facts = data.data.facts as WorldStateFact[] || data.data.constraints as WorldStateFact[];
+              if (facts && Array.isArray(facts)) {
+                setWorldState(facts);
+              }
+            }
+
             // Handle completion (support both old and new event names)
             if (data.type === 'generation_complete' || data.type === 'generation_completed') {
               setIsComplete(true);
@@ -166,6 +212,16 @@ export function useGenerationStream({
               setIsCancelled(true);
               eventSource.close();
               setIsConnected(false);
+              return;
+            }
+
+            // Handle run not found (after server restart)
+            if (data.type === 'run_not_found') {
+              const errorMsg = data.data?.error as string || rawData.error as string || 'Run not found. Please start a new generation.';
+              setError(errorMsg);
+              eventSource.close();
+              setIsConnected(false);
+              onError?.(errorMsg);
               return;
             }
 
@@ -226,6 +282,8 @@ export function useGenerationStream({
 
   return {
     isConnected,
+    isPaused,
+    isReplay,
     currentPhase,
     activeAgent,
     messages,

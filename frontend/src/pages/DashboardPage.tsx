@@ -384,9 +384,41 @@ export function DashboardPage() {
     }
     
     try {
+      // IMPORTANT: Create or update the project FIRST to get a valid projectId
+      // This ensures the FK constraint on run_artifacts is satisfied
+      let projectId: string;
+      
+      if (editingProject) {
+        await updateProject(editingProject.id, {
+          name: formData.name || 'Untitled Project',
+          seedIdea: formData.seedIdea,
+          moralCompass: formData.moralCompass,
+          targetAudience: formData.targetAudience,
+          themes: formData.themes,
+          outputFormat: formData.outputFormat,
+          readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
+          status: 'pending',
+          result: null,
+        });
+        projectId = editingProject.id;
+      } else {
+        const newProject = await createProject({
+          name: formData.name || 'Untitled Project',
+          seedIdea: formData.seedIdea,
+          moralCompass: formData.moralCompass,
+          targetAudience: formData.targetAudience,
+          themes: formData.themes,
+          outputFormat: formData.outputFormat,
+          readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
+        });
+        projectId = newProject.id;
+      }
+      
+      // Now call generate with the valid projectId
       const response = await orchestratorFetch('/generate', {
         method: 'POST',
         body: JSON.stringify({
+          project_id: projectId,
           provider: architectConfig.provider,
           model: architectConfig.model,
           api_key: apiKey,
@@ -412,34 +444,6 @@ export function DashboardPage() {
       const data = await response.json();
       
       if (data.success && data.run_id) {
-        let projectId: string;
-        
-        if (editingProject) {
-          await updateProject(editingProject.id, {
-            name: formData.name || 'Untitled Project',
-            seedIdea: formData.seedIdea,
-            moralCompass: formData.moralCompass,
-            targetAudience: formData.targetAudience,
-            themes: formData.themes,
-            outputFormat: formData.outputFormat,
-            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
-            status: 'pending',
-            result: null,
-          });
-          projectId = editingProject.id;
-        } else {
-          const newProject = await createProject({
-            name: formData.name || 'Untitled Project',
-            seedIdea: formData.seedIdea,
-            moralCompass: formData.moralCompass,
-            targetAudience: formData.targetAudience,
-            themes: formData.themes,
-            outputFormat: formData.outputFormat,
-            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
-          });
-          projectId = newProject.id;
-        }
-        
         await startGeneration(projectId, data.run_id);
         
         closeProjectModal();
