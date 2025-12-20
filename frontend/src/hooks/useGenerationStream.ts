@@ -190,6 +190,14 @@ export function useGenerationStream({
               }
             }
 
+            // Handle world state updates
+            if (data.type === 'world_state_updated' || data.type === 'constraints_updated') {
+              const facts = data.data.facts as WorldStateFact[] || data.data.constraints as WorldStateFact[];
+              if (facts && Array.isArray(facts)) {
+                setWorldState(facts);
+              }
+            }
+
             // Handle completion (support both old and new event names)
             if (data.type === 'generation_complete' || data.type === 'generation_completed') {
               setIsComplete(true);
