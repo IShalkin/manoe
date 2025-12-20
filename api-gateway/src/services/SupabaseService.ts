@@ -485,4 +485,70 @@ export class SupabaseService {
 
     return data;
   }
+
+  /**
+   * Get research history (Eternal Memory)
+   */
+  async getResearchHistory(limit: number = 20): Promise<unknown[]> {
+    const client = this.getClient();
+    const { data, error } = await client
+      .from("research_results")
+      .select("id, provider, model, seed_idea, target_audience, themes, moral_compass, content, prompt_context, citations, created_at")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throw new Error(`Failed to get research history: ${error.message}`);
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Save research result (Eternal Memory)
+   */
+  async saveResearchResult(params: {
+    userId?: string;
+    projectId?: string;
+    provider: string;
+    model?: string;
+    seedIdea: string;
+    targetAudience?: string;
+    themes?: string[];
+    moralCompass?: string;
+    content: string;
+    promptContext?: string;
+    citations?: unknown[];
+    searchResults?: unknown;
+    webSearches?: unknown;
+    usage?: unknown;
+  }): Promise<string> {
+    const client = this.getClient();
+    const { data, error } = await client
+      .from("research_results")
+      .insert({
+        user_id: params.userId,
+        project_id: params.projectId,
+        provider: params.provider,
+        model: params.model,
+        seed_idea: params.seedIdea,
+        target_audience: params.targetAudience,
+        themes: params.themes,
+        moral_compass: params.moralCompass,
+        content: params.content,
+        prompt_context: params.promptContext,
+        citations: params.citations,
+        search_results: params.searchResults,
+        web_searches: params.webSearches,
+        usage: params.usage,
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to save research result: ${error.message}`);
+    }
+
+    return data.id;
+  }
 }

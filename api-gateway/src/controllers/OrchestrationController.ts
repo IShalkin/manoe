@@ -32,6 +32,7 @@ import { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { StorytellerOrchestrator, GenerationOptions, RunStatus, LLMConfiguration } from "../services/StorytellerOrchestrator";
 import { RedisStreamsService } from "../services/RedisStreamsService";
+import { SupabaseService } from "../services/SupabaseService";
 import { LLMProvider, GenerationPhase } from "../models/LLMModels";
 
 // ==================== DTOs ====================
@@ -254,6 +255,9 @@ export class OrchestrationController {
 
   @Inject()
   private redisStreams: RedisStreamsService;
+
+  @Inject()
+  private supabase: SupabaseService;
 
   /**
    * Start a new narrative generation
@@ -663,5 +667,28 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
   @Returns(200, Array)
   listRuns(): RunStatus[] {
     return this.orchestrator.listActiveRuns();
+  }
+
+  /**
+   * Get research history (Eternal Memory)
+   */
+  @Get("/research/history")
+  @Summary("Get research history")
+  @Description("Returns the most recent research results from Eternal Memory.")
+  @Returns(200)
+  @Returns(500)
+  async getResearchHistory(
+    @QueryParams("limit") limit: number = 20
+  ): Promise<{ success: boolean; research?: unknown[]; error?: string }> {
+    try {
+      const research = await this.supabase.getResearchHistory(limit);
+      return { success: true, research };
+    } catch (error) {
+      $log.error("[OrchestrationController] Failed to get research history:", error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : "Failed to get research history" 
+      };
+    }
   }
 }
