@@ -456,6 +456,8 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     }, 15000); // Every 15 seconds
 
     // First, send all existing events from the stream (catch up)
+    // Track the last event ID to avoid race condition when switching to live streaming
+    let lastEventId = "0";
     try {
       const existingEvents = await this.redisStreams.getEvents(runId, "0", 1000);
       console.log(`[OrchestrationController] Sending ${existingEvents.length} existing events for runId: ${runId}`);

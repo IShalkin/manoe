@@ -94,7 +94,25 @@ export function useGenerationStream({
           try {
             const rawData = JSON.parse(event.data);
             console.log('[useGenerationStream] Raw SSE event:', rawData);
-            const data = rawData as AgentMessage;
+            
+            // Normalize the event to ensure consistent structure
+            // Some events (like 'connected', 'ERROR') may not have a 'data' field
+            // or may have data at the top level instead of nested
+            const normalizedData: AgentMessage = {
+              type: rawData.type ?? 'unknown',
+              timestamp: rawData.timestamp,
+              data: rawData.data ?? {},
+            };
+            
+            // Handle legacy format where agent/thought might be at top level
+            if (rawData.type === 'agent_thought' && !normalizedData.data.agent && rawData.agent) {
+              normalizedData.data = { agent: rawData.agent, thought: rawData.thought, sentiment: rawData.sentiment };
+            }
+            if (rawData.type === 'agent_dialogue' && !normalizedData.data.from && rawData.from) {
+              normalizedData.data = { from: rawData.from, to: rawData.to, message: rawData.message, dialogueType: rawData.dialogueType };
+            }
+            
+            const data = normalizedData;
 
             // Update phase
             if (data.type === 'phase_start' && data.data.phase) {

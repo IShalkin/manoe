@@ -58,15 +58,20 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
           .slice(-5)
           .find((msg) => {
             if (msg.type === "agent_dialogue") {
-              const data = msg.data as any;
+              const data = msg.data as Record<string, unknown> | undefined;
+              // Defensive check for malformed data
+              if (!data || typeof data !== 'object') return false;
               return data.from === agent || data.to === agent;
             }
             return false;
           });
         
         if (recentDialogue) {
-          const data = (recentDialogue.data as any);
-          if (data.from === agent) {
+          const data = recentDialogue.data as Record<string, unknown> | undefined;
+          // Defensive check for malformed data
+          if (!data || typeof data !== 'object') {
+            statuses[agent] = "idle";
+          } else if (data.from === agent) {
             statuses[agent] = "speaking";
           } else if (data.to === agent) {
             statuses[agent] = "listening";
@@ -117,26 +122,39 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
           ) : (
             cinematicMessages.map((msg, idx) => {
               if (msg.type === "agent_thought") {
-                const data = msg.data as any;
+                const data = msg.data as Record<string, unknown> | undefined;
+                if (!data || typeof data !== 'object' || !data.agent) {
+                  console.warn('[CinematicAgentPanel] Skipping malformed agent_thought:', msg);
+                  return null;
+                }
                 return (
                   <DialogueBubble
                     key={idx}
-                    from={data.agent}
-                    message={data.thought}
+                    from={data.agent as AgentType}
+                    message={(data.thought as string) || ''}
                     type="thought"
                     timestamp={msg.timestamp}
                   />
                 );
               }
               if (msg.type === "agent_dialogue") {
-                const data = msg.data as any;
+                const data = msg.data as Record<string, unknown> | undefined;
+                if (!data || typeof data !== 'object' || !data.from) {
+                  console.warn('[CinematicAgentPanel] Skipping malformed agent_dialogue:', msg);
+                  return null;
+                }
+                const dialogueType = (data.dialogueType as string) || "suggestion";
+                const validDialogueTypes = ["question", "objection", "approval", "suggestion", "thought"] as const;
+                const safeDialogueType = validDialogueTypes.includes(dialogueType as typeof validDialogueTypes[number]) 
+                  ? (dialogueType as typeof validDialogueTypes[number])
+                  : "suggestion";
                 return (
                   <DialogueBubble
                     key={idx}
-                    from={data.from}
-                    to={data.to}
-                    message={data.message}
-                    type={data.dialogueType || "suggestion"}
+                    from={data.from as AgentType}
+                    to={data.to as AgentType | undefined}
+                    message={(data.message as string) || ''}
+                    type={safeDialogueType}
                     timestamp={msg.timestamp}
                   />
                 );

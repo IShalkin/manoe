@@ -1400,7 +1400,9 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     });
     
     messages.forEach(msg => {
-      const agent = msg.data.agent;
+      // Defensive check: msg.data may be undefined for some event types
+      if (!msg.data || typeof msg.data !== 'object') return;
+      const agent = msg.data.agent as string | undefined;
       if (!agent || !states[agent]) return;
       
       if (msg.type === 'agent_start') {
