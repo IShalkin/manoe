@@ -466,9 +466,6 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       for (const event of existingEvents) {
         if (!isConnected) break;
         
-        // Track the last event ID for seamless transition to live streaming
-        lastEventId = event.id;
-        
         // Log cinematic events
         if (event.type === "agent_thought" || event.type === "agent_dialogue") {
           console.log(`[OrchestrationController] Streaming existing cinematic event:`, event.type, `runId: ${runId}`, event.data);
@@ -489,12 +486,8 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       console.error(`[OrchestrationController] Error getting existing events:`, error, error instanceof Error ? error.stack : '');
     }
 
-    // Then stream new events from Redis
-    // IMPORTANT: Use lastEventId instead of "$" to avoid race condition!
-    // Using "$" means "only events from now" which can miss events published
-    // between getEvents() and streamEvents() calls
-    console.log(`[OrchestrationController] Starting live stream from lastEventId: ${lastEventId} for runId: ${runId}`);
-    const eventGenerator = this.redisStreams.streamEvents(runId, lastEventId, 15000);
+    // Then stream new events from Redis (starting from the end)
+    const eventGenerator = this.redisStreams.streamEvents(runId, "$", 15000);
 
     try {
       for await (const event of eventGenerator) {
