@@ -117,26 +117,39 @@ export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
           ) : (
             cinematicMessages.map((msg, idx) => {
               if (msg.type === "agent_thought") {
-                const data = msg.data as any;
+                const data = msg.data as Record<string, unknown> | undefined;
+                if (!data || typeof data !== 'object' || !data.agent) {
+                  console.warn('[CinematicAgentPanel] Skipping malformed agent_thought:', msg);
+                  return null;
+                }
                 return (
                   <DialogueBubble
                     key={idx}
-                    from={data.agent}
-                    message={data.thought}
+                    from={data.agent as AgentType}
+                    message={(data.thought as string) || ''}
                     type="thought"
                     timestamp={msg.timestamp}
                   />
                 );
               }
               if (msg.type === "agent_dialogue") {
-                const data = msg.data as any;
+                const data = msg.data as Record<string, unknown> | undefined;
+                if (!data || typeof data !== 'object' || !data.from) {
+                  console.warn('[CinematicAgentPanel] Skipping malformed agent_dialogue:', msg);
+                  return null;
+                }
+                const dialogueType = (data.dialogueType as string) || "suggestion";
+                const validDialogueTypes = ["question", "objection", "approval", "suggestion", "thought"] as const;
+                const safeDialogueType = validDialogueTypes.includes(dialogueType as typeof validDialogueTypes[number]) 
+                  ? (dialogueType as typeof validDialogueTypes[number])
+                  : "suggestion";
                 return (
                   <DialogueBubble
                     key={idx}
-                    from={data.from}
-                    to={data.to}
-                    message={data.message}
-                    type={data.dialogueType || "suggestion"}
+                    from={data.from as AgentType}
+                    to={data.to as AgentType | undefined}
+                    message={(data.message as string) || ''}
+                    type={safeDialogueType}
                     timestamp={msg.timestamp}
                   />
                 );
