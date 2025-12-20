@@ -139,7 +139,18 @@ Develop:
 4. Tone and atmosphere
 5. Target audience and genre positioning
 
-Output as JSON with fields: premise, hook, themes, arc, tone, audience, genre`;
+Output as JSON with this EXACT structure:
+{
+  "premise": "string - the core premise of the story",
+  "hook": "string - the compelling hook that draws readers in",
+  "themes": ["string array - list of themes like 'redemption', 'love', 'identity'"],
+  "arc": "string - narrative arc description like '3-act structure with rising tension'",
+  "tone": "string - tone description like 'dark and atmospheric'",
+  "audience": "string - target audience like 'young adult readers'",
+  "genre": "string - genre like 'science fiction thriller'"
+}
+
+IMPORTANT: themes must be an array of strings, arc must be a single string.`;
     }
 
     if (phase === GenerationPhase.OUTLINING) {

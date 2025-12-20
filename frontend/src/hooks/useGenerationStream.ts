@@ -134,8 +134,8 @@ export function useGenerationStream({
               }
             }
 
-            // Handle completion
-            if (data.type === 'generation_complete') {
+            // Handle completion (support both old and new event names)
+            if (data.type === 'generation_complete' || data.type === 'generation_completed') {
               setIsComplete(true);
               eventSource.close();
               setIsConnected(false);
@@ -151,8 +151,8 @@ export function useGenerationStream({
               return;
             }
 
-            // Handle errors
-            if (data.type === 'generation_error') {
+            // Handle errors (support both old and new event names)
+            if (data.type === 'generation_error' || data.type === 'ERROR') {
               const errorMsg = data.data.error as string || 'Unknown error';
               setError(errorMsg);
               onError?.(errorMsg);
