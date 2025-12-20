@@ -77,7 +77,7 @@ export function useGenerationStream({
 
     const connectSSE = async () => {
       try {
-        const sseUrl = await getAuthenticatedSSEUrl(`/runs/${runId}/events`);
+        const sseUrl = await getAuthenticatedSSEUrl(`/stream/${runId}`);
         const eventSource = new EventSource(sseUrl);
         eventSourceRef.current = eventSource;
 
