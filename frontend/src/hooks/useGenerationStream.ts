@@ -55,7 +55,7 @@ export function useGenerationStream({
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [rawFacts, setRawFacts] = useState<FactUpdate[]>([]);
-  const [worldState] = useState<WorldStateFact[]>([]);
+  const [worldState, setWorldState] = useState<WorldStateFact[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
@@ -149,6 +149,22 @@ export function useGenerationStream({
               const constraints = data.data.constraints_count as number;
               if (constraints !== undefined) {
                 // Could fetch canonical state here if needed
+              }
+            }
+
+            // Handle world state updates
+            if (data.type === 'world_state_update') {
+              const facts = data.data.facts as WorldStateFact[];
+              if (facts && Array.isArray(facts)) {
+                setWorldState(facts);
+              }
+            }
+
+            // Handle artifact_saved events which may contain world state facts
+            if (data.type === 'artifact_saved' && data.data.artifact_type === 'world_state') {
+              const content = data.data.content as { facts?: WorldStateFact[] };
+              if (content?.facts && Array.isArray(content.facts)) {
+                setWorldState(content.facts);
               }
             }
 
