@@ -431,15 +431,29 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       return;
     }
 
-    // Set SSE headers
+    // Set SSE headers - HTTP/2 compatible (no Connection header!)
+    // Connection header is forbidden in HTTP/2 and causes ERR_HTTP2_PROTOCOL_ERROR
     res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("X-Accel-Buffering", "no"); // Disable Nginx buffering
+    res.setHeader("Content-Encoding", "identity"); // Prevent compression which breaks SSE
     res.flushHeaders();
 
     // Send initial connection event (no event: header so onmessage receives it)
     res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase })}\n\n`);
+
+    // Handle client disconnect
+    let isConnected = true;
+    req.on("close", () => {
+      isConnected = false;
+    });
+
+    // Set up heartbeat to prevent idle timeout (Cloudflare/nginx may close idle connections)
+    const heartbeatInterval = setInterval(() => {
+      if (isConnected) {
+        res.write(`: heartbeat\n\n`); // SSE comment, ignored by EventSource but keeps connection alive
+      }
+    }, 15000); // Every 15 seconds
 
     // First, send all existing events from the stream (catch up)
     try {
@@ -448,6 +462,8 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       const cinematicCount = existingEvents.filter(e => e.type === "agent_thought" || e.type === "agent_dialogue").length;
       console.log(`[OrchestrationController] Found ${cinematicCount} cinematic events in existing events`);
       for (const event of existingEvents) {
+        if (!isConnected) break;
+        
         // Log cinematic events
         if (event.type === "agent_thought" || event.type === "agent_dialogue") {
           console.log(`[OrchestrationController] Streaming existing cinematic event:`, event.type, `runId: ${runId}`, event.data);
@@ -470,12 +486,6 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
 
     // Then stream new events from Redis (starting from the end)
     const eventGenerator = this.redisStreams.streamEvents(runId, "$", 15000);
-
-    // Handle client disconnect
-    let isConnected = true;
-    req.on("close", () => {
-      isConnected = false;
-    });
 
     try {
       for await (const event of eventGenerator) {
@@ -507,6 +517,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
         res.write(`data: ${JSON.stringify({ type: "ERROR", error: String(error) })}\n\n`);
       }
     } finally {
+      clearInterval(heartbeatInterval);
       res.end();
     }
   }
