@@ -371,7 +371,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
         run_id: runId,
         success: true,
         message: "Generation started",
-        streamUrl: `/stream/${runId}`,
+        streamUrl: `/orchestrate/stream/${runId}`,
       };
     } catch (error) {
       // #region debug instrumentation
