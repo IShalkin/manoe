@@ -267,7 +267,7 @@ export class StorytellerOrchestrator {
     state.updatedAt = new Date().toISOString();
 
     // Save to Supabase
-    await this.saveArtifact(runId, options.projectId, "narrative", state.narrative);
+    await this.saveArtifact(runId, options.projectId, "narrative", state.narrative, GenerationPhase.GENESIS);
 
     await this.publishPhaseComplete(runId, GenerationPhase.GENESIS, state.narrative);
   }
@@ -302,7 +302,7 @@ export class StorytellerOrchestrator {
       await this.qdrantMemory.storeCharacter(options.projectId, character);
     }
 
-    await this.saveArtifact(runId, options.projectId, "characters", state.characters);
+    await this.saveArtifact(runId, options.projectId, "characters", state.characters, GenerationPhase.CHARACTERS);
     await this.publishPhaseComplete(runId, GenerationPhase.CHARACTERS, state.characters);
   }
 
@@ -343,7 +343,7 @@ export class StorytellerOrchestrator {
       }
     }
 
-    await this.saveArtifact(runId, options.projectId, "worldbuilding", state.worldbuilding);
+    await this.saveArtifact(runId, options.projectId, "worldbuilding", state.worldbuilding, GenerationPhase.WORLDBUILDING);
     await this.publishPhaseComplete(runId, GenerationPhase.WORLDBUILDING, state.worldbuilding);
   }
 
@@ -374,7 +374,7 @@ export class StorytellerOrchestrator {
     state.totalScenes = Array.isArray(scenes) ? scenes.length : 0;
     state.updatedAt = new Date().toISOString();
 
-    await this.saveArtifact(runId, options.projectId, "outline", state.outline);
+    await this.saveArtifact(runId, options.projectId, "outline", state.outline, GenerationPhase.OUTLINING);
     await this.publishPhaseComplete(runId, GenerationPhase.OUTLINING, state.outline);
   }
 
@@ -403,7 +403,7 @@ export class StorytellerOrchestrator {
     const advancedPlan = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
-    await this.saveArtifact(runId, options.projectId, "advanced_plan", advancedPlan);
+    await this.saveArtifact(runId, options.projectId, "advanced_plan", advancedPlan, GenerationPhase.ADVANCED_PLANNING);
     await this.publishPhaseComplete(runId, GenerationPhase.ADVANCED_PLANNING, advancedPlan);
   }
 
@@ -519,7 +519,7 @@ export class StorytellerOrchestrator {
     // Store scene in Qdrant
     await this.qdrantMemory.storeScene(options.projectId, sceneNum, draft);
 
-    await this.saveArtifact(runId, options.projectId, `draft_scene_${sceneNum}`, draft);
+    await this.saveArtifact(runId, options.projectId, `draft_scene_${sceneNum}`, draft, GenerationPhase.DRAFTING);
     await this.publishEvent(runId, "scene_draft_complete", { sceneNum, wordCount: draft.wordCount });
   }
 
@@ -558,7 +558,7 @@ export class StorytellerOrchestrator {
     state.critiques.get(sceneNum)!.push(critique);
     state.updatedAt = new Date().toISOString();
 
-    await this.saveArtifact(runId, options.projectId, `critique_scene_${sceneNum}`, critique);
+    await this.saveArtifact(runId, options.projectId, `critique_scene_${sceneNum}`, critique, GenerationPhase.CRITIQUE);
     await this.publishEvent(runId, "scene_critique_complete", { sceneNum, critique });
 
     return critique;
@@ -609,7 +609,7 @@ export class StorytellerOrchestrator {
     // Extract new facts from revision
     await this.extractRawFacts(runId, sceneNum, response, AgentType.WRITER);
 
-    await this.saveArtifact(runId, options.projectId, `revision_scene_${sceneNum}`, revision);
+    await this.saveArtifact(runId, options.projectId, `revision_scene_${sceneNum}`, revision, GenerationPhase.REVISION);
     await this.publishEvent(runId, "scene_revision_complete", { sceneNum });
   }
 
@@ -654,7 +654,7 @@ export class StorytellerOrchestrator {
     state.drafts.set(sceneNum, polished);
     state.updatedAt = new Date().toISOString();
 
-    await this.saveArtifact(runId, options.projectId, `final_scene_${sceneNum}`, polished);
+    await this.saveArtifact(runId, options.projectId, `final_scene_${sceneNum}`, polished, GenerationPhase.POLISH);
     await this.publishEvent(runId, "scene_polish_complete", { sceneNum });
   }
 
@@ -947,7 +947,8 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     runId: string,
     projectId: string,
     artifactType: string,
-    content: unknown
+    content: unknown,
+    phase: string
   ): Promise<void> {
     try {
       await this.supabase.saveRunArtifact({
@@ -955,6 +956,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         projectId,
         artifactType,
         content,
+        phase,
       });
     } catch (error) {
       console.error(`Failed to save artifact ${artifactType}:`, error);
@@ -1214,6 +1216,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           projectId: state.projectId,
           artifactType: "run_state_snapshot",
           content: serializedState,
+          phase: state.phase || "unknown",
         });
 
         savedCount++;

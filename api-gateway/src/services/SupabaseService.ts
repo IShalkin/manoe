@@ -426,6 +426,7 @@ export class SupabaseService {
     projectId: string;
     artifactType: string;
     content: unknown;
+    phase: string;
   }): Promise<void> {
     const client = this.getClient();
     const { error } = await client.from("run_artifacts").upsert({
@@ -433,6 +434,7 @@ export class SupabaseService {
       project_id: params.projectId,
       artifact_type: params.artifactType,
       content: params.content,
+      phase: params.phase,
       created_at: new Date().toISOString(),
     });
 
