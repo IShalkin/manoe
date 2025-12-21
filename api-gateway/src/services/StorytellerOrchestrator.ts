@@ -255,18 +255,27 @@ export class StorytellerOrchestrator {
     runId: string,
     options: GenerationOptions
   ): Promise<void> {
+    console.log(`[runGenesisPhase] Starting for runId: ${runId}`);
     const state = this.activeRuns.get(runId);
-    if (!state) return;
+    if (!state) {
+      console.log(`[runGenesisPhase] No state found, aborting`);
+      return;
+    }
 
     state.phase = GenerationPhase.GENESIS;
+    console.log(`[runGenesisPhase] Publishing phase start...`);
     await this.publishPhaseStart(runId, GenerationPhase.GENESIS);
+    console.log(`[runGenesisPhase] Phase start published`);
 
     // Get system prompt from Langfuse or use fallback
+    console.log(`[runGenesisPhase] Getting agent prompt...`);
     const systemPrompt = await this.getAgentPrompt(AgentType.ARCHITECT, {
       seedIdea: options.seedIdea,
     });
+    console.log(`[runGenesisPhase] Got agent prompt (${systemPrompt.length} chars)`);
 
     // Call Architect agent
+    console.log(`[runGenesisPhase] Calling LLM (${options.llmConfig.provider}/${options.llmConfig.model})...`);
     const response = await this.callAgent(
       runId,
       AgentType.ARCHITECT,
@@ -284,15 +293,21 @@ export class StorytellerOrchestrator {
       options.llmConfig,
       GenerationPhase.GENESIS
     );
+    console.log(`[runGenesisPhase] LLM response received (${response.length} chars)`);
 
     // Parse and store narrative
     state.narrative = this.parseJSON(response);
     state.updatedAt = new Date().toISOString();
+    console.log(`[runGenesisPhase] Narrative parsed`);
 
     // Save to Supabase
+    console.log(`[runGenesisPhase] Saving artifact to Supabase...`);
     await this.saveArtifact(runId, options.projectId, "narrative", state.narrative);
+    console.log(`[runGenesisPhase] Artifact saved`);
 
+    console.log(`[runGenesisPhase] Publishing phase complete...`);
     await this.publishPhaseComplete(runId, GenerationPhase.GENESIS, state.narrative);
+    console.log(`[runGenesisPhase] Genesis phase completed successfully`);
   }
 
   /**
@@ -936,6 +951,10 @@ export class StorytellerOrchestrator {
     llmConfig: LLMConfiguration,
     phase: GenerationPhase
   ): Promise<string> {
+    console.log(`[callAgent] Starting ${agent} call for runId: ${runId}`);
+    console.log(`[callAgent] Provider: ${llmConfig.provider}, Model: ${llmConfig.model}`);
+    console.log(`[callAgent] API key present: ${!!llmConfig.apiKey}, length: ${llmConfig.apiKey?.length || 0}`);
+    
     const messages: ChatMessage[] = [
       { role: MessageRole.SYSTEM, content: systemPrompt },
       { role: MessageRole.USER, content: userPrompt },
@@ -944,7 +963,11 @@ export class StorytellerOrchestrator {
     const spanId = this.langfuse.startSpan(runId, `${agent}_call`, { phase });
 
     try {
-      const response = await this.llmProvider.createCompletionWithRetry({
+      console.log(`[callAgent] Calling LLM provider...`);
+      
+      // Add timeout to prevent indefinite hangs (2 minutes for LLM calls)
+      const LLM_TIMEOUT = 120000;
+      const llmPromise = this.llmProvider.createCompletionWithRetry({
         messages,
         model: llmConfig.model,
         provider: llmConfig.provider,
@@ -955,6 +978,13 @@ export class StorytellerOrchestrator {
           ? { type: "json_object" }
           : undefined,
       });
+      
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`LLM call timed out after ${LLM_TIMEOUT}ms`)), LLM_TIMEOUT);
+      });
+      
+      const response = await Promise.race([llmPromise, timeoutPromise]);
+      console.log(`[callAgent] LLM response received, content length: ${response.content.length}`);
 
       // Track in Langfuse
       this.langfuse.trackLLMCall(runId, agent, messages, response, spanId);
@@ -971,8 +1001,10 @@ export class StorytellerOrchestrator {
         });
       }
 
+      console.log(`[callAgent] ${agent} call completed successfully`);
       return response.content;
     } catch (error) {
+      console.error(`[callAgent] ${agent} call failed:`, error instanceof Error ? error.message : String(error));
       this.langfuse.endSpan(runId, spanId, { error: String(error) });
       throw error;
     }
@@ -1136,6 +1168,12 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     const state = this.activeRuns.get(runId);
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    // CRITICAL: Log the error so we can see it in container logs
+    console.error(`[handleError] Generation error for runId ${runId}:`, errorMessage);
+    if (errorStack) {
+      console.error(`[handleError] Stack trace:`, errorStack);
+    }
 
     if (state) {
       state.error = errorMessage;
