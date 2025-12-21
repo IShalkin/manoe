@@ -76,34 +76,44 @@ export class LLMProviderService {
    */
   async createCompletion(options: CompletionOptions): Promise<LLMResponse> {
     const startTime = Date.now();
+    console.log(`[LLMProviderService] Starting ${options.provider} completion, model: ${options.model}, maxTokens: ${options.maxTokens}`);
 
     let response: LLMResponse;
 
-    switch (options.provider) {
-      case LLMProvider.OPENAI:
-        response = await this.openAICompletion(options);
-        break;
-      case LLMProvider.ANTHROPIC:
-        response = await this.anthropicCompletion(options);
-        break;
-      case LLMProvider.GEMINI:
-        response = await this.geminiCompletion(options);
-        break;
-      case LLMProvider.OPENROUTER:
-        response = await this.openRouterCompletion(options);
-        break;
-      case LLMProvider.DEEPSEEK:
-        response = await this.deepSeekCompletion(options);
-        break;
-      case LLMProvider.VENICE:
-        response = await this.veniceCompletion(options);
-        break;
-      default:
-        throw new Error(`Unsupported provider: ${options.provider}`);
-    }
+    try {
+      switch (options.provider) {
+        case LLMProvider.OPENAI:
+          response = await this.openAICompletion(options);
+          break;
+        case LLMProvider.ANTHROPIC:
+          response = await this.anthropicCompletion(options);
+          break;
+        case LLMProvider.GEMINI:
+          response = await this.geminiCompletion(options);
+          break;
+        case LLMProvider.OPENROUTER:
+          response = await this.openRouterCompletion(options);
+          break;
+        case LLMProvider.DEEPSEEK:
+          response = await this.deepSeekCompletion(options);
+          break;
+        case LLMProvider.VENICE:
+          response = await this.veniceCompletion(options);
+          break;
+        default:
+          throw new Error(`Unsupported provider: ${options.provider}`);
+      }
 
-    response.latencyMs = Date.now() - startTime;
-    return response;
+      const elapsedMs = Date.now() - startTime;
+      console.log(`[LLMProviderService] Completed ${options.provider} completion in ${elapsedMs}ms, tokens: ${response.usage?.totalTokens || 'unknown'}`);
+      
+      response.latencyMs = elapsedMs;
+      return response;
+    } catch (error) {
+      const elapsedMs = Date.now() - startTime;
+      console.error(`[LLMProviderService] Error in ${options.provider} completion after ${elapsedMs}ms:`, error);
+      throw error;
+    }
   }
 
   /**

@@ -934,8 +934,16 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
    * Publish phase start event
    */
   private async publishPhaseStart(runId: string, phase: GenerationPhase): Promise<void> {
+    const startTime = Date.now();
+    $log.info(`[StorytellerOrchestrator] publishPhaseStart: starting, runId: ${runId}, phase: ${phase}`);
+    
     await this.publishEvent(runId, "phase_start", { phase });
+    const afterPublish = Date.now();
+    $log.info(`[StorytellerOrchestrator] publishPhaseStart: publishEvent took ${afterPublish - startTime}ms, runId: ${runId}`);
+    
     this.langfuse.addEvent(runId, "phase_start", { phase });
+    const afterLangfuse = Date.now();
+    $log.info(`[StorytellerOrchestrator] publishPhaseStart: langfuse.addEvent took ${afterLangfuse - afterPublish}ms, runId: ${runId}`);
   }
 
   /**
