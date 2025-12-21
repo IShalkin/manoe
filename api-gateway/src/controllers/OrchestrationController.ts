@@ -478,4 +478,66 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
   listRuns(): RunStatus[] {
     return this.orchestrator.listActiveRuns();
   }
+
+  // ==================== Legacy Routes ====================
+  // These routes support the frontend's expected endpoint format
+
+  /**
+   * SSE Stream endpoint (legacy route for frontend compatibility)
+   */
+  @Get("/runs/:runId/events")
+  @AcceptMime("text/event-stream", "application/json", "*/*")
+  @Summary("Subscribe to generation events (SSE) - legacy route")
+  @Description("Legacy route for frontend compatibility. Delegates to /stream/:runId.")
+  @Returns(200)
+  @Returns(404)
+  async streamEventsLegacy(
+    @PathParams("runId") runId: string,
+    @Req() req: Request,
+    @Res() res: Response
+  ): Promise<void> {
+    return this.streamEvents(runId, req, res);
+  }
+
+  /**
+   * Pause a running generation (legacy route)
+   */
+  @Post("/runs/:runId/pause")
+  @Summary("Pause generation (legacy)")
+  @Description("Legacy route for frontend compatibility.")
+  @Returns(200)
+  @Returns(404)
+  pauseRunLegacy(
+    @PathParams("runId") runId: string
+  ): { success: boolean; message: string } {
+    return this.pauseRun(runId);
+  }
+
+  /**
+   * Resume a paused generation (legacy route)
+   */
+  @Post("/runs/:runId/resume")
+  @Summary("Resume generation (legacy)")
+  @Description("Legacy route for frontend compatibility.")
+  @Returns(200)
+  @Returns(404)
+  resumeRunLegacy(
+    @PathParams("runId") runId: string
+  ): { success: boolean; message: string } {
+    return this.resumeRun(runId);
+  }
+
+  /**
+   * Get run state (legacy route)
+   */
+  @Get("/runs/:runId/state")
+  @Summary("Get run state (legacy)")
+  @Description("Legacy route for frontend compatibility. Returns run status.")
+  @Returns(200)
+  @Returns(404)
+  getRunState(
+    @PathParams("runId") runId: string
+  ): RunStatusDTO | { error: string } {
+    return this.getStatus(runId);
+  }
 }
