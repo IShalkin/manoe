@@ -1066,6 +1066,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
   /**
    * Save artifact to Supabase
+   * Phase is derived from the current run state to ensure consistency
    */
   private async saveArtifact(
     runId: string,
@@ -1074,9 +1075,14 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     content: unknown
   ): Promise<void> {
     try {
+      // Derive phase from run state to ensure consistency
+      const state = this.activeRuns.get(runId);
+      const phase = state?.phase?.toLowerCase() ?? "genesis";
+      
       await this.supabase.saveRunArtifact({
         runId,
         projectId,
+        phase,
         artifactType,
         content,
       });
@@ -1336,6 +1342,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         await this.supabase.saveRunArtifact({
           runId: state.runId,
           projectId: state.projectId,
+          phase: state.phase?.toLowerCase() ?? "unknown",
           artifactType: "run_state_snapshot",
           content: serializedState,
         });
