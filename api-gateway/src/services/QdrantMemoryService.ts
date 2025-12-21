@@ -104,12 +104,7 @@ export class QdrantMemoryService {
     const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
     const qdrantApiKey = process.env.QDRANT_API_KEY;
 
-    this.client = new QdrantClient({
-      url: qdrantUrl,
-      apiKey: qdrantApiKey,
-    });
-
-    // Initialize embedding provider
+    // Initialize embedding provider first (doesn't depend on Qdrant)
     if (!preferLocal && openaiApiKey) {
       this.openaiClient = new OpenAI({ apiKey: openaiApiKey });
       this.embeddingProvider = EmbeddingProvider.OPENAI;
@@ -129,10 +124,24 @@ export class QdrantMemoryService {
       console.log("Qdrant Memory: Using local embeddings (384 dimensions)");
     }
 
-    // Ensure collections exist
-    await this.ensureCollections();
+    // Try to connect to Qdrant - failures are non-blocking
+    try {
+      this.client = new QdrantClient({
+        url: qdrantUrl,
+        apiKey: qdrantApiKey,
+        // Skip version compatibility check - server may be older version
+        checkCompatibility: false,
+      });
 
-    console.log(`Qdrant Memory connected to ${qdrantUrl}`);
+      // Ensure collections exist
+      await this.ensureCollections();
+
+      console.log(`Qdrant Memory connected to ${qdrantUrl}`);
+    } catch (error) {
+      // Qdrant is optional - log warning and continue without vector memory
+      console.warn(`Qdrant Memory: Failed to connect to ${qdrantUrl}, continuing without vector memory:`, error instanceof Error ? error.message : String(error));
+      this.client = null;
+    }
   }
 
   /**
