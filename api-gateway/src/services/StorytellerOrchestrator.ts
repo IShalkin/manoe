@@ -114,6 +114,16 @@ export class StorytellerOrchestrator {
     process.stdout.write(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}\n`);
     $log.info(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}`);
 
+    // Ensure project exists in Supabase before saving any artifacts
+    // This prevents FK constraint violations when the frontend creates the project after calling generate
+    try {
+      await this.supabase.ensureProjectExists(options.projectId, options.seedIdea);
+      $log.info(`[StorytellerOrchestrator] ensureProjectExists completed, projectId: ${options.projectId}`);
+    } catch (error) {
+      $log.error(`[StorytellerOrchestrator] ensureProjectExists failed, projectId: ${options.projectId}`, error);
+      // Continue anyway - the frontend may have already created the project
+    }
+
     // Initialize generation state
     const state: GenerationState = {
       phase: GenerationPhase.GENESIS,
@@ -924,8 +934,16 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
    * Publish phase start event
    */
   private async publishPhaseStart(runId: string, phase: GenerationPhase): Promise<void> {
+    const startTime = Date.now();
+    $log.info(`[StorytellerOrchestrator] publishPhaseStart: starting, runId: ${runId}, phase: ${phase}`);
+    
     await this.publishEvent(runId, "phase_start", { phase });
+    const afterPublish = Date.now();
+    $log.info(`[StorytellerOrchestrator] publishPhaseStart: publishEvent took ${afterPublish - startTime}ms, runId: ${runId}`);
+    
     this.langfuse.addEvent(runId, "phase_start", { phase });
+    const afterLangfuse = Date.now();
+    $log.info(`[StorytellerOrchestrator] publishPhaseStart: langfuse.addEvent took ${afterLangfuse - afterPublish}ms, runId: ${runId}`);
   }
 
   /**
@@ -942,6 +960,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
   /**
    * Save artifact to Supabase
+   * Phase is derived from the current run state to ensure consistency
    */
   private async saveArtifact(
     runId: string,
@@ -950,9 +969,14 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     content: unknown
   ): Promise<void> {
     try {
+      // Derive phase from run state to ensure consistency
+      const state = this.activeRuns.get(runId);
+      const phase = state?.phase?.toLowerCase() ?? "genesis";
+      
       await this.supabase.saveRunArtifact({
         runId,
         projectId,
+        phase,
         artifactType,
         content,
       });
@@ -1212,6 +1236,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         await this.supabase.saveRunArtifact({
           runId: state.runId,
           projectId: state.projectId,
+          phase: state.phase?.toLowerCase() ?? "unknown",
           artifactType: "run_state_snapshot",
           content: serializedState,
         });

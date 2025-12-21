@@ -133,6 +133,59 @@ export class SupabaseService {
     return project;
   }
 
+  /**
+   * Ensure a project exists in the database.
+   * If the project doesn't exist, create it with minimal required fields.
+   * This is used by the orchestrator to ensure FK constraints are satisfied
+   * before saving artifacts.
+   * 
+   * Note: We use a system user UUID for projects created by the backend.
+   * This is a workaround for the NOT NULL constraint on user_id.
+   * The frontend should ideally create the project before calling generate.
+   */
+  async ensureProjectExists(projectId: string, seedIdea?: string, userId?: string): Promise<void> {
+    const client = this.getClient();
+    
+    // Check if project exists
+    const existing = await this.getProject(projectId);
+    if (existing) {
+      return; // Project already exists
+    }
+
+    // Use provided userId or a system user UUID
+    // This system UUID should be created in auth.users or we use the projectId as a fallback
+    // Since we're using service role key, RLS is bypassed
+    const effectiveUserId = userId || projectId; // Use projectId as user_id fallback
+
+    // Create minimal project to satisfy FK constraint
+    const { error } = await client.from("projects").insert({
+      id: projectId,
+      user_id: effectiveUserId,
+      name: seedIdea?.substring(0, 50) || "Auto-generated project",
+      seed_idea: seedIdea || "Auto-generated project",
+      moral_compass: "balanced",
+      status: "generating",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      // Ignore duplicate key errors (race condition - another request created it)
+      if (error.code === "23505") {
+        console.log(`[SupabaseService] Project ${projectId} already exists (race condition)`);
+        return;
+      }
+      // If FK constraint on user_id fails, log but don't throw - the frontend should create the project
+      if (error.code === "23503" && error.message.includes("user_id")) {
+        console.log(`[SupabaseService] Cannot create project ${projectId} - user_id FK constraint. Frontend should create project first.`);
+        return;
+      }
+      throw new Error(`Failed to ensure project exists: ${error.message}`);
+    }
+
+    console.log(`[SupabaseService] Created project ${projectId} to satisfy FK constraint`);
+  }
+
   async updateProjectStatus(id: string, status: string): Promise<void> {
     const client = this.getClient();
     const { error } = await client
@@ -424,6 +477,7 @@ export class SupabaseService {
   async saveRunArtifact(params: {
     runId: string;
     projectId: string;
+    phase: string;
     artifactType: string;
     content: unknown;
   }): Promise<void> {
@@ -431,6 +485,7 @@ export class SupabaseService {
     const { error } = await client.from("run_artifacts").upsert({
       run_id: params.runId,
       project_id: params.projectId,
+      phase: params.phase,
       artifact_type: params.artifactType,
       content: params.content,
       created_at: new Date().toISOString(),

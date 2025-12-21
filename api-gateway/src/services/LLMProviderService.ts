@@ -34,6 +34,38 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   venice: "https://api.venice.ai/api/v1",
 };
 
+/**
+ * Get Anthropic model max output token limit
+ * Clamps requested tokens to model's actual capability
+ * See: https://docs.anthropic.com/en/docs/about-claude/models
+ */
+function getAnthropicModelMaxTokens(model: string): number {
+  const modelLower = model.toLowerCase();
+  
+  // Claude 3.5 Haiku has 8192 max output tokens
+  if (modelLower.includes("haiku")) {
+    return 8192;
+  }
+  
+  // Claude 3.5 Sonnet has 8192 max output tokens
+  if (modelLower.includes("sonnet")) {
+    return 8192;
+  }
+  
+  // Claude 3 Opus has 4096 max output tokens
+  if (modelLower.includes("opus") && modelLower.includes("3")) {
+    return 4096;
+  }
+  
+  // Claude 4 Opus has higher limits
+  if (modelLower.includes("opus") && modelLower.includes("4")) {
+    return 16384;
+  }
+  
+  // Default to a safe limit for unknown models
+  return 8192;
+}
+
 @Service()
 export class LLMProviderService {
   /**
@@ -44,34 +76,44 @@ export class LLMProviderService {
    */
   async createCompletion(options: CompletionOptions): Promise<LLMResponse> {
     const startTime = Date.now();
+    console.log(`[LLMProviderService] Starting ${options.provider} completion, model: ${options.model}, maxTokens: ${options.maxTokens}`);
 
     let response: LLMResponse;
 
-    switch (options.provider) {
-      case LLMProvider.OPENAI:
-        response = await this.openAICompletion(options);
-        break;
-      case LLMProvider.ANTHROPIC:
-        response = await this.anthropicCompletion(options);
-        break;
-      case LLMProvider.GEMINI:
-        response = await this.geminiCompletion(options);
-        break;
-      case LLMProvider.OPENROUTER:
-        response = await this.openRouterCompletion(options);
-        break;
-      case LLMProvider.DEEPSEEK:
-        response = await this.deepSeekCompletion(options);
-        break;
-      case LLMProvider.VENICE:
-        response = await this.veniceCompletion(options);
-        break;
-      default:
-        throw new Error(`Unsupported provider: ${options.provider}`);
-    }
+    try {
+      switch (options.provider) {
+        case LLMProvider.OPENAI:
+          response = await this.openAICompletion(options);
+          break;
+        case LLMProvider.ANTHROPIC:
+          response = await this.anthropicCompletion(options);
+          break;
+        case LLMProvider.GEMINI:
+          response = await this.geminiCompletion(options);
+          break;
+        case LLMProvider.OPENROUTER:
+          response = await this.openRouterCompletion(options);
+          break;
+        case LLMProvider.DEEPSEEK:
+          response = await this.deepSeekCompletion(options);
+          break;
+        case LLMProvider.VENICE:
+          response = await this.veniceCompletion(options);
+          break;
+        default:
+          throw new Error(`Unsupported provider: ${options.provider}`);
+      }
 
-    response.latencyMs = Date.now() - startTime;
-    return response;
+      const elapsedMs = Date.now() - startTime;
+      console.log(`[LLMProviderService] Completed ${options.provider} completion in ${elapsedMs}ms, tokens: ${response.usage?.totalTokens || 'unknown'}`);
+      
+      response.latencyMs = elapsedMs;
+      return response;
+    } catch (error) {
+      const elapsedMs = Date.now() - startTime;
+      console.error(`[LLMProviderService] Error in ${options.provider} completion after ${elapsedMs}ms:`, error);
+      throw error;
+    }
   }
 
   /**
@@ -201,9 +243,14 @@ export class LLMProviderService {
       systemMessage += "\n\nYou MUST respond with valid JSON only, no other text.";
     }
 
+    // Clamp max_tokens to model's actual capability to avoid API errors
+    const modelMaxTokens = getAnthropicModelMaxTokens(options.model);
+    const requestedTokens = options.maxTokens ?? 4096;
+    const effectiveMaxTokens = Math.min(requestedTokens, modelMaxTokens);
+
     const response = await client.messages.create({
       model: options.model,
-      max_tokens: options.maxTokens ?? 4096,
+      max_tokens: effectiveMaxTokens,
       system: systemMessage,
       messages: chatMessages,
       temperature: options.temperature ?? 0.7,
