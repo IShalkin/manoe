@@ -15,6 +15,7 @@
  */
 
 import { Controller, Post, Get, PathParams, BodyParams, Req, Res, AcceptMime } from "@tsed/common";
+import { v4 as uuidv4 } from "uuid";
 import { 
   Description, 
   Returns, 
@@ -63,22 +64,23 @@ class LLMConfigDTO {
 }
 
 /**
- * Generation Request DTO
+ * Generation Request DTO - supports both nested llmConfig and flat format from frontend
  */
 class GenerateRequestDTO {
-  @Required()
+  // Nested format (TypeScript style)
+  @Property()
   @Description("Project ID from Supabase")
   @Example("550e8400-e29b-41d4-a716-446655440000")
-  projectId: string;
+  projectId?: string;
 
-  @Required()
+  @Property()
   @Description("Seed idea for the narrative")
   @Example("A story about a detective who can see ghosts")
-  seedIdea: string;
+  seedIdea?: string;
 
-  @Required()
-  @Description("LLM configuration")
-  llmConfig: LLMConfigDTO;
+  @Property()
+  @Description("LLM configuration (nested format)")
+  llmConfig?: LLMConfigDTO;
 
   @Property()
   @Enum("full", "branching")
@@ -90,6 +92,31 @@ class GenerateRequestDTO {
   @Groups("internal")
   @Description("Additional settings")
   settings?: Record<string, unknown>;
+
+  // Flat format from frontend (snake_case)
+  @Property()
+  @Description("Supabase project ID (flat format)")
+  supabase_project_id?: string;
+
+  @Property()
+  @Description("Seed idea (flat format)")
+  seed_idea?: string;
+
+  @Property()
+  @Description("LLM provider (flat format)")
+  provider?: string;
+
+  @Property()
+  @Description("LLM model (flat format)")
+  model?: string;
+
+  @Property()
+  @Description("API key (flat format)")
+  api_key?: string;
+
+  @Property()
+  @Description("Generation mode (flat format)")
+  generation_mode?: "full" | "branching";
 }
 
 /**
@@ -241,16 +268,24 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
   async startGeneration(
     @BodyParams() @Groups("!internal") request: GenerateRequestDTO
   ): Promise<GenerateResponseDTO> {
+    // Support both nested llmConfig format and flat format from frontend
+    const projectId = request.projectId || request.supabase_project_id || uuidv4();
+    const seedIdea = request.seedIdea || request.seed_idea || "";
+    const provider = request.llmConfig?.provider || request.provider as LLMProvider;
+    const model = request.llmConfig?.model || request.model || "";
+    const apiKey = request.llmConfig?.apiKey || request.api_key || "";
+    const mode = request.mode || request.generation_mode || "full";
+
     const options: GenerationOptions = {
-      projectId: request.projectId,
-      seedIdea: request.seedIdea,
+      projectId,
+      seedIdea,
       llmConfig: {
-        provider: request.llmConfig.provider,
-        model: request.llmConfig.model,
-        apiKey: request.llmConfig.apiKey,
-        temperature: request.llmConfig.temperature,
+        provider,
+        model,
+        apiKey,
+        temperature: request.llmConfig?.temperature,
       },
-      mode: request.mode || "full",
+      mode,
       settings: request.settings,
     };
 
