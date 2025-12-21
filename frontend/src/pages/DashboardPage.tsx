@@ -384,6 +384,37 @@ export function DashboardPage() {
     }
     
     try {
+      // IMPORTANT: Create/update project BEFORE calling generate
+      // This ensures the project exists in Supabase before the backend tries to save artifacts
+      let projectId: string;
+      
+      if (editingProject) {
+        await updateProject(editingProject.id, {
+          name: formData.name || 'Untitled Project',
+          seedIdea: formData.seedIdea,
+          moralCompass: formData.moralCompass,
+          targetAudience: formData.targetAudience,
+          themes: formData.themes,
+          outputFormat: formData.outputFormat,
+          readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
+          status: 'pending',
+          result: null,
+        });
+        projectId = editingProject.id;
+      } else {
+        const newProject = await createProject({
+          name: formData.name || 'Untitled Project',
+          seedIdea: formData.seedIdea,
+          moralCompass: formData.moralCompass,
+          targetAudience: formData.targetAudience,
+          themes: formData.themes,
+          outputFormat: formData.outputFormat,
+          readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
+        });
+        projectId = newProject.id;
+      }
+
+      // Now call generate with the project ID
       const response = await orchestratorFetch('/generate', {
         method: 'POST',
         body: JSON.stringify({
@@ -391,6 +422,7 @@ export function DashboardPage() {
           model: architectConfig.model,
           api_key: apiKey,
           seed_idea: formData.seedIdea,
+          supabase_project_id: projectId, // Pass the project ID to the backend
           moral_compass: formData.moralCompass,
           custom_moral_system: formData.moralCompass === 'user_defined' ? formData.customMoralSystem : undefined,
           target_audience: formData.targetAudience || undefined,
@@ -412,34 +444,6 @@ export function DashboardPage() {
       const data = await response.json();
       
       if (data.success && data.run_id) {
-        let projectId: string;
-        
-        if (editingProject) {
-          await updateProject(editingProject.id, {
-            name: formData.name || 'Untitled Project',
-            seedIdea: formData.seedIdea,
-            moralCompass: formData.moralCompass,
-            targetAudience: formData.targetAudience,
-            themes: formData.themes,
-            outputFormat: formData.outputFormat,
-            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
-            status: 'pending',
-            result: null,
-          });
-          projectId = editingProject.id;
-        } else {
-          const newProject = await createProject({
-            name: formData.name || 'Untitled Project',
-            seedIdea: formData.seedIdea,
-            moralCompass: formData.moralCompass,
-            targetAudience: formData.targetAudience,
-            themes: formData.themes,
-            outputFormat: formData.outputFormat,
-            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
-          });
-          projectId = newProject.id;
-        }
-        
         await startGeneration(projectId, data.run_id);
         
         closeProjectModal();
@@ -448,7 +452,7 @@ export function DashboardPage() {
       } else {
         setError(data.error || 'Failed to start generation. Please try again.');
       }
-    } catch (err) {
+    }catch (err) {
       console.error('[DashboardPage] Generation error:', err);
       let errorMsg = 'Unknown error';
       if (err instanceof Error) {
