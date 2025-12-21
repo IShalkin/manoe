@@ -133,6 +133,43 @@ export class SupabaseService {
     return project;
   }
 
+  /**
+   * Ensure a project exists in the database.
+   * If the project doesn't exist, create it with minimal required fields.
+   * This is used by the orchestrator to ensure FK constraints are satisfied
+   * before saving artifacts.
+   */
+  async ensureProjectExists(projectId: string, seedIdea?: string): Promise<void> {
+    const client = this.getClient();
+    
+    // Check if project exists
+    const existing = await this.getProject(projectId);
+    if (existing) {
+      return; // Project already exists
+    }
+
+    // Create minimal project to satisfy FK constraint
+    const { error } = await client.from("projects").insert({
+      id: projectId,
+      seed_idea: seedIdea || "Auto-generated project",
+      moral_compass: "balanced",
+      status: "generating",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      // Ignore duplicate key errors (race condition - another request created it)
+      if (error.code === "23505") {
+        console.log(`[SupabaseService] Project ${projectId} already exists (race condition)`);
+        return;
+      }
+      throw new Error(`Failed to ensure project exists: ${error.message}`);
+    }
+
+    console.log(`[SupabaseService] Created project ${projectId} to satisfy FK constraint`);
+  }
+
   async updateProjectStatus(id: string, status: string): Promise<void> {
     const client = this.getClient();
     const { error } = await client

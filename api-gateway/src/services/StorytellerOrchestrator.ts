@@ -114,6 +114,16 @@ export class StorytellerOrchestrator {
     process.stdout.write(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}\n`);
     $log.info(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}`);
 
+    // Ensure project exists in Supabase before saving any artifacts
+    // This prevents FK constraint violations when the frontend creates the project after calling generate
+    try {
+      await this.supabase.ensureProjectExists(options.projectId, options.seedIdea);
+      $log.info(`[StorytellerOrchestrator] ensureProjectExists completed, projectId: ${options.projectId}`);
+    } catch (error) {
+      $log.error(`[StorytellerOrchestrator] ensureProjectExists failed, projectId: ${options.projectId}`, error);
+      // Continue anyway - the frontend may have already created the project
+    }
+
     // Initialize generation state
     const state: GenerationState = {
       phase: GenerationPhase.GENESIS,
