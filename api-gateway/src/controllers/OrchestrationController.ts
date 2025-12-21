@@ -266,8 +266,23 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
   @Returns(400)
   @Returns(500)
   async startGeneration(
-    @BodyParams() @Groups("!internal") request: GenerateRequestDTO
+    @BodyParams() @Groups("!internal") request: GenerateRequestDTO,
+    @Req() req: Request
   ): Promise<GenerateResponseDTO> {
+    // Extract user_id from JWT token in Authorization header
+    let userId: string | undefined;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const token = authHeader.substring(7);
+        // Decode JWT payload (base64) without verification - Supabase handles auth
+        const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64").toString());
+        userId = payload.sub;
+      } catch (e) {
+        console.warn("Failed to extract user_id from JWT:", e);
+      }
+    }
+
     // Support both nested llmConfig format and flat format from frontend
     const projectId = request.projectId || request.supabase_project_id || uuidv4();
     const seedIdea = request.seedIdea || request.seed_idea || "";
@@ -279,6 +294,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
     const options: GenerationOptions = {
       projectId,
       seedIdea,
+      userId,
       llmConfig: {
         provider,
         model,

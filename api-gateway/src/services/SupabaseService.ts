@@ -183,7 +183,7 @@ export class SupabaseService {
    * This is a defensive measure to prevent FK constraint errors when
    * the frontend doesn't create the project before calling generate.
    */
-  async ensureProjectExists(projectId: string, seedIdea?: string): Promise<void> {
+  async ensureProjectExists(projectId: string, seedIdea?: string, userId?: string): Promise<void> {
     const existing = await this.getProject(projectId);
     if (existing) {
       return; // Project already exists
@@ -194,6 +194,7 @@ export class SupabaseService {
     const client = this.getClient();
     const { error } = await client.from("projects").insert({
       id: projectId,
+      user_id: userId,
       name: seedIdea?.substring(0, 50) || "Untitled Generation",
       seed_idea: seedIdea || "",
       status: "generating",

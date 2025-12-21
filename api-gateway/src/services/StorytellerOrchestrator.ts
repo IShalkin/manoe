@@ -55,6 +55,7 @@ export interface LLMConfiguration {
 export interface GenerationOptions {
   projectId: string;
   seedIdea: string;
+  userId?: string;
   llmConfig: LLMConfiguration;
   mode: "full" | "branching";
   settings?: Record<string, unknown>;
@@ -172,7 +173,7 @@ export class StorytellerOrchestrator {
     try {
       // Ensure project exists in database before saving any artifacts
       // This is a defensive measure for when frontend doesn't create the project
-      await this.supabase.ensureProjectExists(options.projectId, options.seedIdea);
+      await this.supabase.ensureProjectExists(options.projectId, options.seedIdea, options.userId);
 
       // Phase 1: Genesis
       await this.runGenesisPhase(runId, options);
