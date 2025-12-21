@@ -121,11 +121,22 @@ class GenerateRequestDTO {
 
 /**
  * Generation Response DTO
+ * Includes both camelCase and snake_case fields for backward compatibility
  */
 class GenerateResponseDTO {
   @Required()
-  @Description("Unique run identifier")
-  @Example("run-550e8400-e29b-41d4-a716-446655440000")
+  @Description("Success flag for frontend compatibility")
+  @Example(true)
+  success: boolean;
+
+  @Required()
+  @Description("Unique run identifier (snake_case for frontend compatibility)")
+  @Example("550e8400-e29b-41d4-a716-446655440000")
+  run_id: string;
+
+  @Required()
+  @Description("Unique run identifier (camelCase)")
+  @Example("550e8400-e29b-41d4-a716-446655440000")
   runId: string;
 
   @Required()
@@ -135,7 +146,7 @@ class GenerateResponseDTO {
 
   @Required()
   @Description("SSE stream URL for real-time updates")
-  @Example("/orchestrate/stream/run-550e8400-e29b-41d4-a716-446655440000")
+  @Example("/orchestrate/stream/550e8400-e29b-41d4-a716-446655440000")
   streamUrl: string;
 }
 
@@ -308,6 +319,8 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
     const runId = await this.orchestrator.startGeneration(options);
 
     return {
+      success: true,
+      run_id: runId,
       runId,
       message: "Generation started",
       streamUrl: `/orchestrate/stream/${runId}`,
