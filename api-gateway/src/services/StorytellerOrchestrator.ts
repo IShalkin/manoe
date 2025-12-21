@@ -170,6 +170,10 @@ export class StorytellerOrchestrator {
     if (!state) return;
 
     try {
+      // Ensure project exists in database before saving any artifacts
+      // This is a defensive measure for when frontend doesn't create the project
+      await this.supabase.ensureProjectExists(options.projectId, options.seedIdea);
+
       // Phase 1: Genesis
       await this.runGenesisPhase(runId, options);
       if (this.shouldStop(runId)) return;

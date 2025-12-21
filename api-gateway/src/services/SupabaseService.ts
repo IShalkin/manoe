@@ -177,6 +177,41 @@ export class SupabaseService {
     }
   }
 
+  /**
+   * Ensure a project exists in the database.
+   * If the project doesn't exist, create it with minimal required fields.
+   * This is a defensive measure to prevent FK constraint errors when
+   * the frontend doesn't create the project before calling generate.
+   */
+  async ensureProjectExists(projectId: string, seedIdea?: string): Promise<void> {
+    const existing = await this.getProject(projectId);
+    if (existing) {
+      return; // Project already exists
+    }
+
+    // Create a minimal project to satisfy FK constraints
+    // Note: Using service role key bypasses RLS, so we create with minimal fields
+    const client = this.getClient();
+    const { error } = await client.from("projects").insert({
+      id: projectId,
+      name: seedIdea?.substring(0, 50) || "Untitled Generation",
+      seed_idea: seedIdea || "",
+      status: "generating",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      // If insert fails (e.g., race condition where another request created it),
+      // check if it exists now
+      const checkAgain = await this.getProject(projectId);
+      if (!checkAgain) {
+        console.error(`Failed to ensure project exists: ${error.message}`);
+        throw new Error(`Failed to ensure project exists: ${error.message}`);
+      }
+    }
+  }
+
   // ========================================================================
   // Narrative Possibility Operations
   // ========================================================================
