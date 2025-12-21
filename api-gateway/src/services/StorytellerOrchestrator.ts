@@ -106,6 +106,7 @@ export class StorytellerOrchestrator {
    */
   async startGeneration(options: GenerationOptions): Promise<string> {
     const runId = uuidv4();
+    console.log(`[startGeneration] Starting generation for runId: ${runId}`);
 
     // Initialize generation state
     const state: GenerationState = {
@@ -130,33 +131,56 @@ export class StorytellerOrchestrator {
     };
 
     this.activeRuns.set(runId, state);
+    console.log(`[startGeneration] State initialized, connecting to Qdrant...`);
 
     // Initialize Qdrant memory with API key for embeddings
-    await this.qdrantMemory.connect(
-      options.llmConfig.provider === LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined,
-      options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined
-    );
+    // Use Promise.race with timeout to prevent blocking
+    try {
+      await Promise.race([
+        this.qdrantMemory.connect(
+          options.llmConfig.provider === LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined,
+          options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Qdrant connect timeout")), 5000))
+      ]);
+      console.log(`[startGeneration] Qdrant connected`);
+    } catch (error) {
+      console.warn(`[startGeneration] Qdrant connect failed/timeout, continuing without:`, error);
+    }
 
     // Start Langfuse trace
+    console.log(`[startGeneration] Starting Langfuse trace...`);
     this.langfuse.startTrace({
       projectId: options.projectId,
       runId,
       phase: GenerationPhase.GENESIS,
     });
+    console.log(`[startGeneration] Langfuse trace started`);
 
-    // Publish start event
-    await this.publishEvent(runId, "generation_started", {
-      projectId: options.projectId,
-      mode: options.mode,
-      phase: GenerationPhase.GENESIS,
-    });
+    // Publish start event with timeout
+    console.log(`[startGeneration] Publishing start event to Redis...`);
+    try {
+      await Promise.race([
+        this.publishEvent(runId, "generation_started", {
+          projectId: options.projectId,
+          mode: options.mode,
+          phase: GenerationPhase.GENESIS,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Redis publish timeout")), 5000))
+      ]);
+      console.log(`[startGeneration] Start event published`);
+    } catch (error) {
+      console.warn(`[startGeneration] Redis publish failed/timeout, continuing:`, error);
+    }
 
     // Start generation in background
+    console.log(`[startGeneration] Starting background generation...`);
     this.runGeneration(runId, options).catch((error) => {
       console.error(`Generation error for run ${runId}:`, error);
       this.handleError(runId, error);
     });
 
+    console.log(`[startGeneration] Returning runId: ${runId}`);
     return runId;
   }
 
