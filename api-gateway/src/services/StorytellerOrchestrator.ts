@@ -191,13 +191,19 @@ export class StorytellerOrchestrator {
     runId: string,
     options: GenerationOptions
   ): Promise<void> {
+    console.log(`[runGeneration] Starting for runId: ${runId}`);
     const state = this.activeRuns.get(runId);
-    if (!state) return;
+    if (!state) {
+      console.log(`[runGeneration] No state found for runId: ${runId}, aborting`);
+      return;
+    }
 
     try {
       // Ensure project exists in database before saving any artifacts
       // This is a defensive measure for when frontend doesn't create the project
+      console.log(`[runGeneration] Ensuring project exists: ${options.projectId}`);
       await this.supabase.ensureProjectExists(options.projectId, options.seedIdea, options.userId);
+      console.log(`[runGeneration] Project ensured, starting Genesis phase`);
 
       // Phase 1: Genesis
       await this.runGenesisPhase(runId, options);
