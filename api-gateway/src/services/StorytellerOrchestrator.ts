@@ -207,27 +207,56 @@ export class StorytellerOrchestrator {
 
       // Phase 1: Genesis
       await this.runGenesisPhase(runId, options);
-      if (this.shouldStop(runId)) return;
+      console.log(`[runGeneration] Genesis complete, checking shouldStop...`);
+      if (this.shouldStop(runId)) {
+        console.log(`[runGeneration] shouldStop returned true after Genesis, stopping`);
+        return;
+      }
 
       // Phase 2: Characters
+      console.log(`[runGeneration] Starting Characters phase...`);
       await this.runCharactersPhase(runId, options);
-      if (this.shouldStop(runId)) return;
+      console.log(`[runGeneration] Characters complete, checking shouldStop...`);
+      if (this.shouldStop(runId)) {
+        console.log(`[runGeneration] shouldStop returned true after Characters, stopping`);
+        return;
+      }
 
       // Phase 3: Worldbuilding
+      console.log(`[runGeneration] Starting Worldbuilding phase...`);
       await this.runWorldbuildingPhase(runId, options);
-      if (this.shouldStop(runId)) return;
+      console.log(`[runGeneration] Worldbuilding complete, checking shouldStop...`);
+      if (this.shouldStop(runId)) {
+        console.log(`[runGeneration] shouldStop returned true after Worldbuilding, stopping`);
+        return;
+      }
 
       // Phase 4: Outlining
+      console.log(`[runGeneration] Starting Outlining phase...`);
       await this.runOutliningPhase(runId, options);
-      if (this.shouldStop(runId)) return;
+      console.log(`[runGeneration] Outlining complete, checking shouldStop...`);
+      if (this.shouldStop(runId)) {
+        console.log(`[runGeneration] shouldStop returned true after Outlining, stopping`);
+        return;
+      }
 
       // Phase 5: Advanced Planning (optional)
+      console.log(`[runGeneration] Starting Advanced Planning phase...`);
       await this.runAdvancedPlanningPhase(runId, options);
-      if (this.shouldStop(runId)) return;
+      console.log(`[runGeneration] Advanced Planning complete, checking shouldStop...`);
+      if (this.shouldStop(runId)) {
+        console.log(`[runGeneration] shouldStop returned true after Advanced Planning, stopping`);
+        return;
+      }
 
       // Phase 6-9: Drafting → Critique → Revision → Polish (per scene)
+      console.log(`[runGeneration] Starting Drafting loop...`);
       await this.runDraftingLoop(runId, options);
-      if (this.shouldStop(runId)) return;
+      console.log(`[runGeneration] Drafting loop complete, checking shouldStop...`);
+      if (this.shouldStop(runId)) {
+        console.log(`[runGeneration] shouldStop returned true after Drafting, stopping`);
+        return;
+      }
 
       // Mark as completed
       state.isCompleted = true;
@@ -1214,16 +1243,27 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
    */
   private shouldStop(runId: string): boolean {
     const state = this.activeRuns.get(runId);
-    if (!state) return true;
-    if (state.isPaused) return true;
-    if (state.error) return true;
+    if (!state) {
+      console.log(`[shouldStop] No state found for runId: ${runId}, returning true`);
+      return true;
+    }
+    if (state.isPaused) {
+      console.log(`[shouldStop] State is paused for runId: ${runId}, returning true`);
+      return true;
+    }
+    if (state.error) {
+      console.log(`[shouldStop] State has error for runId: ${runId}: ${state.error}, returning true`);
+      return true;
+    }
 
     const pauseCallback = this.pauseCallbacks.get(runId);
     if (pauseCallback && pauseCallback()) {
+      console.log(`[shouldStop] Pause callback returned true for runId: ${runId}, returning true`);
       state.isPaused = true;
       return true;
     }
 
+    console.log(`[shouldStop] No stop condition for runId: ${runId}, returning false`);
     return false;
   }
 
