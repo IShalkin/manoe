@@ -206,36 +206,45 @@ export class QdrantMemoryService {
 
   /**
    * Store a character in Qdrant
+   * Returns pointId on success, null if Qdrant is unavailable or fails
    */
   async storeCharacter(
     projectId: string,
     character: Record<string, unknown>
-  ): Promise<string> {
-    if (!this.client) throw new Error("Qdrant client not connected");
+  ): Promise<string | null> {
+    if (!this.client) {
+      console.warn("Qdrant Memory: Cannot store character - client not connected");
+      return null;
+    }
 
-    const characterName = String(character.name ?? "Unknown");
-    const characterText = this.characterToText(character);
-    const embedding = await this.generateEmbedding(characterText);
+    try {
+      const characterName = String(character.name ?? "Unknown");
+      const characterText = this.characterToText(character);
+      const embedding = await this.generateEmbedding(characterText);
 
-    const pointId = uuidv4();
-    const payload: CharacterPayload = {
-      projectId,
-      character,
-      name: characterName,
-      createdAt: new Date().toISOString(),
-    };
+      const pointId = uuidv4();
+      const payload: CharacterPayload = {
+        projectId,
+        character,
+        name: characterName,
+        createdAt: new Date().toISOString(),
+      };
 
-    await this.client.upsert(this.COLLECTION_CHARACTERS, {
-      points: [
-        {
-          id: pointId,
-          vector: embedding,
-          payload: payload as Record<string, unknown>,
-        },
-      ],
-    });
+      await this.client.upsert(this.COLLECTION_CHARACTERS, {
+        points: [
+          {
+            id: pointId,
+            vector: embedding,
+            payload: payload as Record<string, unknown>,
+          },
+        ],
+      });
 
-    return pointId;
+      return pointId;
+    } catch (error) {
+      console.warn("Qdrant Memory: Failed to store character, continuing without vector memory:", error instanceof Error ? error.message : String(error));
+      return null;
+    }
   }
 
   /**
@@ -283,36 +292,45 @@ export class QdrantMemoryService {
 
   /**
    * Store worldbuilding element in Qdrant
+   * Returns pointId on success, null if Qdrant is unavailable or fails
    */
   async storeWorldbuilding(
     projectId: string,
     elementType: string,
     element: Record<string, unknown>
-  ): Promise<string> {
-    if (!this.client) throw new Error("Qdrant client not connected");
+  ): Promise<string | null> {
+    if (!this.client) {
+      console.warn("Qdrant Memory: Cannot store worldbuilding - client not connected");
+      return null;
+    }
 
-    const elementText = this.worldbuildingToText(elementType, element);
-    const embedding = await this.generateEmbedding(elementText);
+    try {
+      const elementText = this.worldbuildingToText(elementType, element);
+      const embedding = await this.generateEmbedding(elementText);
 
-    const pointId = uuidv4();
-    const payload: WorldbuildingPayload = {
-      projectId,
-      elementType,
-      element,
-      createdAt: new Date().toISOString(),
-    };
+      const pointId = uuidv4();
+      const payload: WorldbuildingPayload = {
+        projectId,
+        elementType,
+        element,
+        createdAt: new Date().toISOString(),
+      };
 
-    await this.client.upsert(this.COLLECTION_WORLDBUILDING, {
-      points: [
-        {
-          id: pointId,
-          vector: embedding,
-          payload: payload as Record<string, unknown>,
-        },
-      ],
-    });
+      await this.client.upsert(this.COLLECTION_WORLDBUILDING, {
+        points: [
+          {
+            id: pointId,
+            vector: embedding,
+            payload: payload as Record<string, unknown>,
+          },
+        ],
+      });
 
-    return pointId;
+      return pointId;
+    } catch (error) {
+      console.warn("Qdrant Memory: Failed to store worldbuilding, continuing without vector memory:", error instanceof Error ? error.message : String(error));
+      return null;
+    }
   }
 
   /**
@@ -344,36 +362,45 @@ export class QdrantMemoryService {
 
   /**
    * Store a scene in Qdrant
+   * Returns pointId on success, null if Qdrant is unavailable or fails
    */
   async storeScene(
     projectId: string,
     sceneNumber: number,
     scene: Record<string, unknown>
-  ): Promise<string> {
-    if (!this.client) throw new Error("Qdrant client not connected");
+  ): Promise<string | null> {
+    if (!this.client) {
+      console.warn("Qdrant Memory: Cannot store scene - client not connected");
+      return null;
+    }
 
-    const sceneText = this.sceneToText(scene);
-    const embedding = await this.generateEmbedding(sceneText);
+    try {
+      const sceneText = this.sceneToText(scene);
+      const embedding = await this.generateEmbedding(sceneText);
 
-    const pointId = uuidv4();
-    const payload: ScenePayload = {
-      projectId,
-      sceneNumber,
-      scene,
-      createdAt: new Date().toISOString(),
-    };
+      const pointId = uuidv4();
+      const payload: ScenePayload = {
+        projectId,
+        sceneNumber,
+        scene,
+        createdAt: new Date().toISOString(),
+      };
 
-    await this.client.upsert(this.COLLECTION_SCENES, {
-      points: [
-        {
-          id: pointId,
-          vector: embedding,
-          payload: payload as Record<string, unknown>,
-        },
-      ],
-    });
+      await this.client.upsert(this.COLLECTION_SCENES, {
+        points: [
+          {
+            id: pointId,
+            vector: embedding,
+            payload: payload as Record<string, unknown>,
+          },
+        ],
+      });
 
-    return pointId;
+      return pointId;
+    } catch (error) {
+      console.warn("Qdrant Memory: Failed to store scene, continuing without vector memory:", error instanceof Error ? error.message : String(error));
+      return null;
+    }
   }
 
   /**
