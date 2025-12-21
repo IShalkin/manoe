@@ -372,12 +372,14 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       return;
     }
 
-    // Set SSE headers
+    // Set SSE headers (avoid Connection header - forbidden in HTTP/2, causes ERR_HTTP2_PROTOCOL_ERROR)
     res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("X-Accel-Buffering", "no"); // Disable Nginx buffering
     res.flushHeaders();
+
+    // Send initial ping to establish connection quickly
+    res.write(":ok\n\n");
 
     // Send initial connection event
     res.write(`event: connected\ndata: ${JSON.stringify({ runId, status: status.phase })}\n\n`);
