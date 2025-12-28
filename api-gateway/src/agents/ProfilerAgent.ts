@@ -127,6 +127,7 @@ export class ProfilerAgent extends BaseAgent {
    * - "Protagonist" -> "protagonist"
    * - "Protagonist — description" -> "protagonist"
    * - "Supporting/Shadow-Antagonist — description" -> "supporting"
+   * - "shadow-antagonist" -> "supporting" (shadow antagonists are supporting characters)
    */
   private normalizeRole(role: unknown): CharacterRole {
     if (typeof role !== "string") {
@@ -140,7 +141,13 @@ export class ProfilerAgent extends BaseAgent {
       return "protagonist";
     }
 
-    // Check for antagonist (but not "shadow-antagonist" which is supporting)
+    // Check for shadow-antagonist BEFORE checking for antagonist
+    // Shadow antagonists are supporting characters, not main antagonists
+    if (roleLower.includes("shadow-antagonist") || roleLower.includes("shadow antagonist")) {
+      return "supporting";
+    }
+
+    // Check for antagonist (main antagonist only)
     if (roleLower.startsWith("antagonist")) {
       return "antagonist";
     }
@@ -150,8 +157,8 @@ export class ProfilerAgent extends BaseAgent {
       return "supporting";
     }
 
-    // Check if antagonist appears anywhere (for cases like "Shadow-Antagonist")
-    if (roleLower.includes("antagonist") && !roleLower.includes("supporting")) {
+    // Check if antagonist appears anywhere (for main antagonist variations)
+    if (roleLower.includes("antagonist")) {
       return "antagonist";
     }
 
