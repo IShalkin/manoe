@@ -85,16 +85,43 @@ All endpoints require a valid API key passed via the \`x-api-key\` header or Bea
   ],
   socketIO: {
     cors: {
-      origin: process.env.CORS_ORIGIN || "*",
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: string | boolean) => void) => {
+        const corsOriginEnv = process.env.CORS_ORIGIN || "*";
+        if (corsOriginEnv === "*") {
+          callback(null, true);
+          return;
+        }
+        const whitelist = corsOriginEnv.split(",").map(s => s.trim());
+        if (!origin || whitelist.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error(`Origin ${origin} not allowed by CORS`));
+        }
+      },
       methods: ["GET", "POST"],
     },
   },
   middlewares: [
     cors({
-      origin: process.env.CORS_ORIGIN || "*",
+      origin: (origin, callback) => {
+        const corsOriginEnv = process.env.CORS_ORIGIN || "*";
+        
+        if (corsOriginEnv === "*") {
+          callback(null, "*");
+          return;
+        }
+        
+        const whitelist = corsOriginEnv.split(",").map(s => s.trim());
+        
+        if (!origin || whitelist.includes(origin)) {
+          callback(null, origin || "*");
+        } else {
+          callback(new Error(`Origin ${origin} not allowed by CORS`));
+        }
+      },
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "x-api-key"],
       exposedHeaders: ["Content-Length", "X-Request-Id"],
       preflightContinue: false,
       optionsSuccessStatus: 204,
@@ -115,24 +142,9 @@ export class Server {
   protected settings: Configuration;
 
   $beforeRoutesInit(): void {
-    // Handle CORS preflight requests explicitly before any routes
-    const corsOrigin = process.env.CORS_ORIGIN || "*";
-    
-    this.app.use((req: any, res: any, next: any) => {
-      // Set CORS headers for all requests
-      res.header("Access-Control-Allow-Origin", corsOrigin);
-      res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
-      res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin");
-      res.header("Access-Control-Allow-Credentials", "true");
-      res.header("Access-Control-Max-Age", "86400");
-      
-      // Handle preflight requests immediately
-      if (req.method === "OPTIONS") {
-        return res.status(204).end();
-      }
-      
-      next();
-    });
+    // CORS is now handled entirely by the cors() middleware in the middlewares array
+    // This prevents duplicate CORS headers which cause browser errors
+    // See: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS/Errors/CORSMultipleAllowOriginNotAllowed
   }
 
   $afterRoutesInit(): void {
