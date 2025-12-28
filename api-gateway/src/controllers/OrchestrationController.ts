@@ -285,31 +285,6 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
     const apiKey = request.llmConfig?.apiKey || request.api_key || "";
     const mode = request.mode || request.generation_mode || "full";
 
-    // #region debug instrumentation
-    fetch("http://127.0.0.1:7242/ingest/4ed3716a-6e81-4213-8ba0-e923964d0642", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "pre-run",
-        hypothesisId: "H1",
-        location: "OrchestrationController.ts:startGeneration:entry",
-        message: "startGeneration entry",
-        data: {
-          provider,
-          model,
-          mode,
-          hasApiKey: !!apiKey,
-          hasLlmConfig: !!request.llmConfig,
-          bodyKeys: Object.keys(request || {}),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
-    // Force immediate output to ensure logs are visible
-    process.stdout.write(`[OrchestrationController] startGeneration called, projectId: ${projectId}, provider: ${provider}\n`);
     $log.info(`[OrchestrationController] startGeneration called, projectId: ${projectId}, seedIdea: ${seedIdea?.substring(0, 50)}...`);
     
     const options: GenerationOptions = {
@@ -325,36 +300,10 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
       settings: request.settings,
     };
 
-    // #region debug instrumentation
-    fetch("http://127.0.0.1:7242/ingest/4ed3716a-6e81-4213-8ba0-e923964d0642", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "pre-run",
-        hypothesisId: "H1",
-        location: "OrchestrationController.ts:startGeneration:options",
-        message: "startGeneration options",
-        data: {
-          projectId,
-          mode,
-          provider,
-          model,
-          hasApiKey: !!apiKey,
-          hasSettings: !!options.settings,
-          hasSeed: !!seedIdea,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
     try {
-      process.stdout.write(`[OrchestrationController] calling orchestrator.startGeneration, projectId: ${options.projectId}\n`);
-      $log.info(`[OrchestrationController] startGeneration: calling orchestrator.startGeneration, projectId: ${options.projectId}`);
+      $log.info(`[OrchestrationController] calling orchestrator.startGeneration, projectId: ${options.projectId}`);
       const runId = await this.orchestrator.startGeneration(options);
-      process.stdout.write(`[OrchestrationController] orchestrator.startGeneration returned runId: ${runId}\n`);
-      $log.info(`[OrchestrationController] startGeneration: orchestrator.startGeneration returned runId: ${runId}`);
+      $log.info(`[OrchestrationController] orchestrator.startGeneration returned runId: ${runId}`);
 
       return {
         runId,
@@ -364,24 +313,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
         streamUrl: `/stream/${runId}`,
       };
     } catch (error) {
-      // #region debug instrumentation
-      fetch("http://127.0.0.1:7242/ingest/4ed3716a-6e81-4213-8ba0-e923964d0642", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "debug-session",
-          runId: "pre-run",
-          hypothesisId: "H2",
-          location: "OrchestrationController.ts:startGeneration:error",
-          message: "startGeneration error",
-          data: {
-            errorMessage: (error as any)?.message ?? String(error),
-            errorStack: error instanceof Error ? error.stack : undefined,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      $log.error(`[OrchestrationController] startGeneration error:`, error);
       throw error;
     }
   }
