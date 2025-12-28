@@ -508,9 +508,10 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       }
     } catch (error) {
       if (isConnected) {
-        res.write(`event: ERROR\ndata: ${JSON.stringify({ error: String(error) })}\n\n`);
+        // Send error as default message event so frontend onmessage handler receives it
+        res.write(`data: ${JSON.stringify({ type: "error", error: String(error) })}\n\n`);
       }
-    } finally {
+    }finally {
       res.end();
     }
   }
