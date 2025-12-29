@@ -524,6 +524,12 @@ interface AgentMessage {
     result?: Record<string, unknown>;
     result_summary?: string;
     round?: number;
+    // Additional fields for agent_thought and agent_dialogue events from backend
+    thought?: string;  // For agent_thought events
+    from?: string;     // For agent_dialogue events (sender agent)
+    to?: string;       // For agent_dialogue events (recipient agent)
+    sentiment?: string; // For agent_thought events
+    dialogueType?: string; // For agent_dialogue events
   };
 }
 
