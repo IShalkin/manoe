@@ -500,6 +500,11 @@ export class StorytellerOrchestrator {
 
   /**
    * Drafting Loop - Draft, Critique, Revise for each scene
+   * 
+   * Key improvements:
+   * 1. Word count validation with expansion loop before Critic
+   * 2. Polish only runs if scene was approved (not after failed revisions)
+   * 3. Strips fake "Word count:" claims from Writer output
    */
   private async runDraftingLoop(
     runId: string,
@@ -516,13 +521,32 @@ export class StorytellerOrchestrator {
 
       state.currentScene = sceneNum + 1;
       const scene = scenes[sceneNum] as Record<string, unknown>;
+      const targetWordCount = Number(scene.wordCount ?? 1500);
+      const minWordCount = Math.floor(targetWordCount * 0.7); // 70% threshold
 
       // Draft the scene
       await this.draftScene(runId, options, sceneNum + 1, scene);
       if (this.shouldStop(runId)) return;
 
+      // Word count expansion loop - expand if too short before calling Critic
+      // This prevents the Critic↔Writer deadlock where Writer can't produce enough words
+      let expansionAttempts = 0;
+      const maxExpansions = 3;
+      while (expansionAttempts < maxExpansions) {
+        const draft = state.drafts.get(sceneNum + 1) as Record<string, unknown>;
+        const actualWordCount = draft?.wordCount as number ?? 0;
+        
+        if (actualWordCount >= minWordCount) break;
+        
+        console.log(`[Orchestrator] Scene ${sceneNum + 1} too short (${actualWordCount}/${minWordCount} words), expanding...`);
+        await this.expandScene(runId, options, sceneNum + 1, targetWordCount - actualWordCount);
+        expansionAttempts++;
+        if (this.shouldStop(runId)) return;
+      }
+
       // Critique and revision loop (max 2 iterations)
       let revisionCount = 0;
+      let sceneApproved = false;
       while (revisionCount < state.maxRevisions) {
         if (this.shouldStop(runId)) return;
 
@@ -532,6 +556,7 @@ export class StorytellerOrchestrator {
 
         // Check if revision needed
         if (this.isApproved(critique)) {
+          sceneApproved = true;
           break;
         }
 
@@ -547,8 +572,13 @@ export class StorytellerOrchestrator {
         state.lastArchivistScene = sceneNum + 1;
       }
 
-      // Polish the scene
-      await this.polishScene(runId, options, sceneNum + 1);
+      // Polish the scene ONLY if it was approved
+      // This prevents Polish from shortening scenes that already failed quality checks
+      if (sceneApproved) {
+        await this.polishScene(runId, options, sceneNum + 1);
+      } else {
+        console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions, skipping polish`);
+      }
     }
   }
 
@@ -590,7 +620,8 @@ export class StorytellerOrchestrator {
     };
 
     const output = await agent.execute(context, options);
-    const response = output.content as string;
+    // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
+    const response = this.stripFakeWordCount(output.content as string);
 
     const draft = {
       sceneNum,
@@ -682,7 +713,8 @@ export class StorytellerOrchestrator {
     };
 
     const output = await agent.execute(context, options);
-    const response = output.content as string;
+    // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
+    const response = this.stripFakeWordCount(output.content as string);
 
     const revision = {
       sceneNum,
@@ -701,6 +733,88 @@ export class StorytellerOrchestrator {
 
     await this.saveArtifact(runId, options.projectId, `revision_scene_${sceneNum}`, revision);
     await this.publishEvent(runId, "scene_revision_complete", { sceneNum });
+  }
+
+  /**
+   * Expand a scene by continuing from where it left off
+   * Used when scene is too short before calling Critic
+   * This prevents the Critic↔Writer deadlock
+   */
+  private async expandScene(
+    runId: string,
+    options: GenerationOptions,
+    sceneNum: number,
+    additionalWordsNeeded: number
+  ): Promise<void> {
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+
+    const draft = state.drafts.get(sceneNum) as Record<string, unknown>;
+    if (!draft) return;
+
+    state.phase = GenerationPhase.DRAFTING;
+    state.currentScene = sceneNum;
+    await this.publishEvent(runId, "scene_expand_start", { sceneNum, additionalWordsNeeded });
+
+    // Store expansion context for WriterAgent
+    state.currentSceneOutline = {
+      ...(state.currentSceneOutline ?? {}),
+      expansionMode: true,
+      existingContent: draft.content,
+      additionalWordsNeeded,
+    };
+
+    // Use WriterAgent through AgentFactory
+    const agent = this.agentFactory.getAgent(AgentType.WRITER);
+    const context: AgentContext = {
+      runId,
+      state,
+      projectId: options.projectId,
+    };
+
+    const output = await agent.execute(context, options);
+    let continuation = output.content as string;
+
+    // Strip fake word count claims from output
+    continuation = this.stripFakeWordCount(continuation);
+
+    // Append continuation to existing content
+    const existingContent = String(draft.content ?? "");
+    const combinedContent = existingContent + "\n\n" + continuation;
+
+    const expanded = {
+      sceneNum,
+      title: draft.title,
+      content: combinedContent,
+      wordCount: combinedContent.split(/\s+/).length,
+      expansionCount: (Number(draft.expansionCount) || 0) + 1,
+      createdAt: new Date().toISOString(),
+    };
+
+    state.drafts.set(sceneNum, expanded);
+    state.updatedAt = new Date().toISOString();
+
+    // Clear expansion mode
+    if (state.currentSceneOutline) {
+      delete state.currentSceneOutline.expansionMode;
+      delete state.currentSceneOutline.existingContent;
+      delete state.currentSceneOutline.additionalWordsNeeded;
+    }
+
+    await this.saveArtifact(runId, options.projectId, `expanded_scene_${sceneNum}`, expanded);
+    await this.publishEvent(runId, "scene_expand_complete", { sceneNum, wordCount: expanded.wordCount });
+  }
+
+  /**
+   * Strip fake "Word count: X" claims from Writer output
+   * LLMs hallucinate word counts - we compute them programmatically instead
+   */
+  private stripFakeWordCount(content: string): string {
+    // Remove patterns like "Word count: 1,234" or "[Word count: 2000 words]" or "**Word count:** 1500"
+    return content
+      .replace(/\[?\*?\*?Word count:?\*?\*?\s*[\d,]+\s*(?:words?)?\]?\.?/gi, "")
+      .replace(/\n\s*\n\s*\n/g, "\n\n") // Clean up extra newlines
+      .trim();
   }
 
   /**
@@ -730,7 +844,8 @@ export class StorytellerOrchestrator {
     };
 
     const output = await agent.execute(context, options);
-    const response = output.content as string;
+    // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
+    const response = this.stripFakeWordCount(output.content as string);
 
     const polished = {
       sceneNum,
