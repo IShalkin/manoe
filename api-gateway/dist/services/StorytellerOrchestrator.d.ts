@@ -119,6 +119,8 @@ export declare class StorytellerOrchestrator {
      * Expand a scene by continuing from where it left off
      * Used when scene is too short before calling Critic
      * This prevents the Critic↔Writer deadlock
+     *
+     * @param sceneOutline - The original scene outline (passed explicitly to prevent state contamination)
      */
     private expandScene;
     /**
@@ -128,8 +130,16 @@ export declare class StorytellerOrchestrator {
     private stripFakeWordCount;
     /**
      * Polish a scene (final refinement)
+     *
+     * CRITICAL: Includes post-polish validation to prevent chunk loss
+     * If polished version is significantly shorter or missing ending, falls back to pre-polish draft
      */
     private polishScene;
+    /**
+     * Validate polish output to prevent chunk loss
+     * Returns true if polish is acceptable, false if we should fall back to pre-polish draft
+     */
+    private validatePolishOutput;
     /**
      * Run Archivist to consolidate constraints
      */

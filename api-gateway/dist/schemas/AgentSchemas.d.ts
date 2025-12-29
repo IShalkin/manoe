@@ -425,17 +425,17 @@ export declare const CritiqueSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     approved?: boolean | undefined;
     strengths?: string[] | undefined;
-    issues?: string[] | undefined;
-    score?: number | undefined;
     revision_needed?: boolean | undefined;
     revisionRequests?: string[] | undefined;
+    issues?: string[] | undefined;
+    score?: number | undefined;
 }, {
     approved?: boolean | undefined;
     strengths?: string[] | undefined;
-    issues?: string[] | undefined;
-    score?: number | undefined;
     revision_needed?: boolean | undefined;
     revisionRequests?: string[] | undefined;
+    issues?: string[] | undefined;
+    score?: number | undefined;
 }>;
 /**
  * Originality Report schema (from OriginalityAgent)
