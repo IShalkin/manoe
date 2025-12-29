@@ -127,14 +127,17 @@ export declare class QdrantMemoryService {
     deleteProjectData(projectId: string): Promise<void>;
     /**
      * Convert character to searchable text
+     * Uses stringifyForPrompt to prevent [object Object] bugs when fields are objects
      */
     private characterToText;
     /**
      * Convert worldbuilding element to searchable text
+     * Uses stringifyForPrompt to prevent [object Object] bugs when fields are objects
      */
     private worldbuildingToText;
     /**
      * Convert scene to searchable text
+     * Uses stringifyForPrompt to prevent [object Object] bugs when fields are objects
      */
     private sceneToText;
     /**

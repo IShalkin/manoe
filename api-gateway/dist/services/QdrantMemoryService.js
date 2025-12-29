@@ -25,6 +25,7 @@ const js_client_rest_1 = require("@qdrant/js-client-rest");
 const openai_1 = __importDefault(require("openai"));
 const generative_ai_1 = require("@google/generative-ai");
 const uuid_1 = require("uuid");
+const schemaNormalizers_1 = require("../utils/schemaNormalizers");
 /**
  * Embedding provider types
  */
@@ -344,57 +345,64 @@ let QdrantMemoryService = class QdrantMemoryService {
     }
     /**
      * Convert character to searchable text
+     * Uses stringifyForPrompt to prevent [object Object] bugs when fields are objects
      */
     characterToText(character) {
         const parts = [];
         if (character.name)
-            parts.push(`Name: ${character.name}`);
+            parts.push(`Name: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.name)}`);
         if (character.archetype)
-            parts.push(`Archetype: ${character.archetype}`);
+            parts.push(`Archetype: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.archetype)}`);
         if (character.role)
-            parts.push(`Role: ${character.role}`);
+            parts.push(`Role: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.role)}`);
         if (character.coreMotivation)
-            parts.push(`Motivation: ${character.coreMotivation}`);
+            parts.push(`Motivation: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.coreMotivation)}`);
         if (character.psychologicalWound)
-            parts.push(`Wound: ${character.psychologicalWound}`);
+            parts.push(`Wound: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.psychologicalWound)}`);
         if (character.innerTrap)
-            parts.push(`Inner Trap: ${character.innerTrap}`);
+            parts.push(`Inner Trap: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.innerTrap)}`);
         if (character.backstory)
-            parts.push(`Backstory: ${character.backstory}`);
+            parts.push(`Backstory: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.backstory)}`);
         if (character.visualSignature)
-            parts.push(`Visual: ${character.visualSignature}`);
+            parts.push(`Visual: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.visualSignature)}`);
+        if (character.voiceProfile)
+            parts.push(`Voice: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.voiceProfile)}`);
+        if (character.relationships)
+            parts.push(`Relationships: ${(0, schemaNormalizers_1.stringifyForPrompt)(character.relationships)}`);
         return parts.join(". ");
     }
     /**
      * Convert worldbuilding element to searchable text
+     * Uses stringifyForPrompt to prevent [object Object] bugs when fields are objects
      */
     worldbuildingToText(elementType, element) {
         const parts = [`Type: ${elementType}`];
         if (element.name)
-            parts.push(`Name: ${element.name}`);
+            parts.push(`Name: ${(0, schemaNormalizers_1.stringifyForPrompt)(element.name)}`);
         if (element.description)
-            parts.push(`Description: ${element.description}`);
+            parts.push(`Description: ${(0, schemaNormalizers_1.stringifyForPrompt)(element.description)}`);
         if (element.location)
-            parts.push(`Location: ${element.location}`);
+            parts.push(`Location: ${(0, schemaNormalizers_1.stringifyForPrompt)(element.location)}`);
         if (element.significance)
-            parts.push(`Significance: ${element.significance}`);
+            parts.push(`Significance: ${(0, schemaNormalizers_1.stringifyForPrompt)(element.significance)}`);
         return parts.join(". ");
     }
     /**
      * Convert scene to searchable text
+     * Uses stringifyForPrompt to prevent [object Object] bugs when fields are objects
      */
     sceneToText(scene) {
         const parts = [];
         if (scene.sceneNumber)
             parts.push(`Scene ${scene.sceneNumber}`);
         if (scene.title)
-            parts.push(`Title: ${scene.title}`);
+            parts.push(`Title: ${(0, schemaNormalizers_1.stringifyForPrompt)(scene.title)}`);
         if (scene.setting)
-            parts.push(`Setting: ${scene.setting}`);
+            parts.push(`Setting: ${(0, schemaNormalizers_1.stringifyForPrompt)(scene.setting)}`);
         if (scene.summary)
-            parts.push(`Summary: ${scene.summary}`);
+            parts.push(`Summary: ${(0, schemaNormalizers_1.stringifyForPrompt)(scene.summary)}`);
         if (scene.content) {
-            const content = String(scene.content);
+            const content = (0, schemaNormalizers_1.stringifyForPrompt)(scene.content);
             parts.push(`Content: ${content.substring(0, 500)}`);
         }
         return parts.join(". ");
