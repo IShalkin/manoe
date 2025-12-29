@@ -426,12 +426,18 @@ export class SupabaseService {
     projectId: string;
     artifactType: string;
     content: unknown;
+    phase?: string;
   }): Promise<void> {
     const client = this.getClient();
+    
+    // Derive phase from artifact type if not provided
+    const phase = params.phase || this.derivePhaseFromArtifactType(params.artifactType);
+    
     const { error } = await client.from("run_artifacts").upsert({
       run_id: params.runId,
       project_id: params.projectId,
       artifact_type: params.artifactType,
+      phase: phase,
       content: params.content,
       created_at: new Date().toISOString(),
     });
@@ -439,6 +445,23 @@ export class SupabaseService {
     if (error) {
       throw new Error(`Failed to save run artifact: ${error.message}`);
     }
+  }
+  
+  /**
+   * Derive phase from artifact type
+   */
+  private derivePhaseFromArtifactType(artifactType: string): string {
+    if (artifactType === "narrative") return "genesis";
+    if (artifactType === "characters") return "characters";
+    if (artifactType === "worldbuilding") return "worldbuilding";
+    if (artifactType === "outline") return "outlining";
+    if (artifactType === "advanced_plan") return "advanced_planning";
+    if (artifactType.startsWith("draft_scene_")) return "drafting";
+    if (artifactType.startsWith("critique_scene_")) return "drafting";
+    if (artifactType.startsWith("revision_scene_")) return "drafting";
+    if (artifactType.startsWith("final_scene_")) return "polish";
+    if (artifactType === "run_state_snapshot") return "snapshot";
+    return "unknown";
   }
 
   /**
