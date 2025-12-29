@@ -1271,7 +1271,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
    * Call this on service startup to recover any runs that were
    * interrupted by a shutdown/restart.
    * 
-   * @param projectId - Optional: only restore runs for a specific project
+   * @param runId - Optional: restore a specific run by ID
    * @returns Number of runs restored
    */
   async restoreFromShutdown(runId?: string): Promise<number> {
@@ -1332,6 +1332,84 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
       }
     } catch (error) {
       console.error("Orchestrator: Error restoring runs:", error);
+      return 0;
+    }
+  }
+
+  /**
+   * Restore ALL interrupted runs from saved state after restart
+   * 
+   * Call this on service startup to recover any runs that were
+   * interrupted by a shutdown/restart.
+   * 
+   * @returns Number of runs restored
+   */
+  async restoreAllInterruptedRuns(): Promise<number> {
+    console.log("Orchestrator: Checking for ALL interrupted runs to restore...");
+
+    try {
+      // Get all interrupted run snapshots from Supabase
+      const snapshots = await this.supabase.getInterruptedRunSnapshots();
+
+      if (snapshots.length === 0) {
+        console.log("Orchestrator: No interrupted runs found to restore");
+        return 0;
+      }
+
+      console.log(`Orchestrator: Found ${snapshots.length} interrupted runs to restore`);
+
+      let restoredCount = 0;
+      for (const snapshot of snapshots) {
+        try {
+          const savedState = snapshot.content as Record<string, unknown>;
+          
+          // Check if this run is already active (shouldn't happen, but safety check)
+          if (this.activeRuns.has(snapshot.run_id)) {
+            console.log(`Orchestrator: Run ${snapshot.run_id} already active, skipping`);
+            continue;
+          }
+
+          // Deserialize the state (restore Maps from serialized objects)
+          const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
+          const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
+          const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
+
+          const state: GenerationState = {
+            ...(savedState as unknown as GenerationState),
+            runId: snapshot.run_id,
+            projectId: snapshot.project_id,
+            drafts: new Map(
+              Object.entries(draftsObj).map(([k, v]) => [parseInt(k, 10), v])
+            ),
+            critiques: new Map(
+              Object.entries(critiquesObj).map(([k, v]) => [parseInt(k, 10), v])
+            ),
+            revisionCount: new Map(
+              Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
+            ),
+            isPaused: true, // Keep paused until explicitly resumed
+          };
+
+          this.activeRuns.set(state.runId, state);
+
+          // Notify clients that the run is restored
+          await this.publishEvent(state.runId, "run_restored", {
+            message: "Generation restored after server restart. Call resume to continue.",
+            phase: state.phase,
+            currentScene: state.currentScene,
+          });
+
+          console.log(`Orchestrator: Restored run ${state.runId} (phase: ${state.phase}, scene: ${state.currentScene})`);
+          restoredCount++;
+        } catch (error) {
+          console.error(`Orchestrator: Failed to restore run ${snapshot.run_id}:`, error);
+        }
+      }
+
+      console.log(`Orchestrator: Successfully restored ${restoredCount}/${snapshots.length} interrupted runs`);
+      return restoredCount;
+    } catch (error) {
+      console.error("Orchestrator: Error restoring interrupted runs:", error);
       return 0;
     }
   }

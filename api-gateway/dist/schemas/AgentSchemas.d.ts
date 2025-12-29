@@ -95,112 +95,145 @@ export declare const NarrativeSchema: z.ZodObject<{
 }>;
 /**
  * Character schema (from ProfilerAgent - Characters phase)
+ * Made flexible to handle various LLM output formats
  */
 export declare const CharacterSchema: z.ZodObject<{
     name: z.ZodString;
-    role: z.ZodEnum<["protagonist", "antagonist", "supporting"]>;
+    role: z.ZodUnion<[z.ZodPipeline<z.ZodEffects<z.ZodString, string, string>, z.ZodEnum<["protagonist", "antagonist", "supporting"]>>, z.ZodString]>;
     archetype: z.ZodOptional<z.ZodString>;
-    motivation: z.ZodString;
+    motivation: z.ZodOptional<z.ZodString>;
     psychology: z.ZodOptional<z.ZodObject<{
         wound: z.ZodOptional<z.ZodString>;
         innerTrap: z.ZodOptional<z.ZodString>;
         arc: z.ZodOptional<z.ZodString>;
-    }, "strip", z.ZodTypeAny, {
-        innerTrap?: string | undefined;
-        arc?: string | undefined;
-        wound?: string | undefined;
-    }, {
-        innerTrap?: string | undefined;
-        arc?: string | undefined;
-        wound?: string | undefined;
-    }>>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">>>;
     backstory: z.ZodOptional<z.ZodString>;
     visual: z.ZodOptional<z.ZodString>;
     voice: z.ZodOptional<z.ZodString>;
-    relationships: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
-}, "strip", z.ZodTypeAny, {
-    name: string;
-    role: "protagonist" | "antagonist" | "supporting";
-    motivation: string;
-    archetype?: string | undefined;
-    backstory?: string | undefined;
-    psychology?: {
-        innerTrap?: string | undefined;
-        arc?: string | undefined;
-        wound?: string | undefined;
-    } | undefined;
-    visual?: string | undefined;
-    voice?: string | undefined;
-    relationships?: string[] | undefined;
-}, {
-    name: string;
-    role: "protagonist" | "antagonist" | "supporting";
-    motivation: string;
-    archetype?: string | undefined;
-    backstory?: string | undefined;
-    psychology?: {
-        innerTrap?: string | undefined;
-        arc?: string | undefined;
-        wound?: string | undefined;
-    } | undefined;
-    visual?: string | undefined;
-    voice?: string | undefined;
-    relationships?: string[] | undefined;
-}>;
+    relationships: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+}, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+    name: z.ZodString;
+    role: z.ZodUnion<[z.ZodPipeline<z.ZodEffects<z.ZodString, string, string>, z.ZodEnum<["protagonist", "antagonist", "supporting"]>>, z.ZodString]>;
+    archetype: z.ZodOptional<z.ZodString>;
+    motivation: z.ZodOptional<z.ZodString>;
+    psychology: z.ZodOptional<z.ZodObject<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">>>;
+    backstory: z.ZodOptional<z.ZodString>;
+    visual: z.ZodOptional<z.ZodString>;
+    voice: z.ZodOptional<z.ZodString>;
+    relationships: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+}, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+    name: z.ZodString;
+    role: z.ZodUnion<[z.ZodPipeline<z.ZodEffects<z.ZodString, string, string>, z.ZodEnum<["protagonist", "antagonist", "supporting"]>>, z.ZodString]>;
+    archetype: z.ZodOptional<z.ZodString>;
+    motivation: z.ZodOptional<z.ZodString>;
+    psychology: z.ZodOptional<z.ZodObject<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">>>;
+    backstory: z.ZodOptional<z.ZodString>;
+    visual: z.ZodOptional<z.ZodString>;
+    voice: z.ZodOptional<z.ZodString>;
+    relationships: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+}, z.ZodTypeAny, "passthrough">>;
 /**
  * Characters array schema
  */
 export declare const CharactersArraySchema: z.ZodArray<z.ZodObject<{
     name: z.ZodString;
-    role: z.ZodEnum<["protagonist", "antagonist", "supporting"]>;
+    role: z.ZodUnion<[z.ZodPipeline<z.ZodEffects<z.ZodString, string, string>, z.ZodEnum<["protagonist", "antagonist", "supporting"]>>, z.ZodString]>;
     archetype: z.ZodOptional<z.ZodString>;
-    motivation: z.ZodString;
+    motivation: z.ZodOptional<z.ZodString>;
     psychology: z.ZodOptional<z.ZodObject<{
         wound: z.ZodOptional<z.ZodString>;
         innerTrap: z.ZodOptional<z.ZodString>;
         arc: z.ZodOptional<z.ZodString>;
-    }, "strip", z.ZodTypeAny, {
-        innerTrap?: string | undefined;
-        arc?: string | undefined;
-        wound?: string | undefined;
-    }, {
-        innerTrap?: string | undefined;
-        arc?: string | undefined;
-        wound?: string | undefined;
-    }>>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">>>;
     backstory: z.ZodOptional<z.ZodString>;
     visual: z.ZodOptional<z.ZodString>;
     voice: z.ZodOptional<z.ZodString>;
-    relationships: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
-}, "strip", z.ZodTypeAny, {
-    name: string;
-    role: "protagonist" | "antagonist" | "supporting";
-    motivation: string;
-    archetype?: string | undefined;
-    backstory?: string | undefined;
-    psychology?: {
-        innerTrap?: string | undefined;
-        arc?: string | undefined;
-        wound?: string | undefined;
-    } | undefined;
-    visual?: string | undefined;
-    voice?: string | undefined;
-    relationships?: string[] | undefined;
-}, {
-    name: string;
-    role: "protagonist" | "antagonist" | "supporting";
-    motivation: string;
-    archetype?: string | undefined;
-    backstory?: string | undefined;
-    psychology?: {
-        innerTrap?: string | undefined;
-        arc?: string | undefined;
-        wound?: string | undefined;
-    } | undefined;
-    visual?: string | undefined;
-    voice?: string | undefined;
-    relationships?: string[] | undefined;
-}>, "many">;
+    relationships: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+}, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+    name: z.ZodString;
+    role: z.ZodUnion<[z.ZodPipeline<z.ZodEffects<z.ZodString, string, string>, z.ZodEnum<["protagonist", "antagonist", "supporting"]>>, z.ZodString]>;
+    archetype: z.ZodOptional<z.ZodString>;
+    motivation: z.ZodOptional<z.ZodString>;
+    psychology: z.ZodOptional<z.ZodObject<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">>>;
+    backstory: z.ZodOptional<z.ZodString>;
+    visual: z.ZodOptional<z.ZodString>;
+    voice: z.ZodOptional<z.ZodString>;
+    relationships: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+}, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+    name: z.ZodString;
+    role: z.ZodUnion<[z.ZodPipeline<z.ZodEffects<z.ZodString, string, string>, z.ZodEnum<["protagonist", "antagonist", "supporting"]>>, z.ZodString]>;
+    archetype: z.ZodOptional<z.ZodString>;
+    motivation: z.ZodOptional<z.ZodString>;
+    psychology: z.ZodOptional<z.ZodObject<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        wound: z.ZodOptional<z.ZodString>;
+        innerTrap: z.ZodOptional<z.ZodString>;
+        arc: z.ZodOptional<z.ZodString>;
+    }, z.ZodTypeAny, "passthrough">>>;
+    backstory: z.ZodOptional<z.ZodString>;
+    visual: z.ZodOptional<z.ZodString>;
+    voice: z.ZodOptional<z.ZodString>;
+    relationships: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+}, z.ZodTypeAny, "passthrough">>, "many">;
 /**
  * Worldbuilding schema (from WorldbuilderAgent)
  */

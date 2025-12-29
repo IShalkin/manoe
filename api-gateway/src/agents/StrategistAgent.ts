@@ -55,14 +55,22 @@ export class StrategistAgent extends BaseAgent {
     
     if (phase === GenerationPhase.OUTLINING) {
       const validated = this.validateOutput(parsed, OutlineSchema, runId);
+      // Emit the actual generated content for the frontend to display
+      await this.emitMessage(runId, validated as Record<string, unknown>, phase);
+      await this.emitThought(runId, "Outline complete. Ready for advanced planning.", "neutral", AgentType.ARCHITECT);
       return { content: validated as Record<string, unknown> };
     }
     
     if (phase === GenerationPhase.ADVANCED_PLANNING) {
       const validated = this.validateOutput(parsed, AdvancedPlanSchema, runId);
+      // Emit the actual generated content for the frontend to display
+      await this.emitMessage(runId, validated as Record<string, unknown>, phase);
+      await this.emitThought(runId, "Advanced planning complete. Ready for drafting.", "excited", AgentType.WRITER);
       return { content: validated as Record<string, unknown> };
     }
 
+    // Emit the actual generated content for the frontend to display
+    await this.emitMessage(runId, parsed as Record<string, unknown>, phase);
     return { content: parsed as Record<string, unknown> };
   }
 

@@ -107,6 +107,19 @@ export declare class SupabaseService {
      * Get a specific research result by ID
      */
     getResearchResult(id: string): Promise<unknown | null>;
+    /**
+     * Get all interrupted run state snapshots for recovery after restart
+     * Returns runs that were saved during graceful shutdown and haven't been completed
+     */
+    getInterruptedRunSnapshots(): Promise<Array<{
+        run_id: string;
+        project_id: string;
+        content: unknown;
+    }>>;
+    /**
+     * Delete a run state snapshot after successful restoration or completion
+     */
+    deleteRunStateSnapshot(runId: string): Promise<void>;
 }
 export {};
 //# sourceMappingURL=SupabaseService.d.ts.map

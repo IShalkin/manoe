@@ -49,6 +49,16 @@ export class ArchivistAgent extends BaseAgent {
     // Extract key constraints from response
     const constraints = this.extractConstraints(validated as Record<string, unknown>, state.currentScene);
 
+    // Emit thought for Cinematic UI
+    await this.emitThought(runId, "Processing continuity constraints and resolving conflicts...", "neutral");
+    
+    // Emit the actual generated content for the frontend to display
+    await this.emitMessage(runId, validated as Record<string, unknown>, GenerationPhase.DRAFTING);
+    
+    if (constraints.length > 0) {
+      await this.emitThought(runId, `Updated ${constraints.length} key constraints.`, "neutral");
+    }
+
     return {
       content: validated as Record<string, unknown>,
       rawFacts: constraints.map(c => ({

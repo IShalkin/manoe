@@ -147,7 +147,8 @@ export class QdrantMemoryService {
   }
 
   /**
-   * Ensure all required collections exist
+   * Ensure all required collections exist with correct dimensions
+   * If a collection exists with wrong dimensions, recreate it
    */
   private async ensureCollections(): Promise<void> {
     if (!this.client) return;
@@ -160,7 +161,38 @@ export class QdrantMemoryService {
 
     for (const collectionName of collections) {
       try {
-        await this.client.getCollection(collectionName);
+        const collectionInfo = await this.client.getCollection(collectionName);
+        
+        // Check if the collection has the correct dimension
+        // The vectors config can be either a single config or named vectors
+        const vectorsConfig = collectionInfo.config?.params?.vectors;
+        let existingDimension: number | undefined;
+        
+        if (vectorsConfig && typeof vectorsConfig === "object") {
+          if ("size" in vectorsConfig) {
+            // Single vector config
+            existingDimension = vectorsConfig.size as number;
+          }
+        }
+        
+        if (existingDimension && existingDimension !== this.embeddingDimension) {
+          console.log(
+            `Qdrant collection ${collectionName} has dimension ${existingDimension}, ` +
+            `but current embedding provider uses ${this.embeddingDimension}. Recreating collection...`
+          );
+          
+          // Delete and recreate the collection with correct dimensions
+          await this.client.deleteCollection(collectionName);
+          await this.client.createCollection(collectionName, {
+            vectors: {
+              size: this.embeddingDimension,
+              distance: "Cosine",
+            },
+          });
+          console.log(`Recreated Qdrant collection: ${collectionName} with ${this.embeddingDimension} dimensions`);
+        } else {
+          console.log(`Qdrant collection ${collectionName} exists with correct dimensions (${this.embeddingDimension})`);
+        }
       } catch (error) {
         // Collection doesn't exist, create it
         await this.client.createCollection(collectionName, {
@@ -169,7 +201,7 @@ export class QdrantMemoryService {
             distance: "Cosine",
           },
         });
-        console.log(`Created Qdrant collection: ${collectionName}`);
+        console.log(`Created Qdrant collection: ${collectionName} with ${this.embeddingDimension} dimensions`);
       }
     }
   }

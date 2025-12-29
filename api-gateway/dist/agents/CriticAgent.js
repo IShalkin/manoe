@@ -32,12 +32,19 @@ class CriticAgent extends BaseAgent_1.BaseAgent {
         const validated = this.validateOutput(parsed, AgentSchemas_1.CritiqueSchema, runId);
         // Determine if revision is needed
         const revisionNeeded = this.isRevisionNeeded(validated);
-        return {
-            content: {
-                ...validated,
-                revision_needed: revisionNeeded,
-            },
+        // Emit the actual generated content for the frontend to display
+        const content = {
+            ...validated,
+            revision_needed: revisionNeeded,
         };
+        await this.emitMessage(runId, content, phase);
+        if (revisionNeeded) {
+            await this.emitThought(runId, "Revision needed. Sending feedback to Writer.", "concerned", AgentModels_1.AgentType.WRITER);
+        }
+        else {
+            await this.emitThought(runId, "Scene approved! Moving forward.", "agree");
+        }
+        return { content };
     }
     /**
      * Determine if revision is needed based on critique

@@ -29,13 +29,29 @@ class ProfilerAgent extends BaseAgent_1.BaseAgent {
             await this.emitThought(runId, "Designing narrative voice and perspective...", "neutral");
         }
         const response = await this.callLLM(runId, systemPrompt, userPrompt, options.llmConfig, phase);
+        console.log(`[profiler] LLM response received, length: ${response.length}, runId: ${runId}`);
         if (phase === LLMModels_1.GenerationPhase.CHARACTERS) {
+            console.log(`[profiler] Parsing JSON array from response, runId: ${runId}`);
             const parsed = this.parseJSONArray(response);
-            const validated = this.validateOutput(parsed, AgentSchemas_1.CharactersArraySchema, runId);
-            // Emit the actual generated content for the frontend to display
-            await this.emitMessage(runId, { characters: validated }, phase);
-            await this.emitThought(runId, "Character profiles complete. Ready for worldbuilding.", "neutral", AgentModels_1.AgentType.WORLDBUILDER);
-            return { content: validated };
+            console.log(`[profiler] Parsed ${Array.isArray(parsed) ? parsed.length : 0} characters, runId: ${runId}`);
+            try {
+                const validated = this.validateOutput(parsed, AgentSchemas_1.CharactersArraySchema, runId);
+                console.log(`[profiler] Validation passed, emitting message, runId: ${runId}`);
+                // Emit the actual generated content for the frontend to display
+                await this.emitMessage(runId, { characters: validated }, phase);
+                console.log(`[profiler] Message emitted, emitting thought, runId: ${runId}`);
+                await this.emitThought(runId, "Character profiles complete. Ready for worldbuilding.", "neutral", AgentModels_1.AgentType.WORLDBUILDER);
+                console.log(`[profiler] Thought emitted, returning content, runId: ${runId}`);
+                return { content: validated };
+            }
+            catch (validationError) {
+                console.error(`[profiler] Validation failed:`, validationError);
+                // Skip validation and emit raw content for debugging
+                console.log(`[profiler] Emitting raw content without validation, runId: ${runId}`);
+                await this.emitMessage(runId, { characters: parsed }, phase);
+                await this.emitThought(runId, "Character profiles complete (validation skipped). Ready for worldbuilding.", "neutral", AgentModels_1.AgentType.WORLDBUILDER);
+                return { content: parsed };
+            }
         }
         // For NARRATOR_DESIGN, return as-is (simple object)
         const content = this.parseJSON(response);

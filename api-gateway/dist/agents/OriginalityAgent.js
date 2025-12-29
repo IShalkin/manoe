@@ -20,9 +20,24 @@ class OriginalityAgent extends BaseAgent_1.BaseAgent {
         const { runId, state } = context;
         const systemPrompt = await this.getSystemPrompt(context, options);
         const userPrompt = this.buildUserPrompt(context, options);
+        // Emit thought for Cinematic UI
+        await this.emitThought(runId, "Checking for cliches and ensuring narrative uniqueness...", "neutral");
         const response = await this.callLLM(runId, systemPrompt, userPrompt, options.llmConfig, LLMModels_1.GenerationPhase.ORIGINALITY_CHECK);
         const parsed = this.parseJSON(response);
         const validated = this.validateOutput(parsed, AgentSchemas_1.OriginalityReportSchema, runId);
+        // Emit the actual generated content for the frontend to display
+        await this.emitMessage(runId, validated, LLMModels_1.GenerationPhase.ORIGINALITY_CHECK);
+        const originalityScore = validated.originality_score ?? 0;
+        const clichesFound = validated.cliches_found ?? [];
+        if (originalityScore >= 8) {
+            await this.emitThought(runId, "Highly original content! No major cliches detected.", "excited");
+        }
+        else if (clichesFound.length > 0) {
+            await this.emitThought(runId, `Found ${clichesFound.length} cliches. Consider revisions.`, "concerned");
+        }
+        else {
+            await this.emitThought(runId, "Originality check complete.", "neutral");
+        }
         return { content: validated };
     }
     async getSystemPrompt(context, options) {

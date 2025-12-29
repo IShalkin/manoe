@@ -20,9 +20,23 @@ class ImpactAgent extends BaseAgent_1.BaseAgent {
         const { runId, state } = context;
         const systemPrompt = await this.getSystemPrompt(context, options);
         const userPrompt = this.buildUserPrompt(context, options);
+        // Emit thought for Cinematic UI
+        await this.emitThought(runId, "Evaluating emotional resonance and reader engagement...", "neutral");
         const response = await this.callLLM(runId, systemPrompt, userPrompt, options.llmConfig, LLMModels_1.GenerationPhase.IMPACT_ASSESSMENT);
         const parsed = this.parseJSON(response);
         const validated = this.validateOutput(parsed, AgentSchemas_1.ImpactReportSchema, runId);
+        // Emit the actual generated content for the frontend to display
+        await this.emitMessage(runId, validated, LLMModels_1.GenerationPhase.IMPACT_ASSESSMENT);
+        const impactScore = validated.impact_score ?? 0;
+        if (impactScore >= 8) {
+            await this.emitThought(runId, "High emotional impact achieved!", "excited");
+        }
+        else if (impactScore >= 5) {
+            await this.emitThought(runId, "Moderate impact. Room for improvement.", "neutral");
+        }
+        else {
+            await this.emitThought(runId, "Low impact detected. Revision recommended.", "concerned");
+        }
         return { content: validated };
     }
     async getSystemPrompt(context, options) {

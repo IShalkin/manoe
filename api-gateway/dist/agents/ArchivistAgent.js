@@ -26,6 +26,13 @@ class ArchivistAgent extends BaseAgent_1.BaseAgent {
         const validated = this.validateOutput(parsed, AgentSchemas_1.ArchivistOutputSchema, runId);
         // Extract key constraints from response
         const constraints = this.extractConstraints(validated, state.currentScene);
+        // Emit thought for Cinematic UI
+        await this.emitThought(runId, "Processing continuity constraints and resolving conflicts...", "neutral");
+        // Emit the actual generated content for the frontend to display
+        await this.emitMessage(runId, validated, LLMModels_1.GenerationPhase.DRAFTING);
+        if (constraints.length > 0) {
+            await this.emitThought(runId, `Updated ${constraints.length} key constraints.`, "neutral");
+        }
         return {
             content: validated,
             rawFacts: constraints.map(c => ({

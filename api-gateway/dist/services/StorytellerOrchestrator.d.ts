@@ -220,10 +220,19 @@ export declare class StorytellerOrchestrator {
      * Call this on service startup to recover any runs that were
      * interrupted by a shutdown/restart.
      *
-     * @param projectId - Optional: only restore runs for a specific project
+     * @param runId - Optional: restore a specific run by ID
      * @returns Number of runs restored
      */
     restoreFromShutdown(runId?: string): Promise<number>;
+    /**
+     * Restore ALL interrupted runs from saved state after restart
+     *
+     * Call this on service startup to recover any runs that were
+     * interrupted by a shutdown/restart.
+     *
+     * @returns Number of runs restored
+     */
+    restoreAllInterruptedRuns(): Promise<number>;
     /**
      * Check if shutdown is in progress
      */
