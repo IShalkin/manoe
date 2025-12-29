@@ -25,6 +25,9 @@ class WorldbuilderAgent extends BaseAgent_1.BaseAgent {
         const response = await this.callLLM(runId, systemPrompt, userPrompt, options.llmConfig, LLMModels_1.GenerationPhase.WORLDBUILDING);
         const parsed = this.parseJSON(response);
         const validated = this.validateOutput(parsed, AgentSchemas_1.WorldbuildingSchema, runId);
+        // Emit the actual generated content for the frontend to display
+        await this.emitMessage(runId, validated, LLMModels_1.GenerationPhase.WORLDBUILDING);
+        await this.emitThought(runId, "World established. Ready for outlining.", "neutral", AgentModels_1.AgentType.STRATEGIST);
         return { content: validated };
     }
     async getSystemPrompt(context, options) {

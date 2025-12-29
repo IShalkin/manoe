@@ -70,17 +70,59 @@ const StateController_1 = require("./controllers/StateController");
 const TracesController_1 = require("./controllers/TracesController");
 const ResearchController_1 = require("./controllers/ResearchController");
 const DynamicModelsController_1 = require("./controllers/DynamicModelsController");
+// Import services for state recovery
+const StorytellerOrchestrator_1 = require("./services/StorytellerOrchestrator");
 const rootDir = __dirname;
 let Server = class Server {
     app;
+    orchestrator;
     settings;
     $beforeRoutesInit() {
         // CORS is now handled entirely by the cors() middleware in the middlewares array
         // This prevents duplicate CORS headers which cause browser errors
         // See: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS/Errors/CORSMultipleAllowOriginNotAllowed
     }
-    $afterRoutesInit() {
-        // Add any post-route initialization here
+    async $afterRoutesInit() {
+        // Restore any interrupted runs from previous shutdown
+        // This ensures active generation runs survive container restarts
+        console.log("Server: Initializing state recovery...");
+        try {
+            const restoredCount = await this.orchestrator.restoreAllInterruptedRuns();
+            if (restoredCount > 0) {
+                console.log(`Server: Restored ${restoredCount} interrupted generation runs`);
+            }
+            else {
+                console.log("Server: No interrupted runs to restore");
+            }
+        }
+        catch (error) {
+            console.error("Server: Failed to restore interrupted runs:", error);
+            // Don't fail startup if recovery fails - just log the error
+        }
+        // Register graceful shutdown handler
+        this.registerShutdownHandler();
+    }
+    /**
+     * Register handler for graceful shutdown
+     * Saves active run states to Supabase before process exit
+     */
+    registerShutdownHandler() {
+        const shutdown = async (signal) => {
+            console.log(`Server: Received ${signal}, initiating graceful shutdown...`);
+            try {
+                const savedCount = await this.orchestrator.gracefulShutdown(30000);
+                console.log(`Server: Graceful shutdown complete. Saved ${savedCount} runs.`);
+                process.exit(0);
+            }
+            catch (error) {
+                console.error("Server: Error during graceful shutdown:", error);
+                process.exit(1);
+            }
+        };
+        // Handle various shutdown signals
+        process.on("SIGTERM", () => shutdown("SIGTERM"));
+        process.on("SIGINT", () => shutdown("SIGINT"));
+        console.log("Server: Graceful shutdown handler registered");
     }
 };
 exports.Server = Server;
@@ -88,6 +130,10 @@ __decorate([
     (0, di_1.Inject)(),
     __metadata("design:type", common_1.PlatformApplication)
 ], Server.prototype, "app", void 0);
+__decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", StorytellerOrchestrator_1.StorytellerOrchestrator)
+], Server.prototype, "orchestrator", void 0);
 __decorate([
     (0, di_1.Configuration)(),
     __metadata("design:type", Object)

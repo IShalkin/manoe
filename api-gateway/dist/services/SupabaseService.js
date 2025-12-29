@@ -405,6 +405,40 @@ let SupabaseService = class SupabaseService {
         }
         return data;
     }
+    // ========================================================================
+    // State Recovery Operations
+    // ========================================================================
+    /**
+     * Get all interrupted run state snapshots for recovery after restart
+     * Returns runs that were saved during graceful shutdown and haven't been completed
+     */
+    async getInterruptedRunSnapshots() {
+        const client = this.getClient();
+        const { data, error } = await client
+            .from("run_artifacts")
+            .select("run_id, project_id, content")
+            .eq("artifact_type", "run_state_snapshot")
+            .order("created_at", { ascending: false });
+        if (error) {
+            console.error(`Failed to get interrupted run snapshots: ${error.message}`);
+            return [];
+        }
+        return data || [];
+    }
+    /**
+     * Delete a run state snapshot after successful restoration or completion
+     */
+    async deleteRunStateSnapshot(runId) {
+        const client = this.getClient();
+        const { error } = await client
+            .from("run_artifacts")
+            .delete()
+            .eq("run_id", runId)
+            .eq("artifact_type", "run_state_snapshot");
+        if (error) {
+            console.error(`Failed to delete run state snapshot: ${error.message}`);
+        }
+    }
 };
 exports.SupabaseService = SupabaseService;
 exports.SupabaseService = SupabaseService = __decorate([

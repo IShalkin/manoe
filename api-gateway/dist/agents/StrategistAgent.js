@@ -32,12 +32,20 @@ class StrategistAgent extends BaseAgent_1.BaseAgent {
         const parsed = this.parseJSON(response);
         if (phase === LLMModels_1.GenerationPhase.OUTLINING) {
             const validated = this.validateOutput(parsed, AgentSchemas_1.OutlineSchema, runId);
+            // Emit the actual generated content for the frontend to display
+            await this.emitMessage(runId, validated, phase);
+            await this.emitThought(runId, "Outline complete. Ready for advanced planning.", "neutral", AgentModels_1.AgentType.ARCHITECT);
             return { content: validated };
         }
         if (phase === LLMModels_1.GenerationPhase.ADVANCED_PLANNING) {
             const validated = this.validateOutput(parsed, AgentSchemas_1.AdvancedPlanSchema, runId);
+            // Emit the actual generated content for the frontend to display
+            await this.emitMessage(runId, validated, phase);
+            await this.emitThought(runId, "Advanced planning complete. Ready for drafting.", "excited", AgentModels_1.AgentType.WRITER);
             return { content: validated };
         }
+        // Emit the actual generated content for the frontend to display
+        await this.emitMessage(runId, parsed, phase);
         return { content: parsed };
     }
     async getSystemPrompt(context, options) {

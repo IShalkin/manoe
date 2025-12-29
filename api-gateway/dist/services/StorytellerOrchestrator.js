@@ -194,27 +194,49 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
      * Characters Phase - Character creation
      */
     async runCharactersPhase(runId, options) {
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase called, runId: ${runId}`);
         const state = this.activeRuns.get(runId);
-        if (!state || !state.narrative)
+        if (!state || !state.narrative) {
+            common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: state or narrative not found, returning, runId: ${runId}`);
             return;
+        }
         state.phase = LLMModels_1.GenerationPhase.CHARACTERS;
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: phase set to CHARACTERS, runId: ${runId}`);
         await this.publishPhaseStart(runId, LLMModels_1.GenerationPhase.CHARACTERS);
         // Use ProfilerAgent through AgentFactory
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: getting ProfilerAgent from factory, runId: ${runId}`);
         const agent = this.agentFactory.getAgent(AgentModels_1.AgentType.PROFILER);
         const context = {
             runId,
             state,
             projectId: options.projectId,
         };
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: calling agent.execute, runId: ${runId}`);
         const output = await agent.execute(context, options);
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: agent.execute completed, output.content type: ${typeof output.content}, isArray: ${Array.isArray(output.content)}, runId: ${runId}`);
         state.characters = output.content;
         state.updatedAt = new Date().toISOString();
         // Store characters in Qdrant for semantic search
-        for (const character of state.characters) {
-            await this.qdrantMemory.storeCharacter(options.projectId, character);
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: storing ${state.characters?.length || 0} characters in Qdrant, runId: ${runId}`);
+        try {
+            if (Array.isArray(state.characters)) {
+                for (const character of state.characters) {
+                    common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: storing character in Qdrant, runId: ${runId}`);
+                    await this.qdrantMemory.storeCharacter(options.projectId, character);
+                }
+            }
+            else {
+                common_1.$log.warn(`[StorytellerOrchestrator] runCharactersPhase: state.characters is not an array, skipping Qdrant storage, runId: ${runId}`);
+            }
         }
+        catch (qdrantError) {
+            common_1.$log.error(`[StorytellerOrchestrator] runCharactersPhase: Qdrant storage failed, continuing anyway, runId: ${runId}`, qdrantError);
+        }
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: saving artifact, runId: ${runId}`);
         await this.saveArtifact(runId, options.projectId, "characters", state.characters);
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: publishing phase complete, runId: ${runId}`);
         await this.publishPhaseComplete(runId, LLMModels_1.GenerationPhase.CHARACTERS, state.characters);
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: completed, runId: ${runId}`);
     }
     /**
      * Worldbuilding Phase - Setting and world details
@@ -976,7 +998,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
      * Call this on service startup to recover any runs that were
      * interrupted by a shutdown/restart.
      *
-     * @param projectId - Optional: only restore runs for a specific project
+     * @param runId - Optional: restore a specific run by ID
      * @returns Number of runs restored
      */
     async restoreFromShutdown(runId) {
@@ -1024,6 +1046,68 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         }
         catch (error) {
             console.error("Orchestrator: Error restoring runs:", error);
+            return 0;
+        }
+    }
+    /**
+     * Restore ALL interrupted runs from saved state after restart
+     *
+     * Call this on service startup to recover any runs that were
+     * interrupted by a shutdown/restart.
+     *
+     * @returns Number of runs restored
+     */
+    async restoreAllInterruptedRuns() {
+        console.log("Orchestrator: Checking for ALL interrupted runs to restore...");
+        try {
+            // Get all interrupted run snapshots from Supabase
+            const snapshots = await this.supabase.getInterruptedRunSnapshots();
+            if (snapshots.length === 0) {
+                console.log("Orchestrator: No interrupted runs found to restore");
+                return 0;
+            }
+            console.log(`Orchestrator: Found ${snapshots.length} interrupted runs to restore`);
+            let restoredCount = 0;
+            for (const snapshot of snapshots) {
+                try {
+                    const savedState = snapshot.content;
+                    // Check if this run is already active (shouldn't happen, but safety check)
+                    if (this.activeRuns.has(snapshot.run_id)) {
+                        console.log(`Orchestrator: Run ${snapshot.run_id} already active, skipping`);
+                        continue;
+                    }
+                    // Deserialize the state (restore Maps from serialized objects)
+                    const draftsObj = savedState.drafts || {};
+                    const critiquesObj = savedState.critiques || {};
+                    const revisionObj = savedState.revisionCount || {};
+                    const state = {
+                        ...savedState,
+                        runId: snapshot.run_id,
+                        projectId: snapshot.project_id,
+                        drafts: new Map(Object.entries(draftsObj).map(([k, v]) => [parseInt(k, 10), v])),
+                        critiques: new Map(Object.entries(critiquesObj).map(([k, v]) => [parseInt(k, 10), v])),
+                        revisionCount: new Map(Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])),
+                        isPaused: true, // Keep paused until explicitly resumed
+                    };
+                    this.activeRuns.set(state.runId, state);
+                    // Notify clients that the run is restored
+                    await this.publishEvent(state.runId, "run_restored", {
+                        message: "Generation restored after server restart. Call resume to continue.",
+                        phase: state.phase,
+                        currentScene: state.currentScene,
+                    });
+                    console.log(`Orchestrator: Restored run ${state.runId} (phase: ${state.phase}, scene: ${state.currentScene})`);
+                    restoredCount++;
+                }
+                catch (error) {
+                    console.error(`Orchestrator: Failed to restore run ${snapshot.run_id}:`, error);
+                }
+            }
+            console.log(`Orchestrator: Successfully restored ${restoredCount}/${snapshots.length} interrupted runs`);
+            return restoredCount;
+        }
+        catch (error) {
+            console.error("Orchestrator: Error restoring interrupted runs:", error);
             return 0;
         }
     }

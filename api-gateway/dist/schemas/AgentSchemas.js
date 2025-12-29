@@ -51,22 +51,30 @@ exports.NarrativeSchema = zod_1.z.object({
 });
 /**
  * Character schema (from ProfilerAgent - Characters phase)
+ * Made flexible to handle various LLM output formats
  */
 exports.CharacterSchema = zod_1.z.object({
     name: zod_1.z.string().min(1),
-    role: zod_1.z.enum(["protagonist", "antagonist", "supporting"]),
+    // Accept both lowercase and title case roles
+    role: zod_1.z.string().transform((val) => val.toLowerCase()).pipe(zod_1.z.enum(["protagonist", "antagonist", "supporting"])).or(zod_1.z.string()), // Fallback to any string if transform fails
     archetype: zod_1.z.string().optional(),
-    motivation: zod_1.z.string().min(1),
+    // Make motivation optional since LLM doesn't always return it
+    motivation: zod_1.z.string().optional(),
     psychology: zod_1.z.object({
         wound: zod_1.z.string().optional(),
         innerTrap: zod_1.z.string().optional(),
         arc: zod_1.z.string().optional(),
-    }).optional(),
+    }).passthrough().optional(),
     backstory: zod_1.z.string().optional(),
     visual: zod_1.z.string().optional(),
     voice: zod_1.z.string().optional(),
-    relationships: zod_1.z.array(zod_1.z.string()).optional(),
-});
+    // Accept string, array, or object for relationships (LLM returns various formats)
+    relationships: zod_1.z.union([
+        zod_1.z.string(),
+        zod_1.z.array(zod_1.z.string()),
+        zod_1.z.record(zod_1.z.unknown()),
+    ]).optional(),
+}).passthrough(); // Allow additional fields from LLM
 /**
  * Characters array schema
  */

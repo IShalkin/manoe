@@ -25,6 +25,9 @@ import { TracesController } from "./controllers/TracesController";
 import { ResearchController } from "./controllers/ResearchController";
 import { DynamicModelsController } from "./controllers/DynamicModelsController";
 
+// Import services for state recovery
+import { StorytellerOrchestrator } from "./services/StorytellerOrchestrator";
+
 const rootDir = __dirname;
 
 @Configuration({
@@ -142,6 +145,9 @@ export class Server {
   @Inject()
   protected app: PlatformApplication;
 
+  @Inject()
+  protected orchestrator: StorytellerOrchestrator;
+
   @Configuration()
   protected settings: Configuration;
 
@@ -151,7 +157,47 @@ export class Server {
     // See: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS/Errors/CORSMultipleAllowOriginNotAllowed
   }
 
-  $afterRoutesInit(): void {
-    // Add any post-route initialization here
+  async $afterRoutesInit(): Promise<void> {
+    // Restore any interrupted runs from previous shutdown
+    // This ensures active generation runs survive container restarts
+    console.log("Server: Initializing state recovery...");
+    try {
+      const restoredCount = await this.orchestrator.restoreAllInterruptedRuns();
+      if (restoredCount > 0) {
+        console.log(`Server: Restored ${restoredCount} interrupted generation runs`);
+      } else {
+        console.log("Server: No interrupted runs to restore");
+      }
+    } catch (error) {
+      console.error("Server: Failed to restore interrupted runs:", error);
+      // Don't fail startup if recovery fails - just log the error
+    }
+
+    // Register graceful shutdown handler
+    this.registerShutdownHandler();
+  }
+
+  /**
+   * Register handler for graceful shutdown
+   * Saves active run states to Supabase before process exit
+   */
+  private registerShutdownHandler(): void {
+    const shutdown = async (signal: string) => {
+      console.log(`Server: Received ${signal}, initiating graceful shutdown...`);
+      try {
+        const savedCount = await this.orchestrator.gracefulShutdown(30000);
+        console.log(`Server: Graceful shutdown complete. Saved ${savedCount} runs.`);
+        process.exit(0);
+      } catch (error) {
+        console.error("Server: Error during graceful shutdown:", error);
+        process.exit(1);
+      }
+    };
+
+    // Handle various shutdown signals
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    
+    console.log("Server: Graceful shutdown handler registered");
   }
 }

@@ -85,7 +85,8 @@ export declare class QdrantMemoryService {
      */
     get providerInfo(): EmbeddingProviderInfo;
     /**
-     * Ensure all required collections exist
+     * Ensure all required collections exist with correct dimensions
+     * If a collection exists with wrong dimensions, recreate it
      */
     private ensureCollections;
     /**

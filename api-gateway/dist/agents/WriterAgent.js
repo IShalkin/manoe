@@ -37,14 +37,24 @@ class WriterAgent extends BaseAgent_1.BaseAgent {
             phase === LLMModels_1.GenerationPhase.POLISH) {
             // Apply guardrails
             await this.applyGuardrails(response, state.keyConstraints, runId);
+            // Emit the actual generated content for the frontend to display
+            await this.emitMessage(runId, { content: response, sceneNumber: state.currentScene }, phase);
             // Emit completion thought
             if (phase === LLMModels_1.GenerationPhase.DRAFTING) {
                 await this.emitThought(runId, "Draft complete. Awaiting Critic's feedback.", "neutral", AgentModels_1.AgentType.CRITIC);
+            }
+            else if (phase === LLMModels_1.GenerationPhase.REVISION) {
+                await this.emitThought(runId, "Revision complete. Ready for re-evaluation.", "neutral", AgentModels_1.AgentType.CRITIC);
+            }
+            else if (phase === LLMModels_1.GenerationPhase.POLISH) {
+                await this.emitThought(runId, "Polish complete. Scene finalized.", "excited");
             }
             return { content: response };
         }
         // For other phases, parse as JSON
         const content = this.parseJSON(response);
+        // Emit the actual generated content for the frontend to display
+        await this.emitMessage(runId, content, phase);
         return { content: content };
     }
     /**
