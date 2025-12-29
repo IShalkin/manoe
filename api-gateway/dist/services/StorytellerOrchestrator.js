@@ -34,6 +34,7 @@ const QdrantMemoryService_1 = require("./QdrantMemoryService");
 const LangfuseService_1 = require("./LangfuseService");
 const SupabaseService_1 = require("./SupabaseService");
 const AgentFactory_1 = require("../agents/AgentFactory");
+const schemaNormalizers_1 = require("../utils/schemaNormalizers");
 let StorytellerOrchestrator = class StorytellerOrchestrator {
     activeRuns = new Map();
     pauseCallbacks = new Map();
@@ -391,7 +392,8 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
                 return;
             state.currentScene = sceneNum + 1;
             const scene = scenes[sceneNum];
-            const targetWordCount = Number(scene.wordCount ?? 1500);
+            // Use safeParseWordCount to handle string values like "1,900" and prevent NaN
+            const targetWordCount = (0, schemaNormalizers_1.safeParseWordCount)(scene.wordCount, 1500);
             const minWordCount = Math.floor(targetWordCount * 0.7); // 70% threshold
             // Draft the scene
             await this.draftScene(runId, options, sceneNum + 1, scene);
@@ -407,7 +409,7 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
                 if (actualWordCount >= minWordCount)
                     break;
                 console.log(`[Orchestrator] Scene ${sceneNum + 1} too short (${actualWordCount}/${minWordCount} words), expanding...`);
-                await this.expandScene(runId, options, sceneNum + 1, targetWordCount - actualWordCount);
+                await this.expandScene(runId, options, sceneNum + 1, scene, targetWordCount - actualWordCount);
                 expansionAttempts++;
                 if (this.shouldStop(runId))
                     return;
@@ -445,6 +447,9 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             else {
                 console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions, skipping polish`);
             }
+            // CRITICAL: Clear currentSceneOutline at the end of each scene to prevent state contamination
+            // Without this, Scene 2 would use Scene 1's outline data due to stale state
+            state.currentSceneOutline = undefined;
         }
     }
     /**
@@ -456,6 +461,10 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             return;
         state.phase = LLMModels_1.GenerationPhase.DRAFTING;
         state.currentScene = sceneNum;
+        // CRITICAL: Set currentSceneOutline at the start of each scene
+        // This ensures WriterAgent always has the correct outline for this scene
+        // and prevents state contamination from previous scenes
+        state.currentSceneOutline = sceneOutline;
         await this.publishEvent(runId, "scene_draft_start", { sceneNum });
         const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
         // Note: Characters are already available in state.characters from the Characters phase.
@@ -566,8 +575,10 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
      * Expand a scene by continuing from where it left off
      * Used when scene is too short before calling Critic
      * This prevents the Critic↔Writer deadlock
+     *
+     * @param sceneOutline - The original scene outline (passed explicitly to prevent state contamination)
      */
-    async expandScene(runId, options, sceneNum, additionalWordsNeeded) {
+    async expandScene(runId, options, sceneNum, sceneOutline, additionalWordsNeeded) {
         const state = this.activeRuns.get(runId);
         if (!state)
             return;
@@ -577,9 +588,10 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         state.phase = LLMModels_1.GenerationPhase.DRAFTING;
         state.currentScene = sceneNum;
         await this.publishEvent(runId, "scene_expand_start", { sceneNum, additionalWordsNeeded });
-        // Store expansion context for WriterAgent
+        // CRITICAL: Use the passed sceneOutline instead of spreading stale state
+        // This prevents state contamination where Scene 2 would use Scene 1's outline
         state.currentSceneOutline = {
-            ...(state.currentSceneOutline ?? {}),
+            ...sceneOutline, // Use the correct scene outline
             expansionMode: true,
             existingContent: draft.content,
             additionalWordsNeeded,
@@ -608,12 +620,9 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         };
         state.drafts.set(sceneNum, expanded);
         state.updatedAt = new Date().toISOString();
-        // Clear expansion mode
-        if (state.currentSceneOutline) {
-            delete state.currentSceneOutline.expansionMode;
-            delete state.currentSceneOutline.existingContent;
-            delete state.currentSceneOutline.additionalWordsNeeded;
-        }
+        // Restore the original scene outline (without expansion mode)
+        // This keeps the correct outline for this scene in case of further operations
+        state.currentSceneOutline = sceneOutline;
         await this.saveArtifact(runId, options.projectId, `expanded_scene_${sceneNum}`, expanded);
         await this.publishEvent(runId, "scene_expand_complete", { sceneNum, wordCount: expanded.wordCount });
     }
@@ -630,6 +639,9 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
     }
     /**
      * Polish a scene (final refinement)
+     *
+     * CRITICAL: Includes post-polish validation to prevent chunk loss
+     * If polished version is significantly shorter or missing ending, falls back to pre-polish draft
      */
     async polishScene(runId, options, sceneNum) {
         const state = this.activeRuns.get(runId);
@@ -641,6 +653,9 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         state.phase = LLMModels_1.GenerationPhase.POLISH;
         state.currentScene = sceneNum;
         await this.publishEvent(runId, "scene_polish_start", { sceneNum });
+        // Store pre-polish content for validation/fallback
+        const prePolishContent = String(draft.content ?? "");
+        const prePolishWordCount = prePolishContent.split(/\s+/).length;
         // Use WriterAgent through AgentFactory
         const agent = this.agentFactory.getAgent(AgentModels_1.AgentType.WRITER);
         const context = {
@@ -651,18 +666,62 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         const output = await agent.execute(context, options);
         // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
         const response = this.stripFakeWordCount(output.content);
+        const polishedWordCount = response.split(/\s+/).length;
+        // POST-POLISH VALIDATION: Check if polish is acceptable
+        // Reject polish if it's significantly shorter (lost chunks) or missing ending
+        const isPolishAcceptable = this.validatePolishOutput(prePolishContent, response, prePolishWordCount, polishedWordCount);
+        let finalContent;
+        let finalWordCount;
+        let polishStatus;
+        if (isPolishAcceptable) {
+            finalContent = response;
+            finalWordCount = polishedWordCount;
+            polishStatus = "polished";
+        }
+        else {
+            // FALLBACK: Keep pre-polish draft if polish failed validation
+            console.log(`[Orchestrator] Scene ${sceneNum} polish rejected (${polishedWordCount}/${prePolishWordCount} words), keeping pre-polish draft`);
+            finalContent = prePolishContent;
+            finalWordCount = prePolishWordCount;
+            polishStatus = "polish_rejected";
+        }
         const polished = {
             sceneNum,
             title: draft.title,
-            content: response,
-            wordCount: response.split(/\s+/).length,
-            status: "final",
+            content: finalContent,
+            wordCount: finalWordCount,
+            status: polishStatus,
             createdAt: new Date().toISOString(),
         };
         state.drafts.set(sceneNum, polished);
         state.updatedAt = new Date().toISOString();
         await this.saveArtifact(runId, options.projectId, `final_scene_${sceneNum}`, polished);
-        await this.publishEvent(runId, "scene_polish_complete", { sceneNum });
+        await this.publishEvent(runId, "scene_polish_complete", { sceneNum, polishStatus });
+    }
+    /**
+     * Validate polish output to prevent chunk loss
+     * Returns true if polish is acceptable, false if we should fall back to pre-polish draft
+     */
+    validatePolishOutput(prePolishContent, polishedContent, prePolishWordCount, polishedWordCount) {
+        // Reject if polished version is more than 15% shorter (lost significant content)
+        const minAcceptableWordCount = Math.floor(prePolishWordCount * 0.85);
+        if (polishedWordCount < minAcceptableWordCount) {
+            console.log(`[Orchestrator] Polish validation failed: word count too low (${polishedWordCount} < ${minAcceptableWordCount})`);
+            return false;
+        }
+        // Check if ending is preserved (last 50 words should have significant overlap)
+        const prePolishEnding = prePolishContent.split(/\s+/).slice(-50).join(" ").toLowerCase();
+        const polishedEnding = polishedContent.split(/\s+/).slice(-50).join(" ").toLowerCase();
+        // Simple overlap check: at least 30% of ending words should be present
+        const prePolishEndingWords = new Set(prePolishEnding.split(/\s+/));
+        const polishedEndingWords = polishedEnding.split(/\s+/);
+        const matchingWords = polishedEndingWords.filter(word => prePolishEndingWords.has(word)).length;
+        const overlapRatio = matchingWords / Math.max(prePolishEndingWords.size, 1);
+        if (overlapRatio < 0.3) {
+            console.log(`[Orchestrator] Polish validation failed: ending not preserved (overlap: ${(overlapRatio * 100).toFixed(1)}%)`);
+            return false;
+        }
+        return true;
     }
     /**
      * Run Archivist to consolidate constraints

@@ -14,6 +14,7 @@ import { QdrantClient } from "@qdrant/js-client-rest";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { v4 as uuidv4 } from "uuid";
+import { stringifyForPrompt } from "../utils/schemaNormalizers";
 
 /**
  * Embedding provider types
@@ -449,24 +450,28 @@ export class QdrantMemoryService {
 
   /**
    * Convert character to searchable text
+   * Uses stringifyForPrompt to prevent [object Object] bugs when fields are objects
    */
   private characterToText(character: Record<string, unknown>): string {
     const parts: string[] = [];
     
-    if (character.name) parts.push(`Name: ${character.name}`);
-    if (character.archetype) parts.push(`Archetype: ${character.archetype}`);
-    if (character.role) parts.push(`Role: ${character.role}`);
-    if (character.coreMotivation) parts.push(`Motivation: ${character.coreMotivation}`);
-    if (character.psychologicalWound) parts.push(`Wound: ${character.psychologicalWound}`);
-    if (character.innerTrap) parts.push(`Inner Trap: ${character.innerTrap}`);
-    if (character.backstory) parts.push(`Backstory: ${character.backstory}`);
-    if (character.visualSignature) parts.push(`Visual: ${character.visualSignature}`);
+    if (character.name) parts.push(`Name: ${stringifyForPrompt(character.name)}`);
+    if (character.archetype) parts.push(`Archetype: ${stringifyForPrompt(character.archetype)}`);
+    if (character.role) parts.push(`Role: ${stringifyForPrompt(character.role)}`);
+    if (character.coreMotivation) parts.push(`Motivation: ${stringifyForPrompt(character.coreMotivation)}`);
+    if (character.psychologicalWound) parts.push(`Wound: ${stringifyForPrompt(character.psychologicalWound)}`);
+    if (character.innerTrap) parts.push(`Inner Trap: ${stringifyForPrompt(character.innerTrap)}`);
+    if (character.backstory) parts.push(`Backstory: ${stringifyForPrompt(character.backstory)}`);
+    if (character.visualSignature) parts.push(`Visual: ${stringifyForPrompt(character.visualSignature)}`);
+    if (character.voiceProfile) parts.push(`Voice: ${stringifyForPrompt(character.voiceProfile)}`);
+    if (character.relationships) parts.push(`Relationships: ${stringifyForPrompt(character.relationships)}`);
 
     return parts.join(". ");
   }
 
   /**
    * Convert worldbuilding element to searchable text
+   * Uses stringifyForPrompt to prevent [object Object] bugs when fields are objects
    */
   private worldbuildingToText(
     elementType: string,
@@ -474,26 +479,27 @@ export class QdrantMemoryService {
   ): string {
     const parts: string[] = [`Type: ${elementType}`];
 
-    if (element.name) parts.push(`Name: ${element.name}`);
-    if (element.description) parts.push(`Description: ${element.description}`);
-    if (element.location) parts.push(`Location: ${element.location}`);
-    if (element.significance) parts.push(`Significance: ${element.significance}`);
+    if (element.name) parts.push(`Name: ${stringifyForPrompt(element.name)}`);
+    if (element.description) parts.push(`Description: ${stringifyForPrompt(element.description)}`);
+    if (element.location) parts.push(`Location: ${stringifyForPrompt(element.location)}`);
+    if (element.significance) parts.push(`Significance: ${stringifyForPrompt(element.significance)}`);
 
     return parts.join(". ");
   }
 
   /**
    * Convert scene to searchable text
+   * Uses stringifyForPrompt to prevent [object Object] bugs when fields are objects
    */
   private sceneToText(scene: Record<string, unknown>): string {
     const parts: string[] = [];
 
     if (scene.sceneNumber) parts.push(`Scene ${scene.sceneNumber}`);
-    if (scene.title) parts.push(`Title: ${scene.title}`);
-    if (scene.setting) parts.push(`Setting: ${scene.setting}`);
-    if (scene.summary) parts.push(`Summary: ${scene.summary}`);
+    if (scene.title) parts.push(`Title: ${stringifyForPrompt(scene.title)}`);
+    if (scene.setting) parts.push(`Setting: ${stringifyForPrompt(scene.setting)}`);
+    if (scene.summary) parts.push(`Summary: ${stringifyForPrompt(scene.summary)}`);
     if (scene.content) {
-      const content = String(scene.content);
+      const content = stringifyForPrompt(scene.content);
       parts.push(`Content: ${content.substring(0, 500)}`);
     }
 

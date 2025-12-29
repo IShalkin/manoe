@@ -7,6 +7,52 @@
  */
 
 /**
+ * Convert any value to a prompt-safe string
+ * Prevents [object Object] bugs when interpolating unknown values into prompts
+ * 
+ * @param value - Any value that needs to be converted to string
+ * @returns A string representation safe for use in prompts
+ */
+export function stringifyForPrompt(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value) || typeof value === "object") {
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
+}
+
+/**
+ * Safely parse a word count value, handling various formats
+ * Prevents NaN issues when outline.wordCount is a string like "1,900"
+ * 
+ * @param value - The word count value (could be number, string, undefined)
+ * @param defaultValue - Default value if parsing fails (default: 1500)
+ * @returns A valid number for word count
+ */
+export function safeParseWordCount(value: unknown, defaultValue: number = 1500): number {
+  if (typeof value === "number" && !isNaN(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    // Remove commas and other non-numeric characters except digits
+    const cleaned = value.replace(/[^\d]/g, "");
+    const parsed = parseInt(cleaned, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return defaultValue;
+}
+
+/**
  * Normalize characters output from LLM
  * Handles various wrapper formats and normalizes individual character fields
  * 

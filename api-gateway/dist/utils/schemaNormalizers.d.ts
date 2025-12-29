@@ -6,6 +6,23 @@
  * (wrapped in objects, different key names, etc.) that need to be normalized.
  */
 /**
+ * Convert any value to a prompt-safe string
+ * Prevents [object Object] bugs when interpolating unknown values into prompts
+ *
+ * @param value - Any value that needs to be converted to string
+ * @returns A string representation safe for use in prompts
+ */
+export declare function stringifyForPrompt(value: unknown): string;
+/**
+ * Safely parse a word count value, handling various formats
+ * Prevents NaN issues when outline.wordCount is a string like "1,900"
+ *
+ * @param value - The word count value (could be number, string, undefined)
+ * @param defaultValue - Default value if parsing fails (default: 1500)
+ * @returns A valid number for word count
+ */
+export declare function safeParseWordCount(value: unknown, defaultValue?: number): number;
+/**
  * Normalize characters output from LLM
  * Handles various wrapper formats and normalizes individual character fields
  *
