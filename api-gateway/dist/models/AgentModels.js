@@ -211,6 +211,11 @@ class GenerationState {
     keyConstraints = [];
     rawFactsLog = [];
     lastArchivistScene = 0;
+    /**
+     * Current scene outline being processed
+     * Used to pass expansion mode context to WriterAgent
+     */
+    currentSceneOutline;
     isPaused = false;
     isCompleted = false;
     error;
@@ -292,6 +297,11 @@ __decorate([
     (0, schema_1.Property)(),
     __metadata("design:type", Number)
 ], GenerationState.prototype, "lastArchivistScene", void 0);
+__decorate([
+    (0, schema_1.Optional)(),
+    (0, schema_1.Property)(),
+    __metadata("design:type", Object)
+], GenerationState.prototype, "currentSceneOutline", void 0);
 __decorate([
     (0, schema_1.Property)(),
     __metadata("design:type", Boolean)

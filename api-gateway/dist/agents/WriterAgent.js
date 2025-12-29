@@ -81,11 +81,15 @@ class WriterAgent extends BaseAgent_1.BaseAgent {
     }
     /**
      * Get fallback prompt
+     * CRITICAL: Includes autonomous agent instruction to prevent persona break
      */
     getFallbackPrompt(variables) {
-        return `You are the Writer, a skilled prose craftsman.
+        return `You are the Writer, a skilled prose craftsman in an autonomous story generation pipeline.
 Your role is to transform outlines into vivid, engaging prose that brings the story to life.
 Maintain consistency with established facts.
+
+CRITICAL INSTRUCTION: You are an autonomous agent in a simulation. DO NOT ask the user for feedback. DO NOT offer options (A/B/C). Always execute the best option immediately. Never output meta-commentary like "Here is the revised scene" or "Which approach would you prefer". Just output the story content directly.
+
 Key Constraints: ${variables.keyConstraints || "No constraints established yet."}`;
     }
     /**
@@ -100,19 +104,44 @@ Key Constraints: ${variables.keyConstraints || "No constraints established yet."
     }
     /**
      * Build user prompt based on phase
+     * CRITICAL: All prompts include autonomous agent instruction to prevent persona break
      */
     buildUserPrompt(context, options, phase) {
         const state = context.state;
         const constraintsBlock = this.buildConstraintsBlock(state.keyConstraints);
+        // Critical instruction to prevent persona break - added to ALL user prompts
+        // This cannot be overridden by Langfuse system prompts
+        const autonomousInstruction = `
+CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer options (A/B/C). DO NOT include meta-commentary like "Here is the scene" or "Which approach would you prefer". Just write the story content directly.`;
         if (phase === LLMModels_1.GenerationPhase.DRAFTING) {
-            // This will be called from Orchestrator with scene-specific data
-            // For now, return a generic prompt structure
-            // Orchestrator will pass scene details via metadata
             const sceneNum = state.currentScene;
             const outline = state.outline;
             const scenes = outline?.scenes || [];
-            const sceneOutline = scenes[sceneNum - 1] || {};
+            const sceneOutline = state.currentSceneOutline ?? scenes[sceneNum - 1] ?? {};
             const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
+            // Check if this is an expansion request (scene too short, need to continue)
+            if (sceneOutline.expansionMode === true) {
+                const existingContent = String(sceneOutline.existingContent ?? "");
+                const additionalWordsNeeded = Number(sceneOutline.additionalWordsNeeded ?? 500);
+                return `Continue Scene ${sceneNum}: "${sceneTitle}"
+
+The scene so far (DO NOT REWRITE - continue from where it ends):
+---
+${existingContent}
+---
+
+Continue the scene from where it left off. Write approximately ${additionalWordsNeeded} more words.
+
+Requirements:
+- Continue seamlessly from the last paragraph
+- Maintain the same voice, tone, and style
+- Progress the scene toward its conclusion
+- DO NOT repeat or summarize what was already written
+
+KEY CONSTRAINTS (MUST NOT VIOLATE):
+${constraintsBlock}
+${autonomousInstruction}`;
+            }
             return `Write Scene ${sceneNum}: "${sceneTitle}"
 
 Scene outline:
@@ -127,11 +156,9 @@ Requirements:
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
-
-Write the full scene prose.`;
+${autonomousInstruction}`;
         }
         if (phase === LLMModels_1.GenerationPhase.REVISION) {
-            // This will be called from Orchestrator with critique feedback
             const sceneNum = state.currentScene;
             const draft = state.drafts.get(sceneNum);
             const critiques = state.critiques.get(sceneNum) || [];
@@ -150,8 +177,7 @@ Revision requests: ${JSON.stringify(latestCritique.revisionRequests || [])}
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
-
-Write the revised scene, addressing all feedback while maintaining what works.`;
+${autonomousInstruction}`;
         }
         if (phase === LLMModels_1.GenerationPhase.POLISH) {
             const sceneNum = state.currentScene;
@@ -159,9 +185,10 @@ Write the revised scene, addressing all feedback while maintaining what works.`;
             if (!draft) {
                 throw new Error(`No draft found for scene ${sceneNum}`);
             }
+            const currentWordCount = draft.content?.split(/\s+/).length ?? 0;
             return `Polish Scene ${sceneNum} for final publication quality.
 
-Current draft:
+Current draft (${currentWordCount} words):
 ${draft.content}
 
 Polish for:
@@ -170,9 +197,27 @@ Polish for:
 - Consistency in voice
 - Final proofreading
 
-Output the polished scene prose.`;
+IMPORTANT: Preserve all story beats and maintain word count. Do NOT shorten or summarize. The polished version must be at least ${currentWordCount} words.
+${autonomousInstruction}`;
         }
         throw new Error(`WriterAgent not configured for phase: ${phase}`);
+    }
+    /**
+     * Detect persona break patterns in Writer output
+     * Returns true if the output contains interactive assistant patterns
+     */
+    detectPersonaBreak(content) {
+        const personaBreakPatterns = [
+            /which (?:approach|option|version) (?:would you|do you) prefer/i,
+            /\b[ABC]\)\s+/, // A) B) C) options
+            /your guidance/i,
+            /let me know (?:if|which|what)/i,
+            /would you like me to/i,
+            /here (?:is|are) (?:the|some) (?:revised|options|approaches)/i,
+            /please (?:choose|select|let me know)/i,
+            /\?{2,}/, // Multiple question marks
+        ];
+        return personaBreakPatterns.some(pattern => pattern.test(content));
     }
 }
 exports.WriterAgent = WriterAgent;

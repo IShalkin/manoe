@@ -257,6 +257,14 @@ export class GenerationState {
   @Property()
   lastArchivistScene: number = 0;
 
+  /**
+   * Current scene outline being processed
+   * Used to pass expansion mode context to WriterAgent
+   */
+  @Optional()
+  @Property()
+  currentSceneOutline?: Record<string, unknown>;
+
   @Property()
   isPaused: boolean = false;
 

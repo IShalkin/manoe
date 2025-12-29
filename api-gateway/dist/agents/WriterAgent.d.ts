@@ -19,6 +19,7 @@ export declare class WriterAgent extends BaseAgent {
     private getSystemPrompt;
     /**
      * Get fallback prompt
+     * CRITICAL: Includes autonomous agent instruction to prevent persona break
      */
     private getFallbackPrompt;
     /**
@@ -27,7 +28,13 @@ export declare class WriterAgent extends BaseAgent {
     private compileFallbackPrompt;
     /**
      * Build user prompt based on phase
+     * CRITICAL: All prompts include autonomous agent instruction to prevent persona break
      */
     private buildUserPrompt;
+    /**
+     * Detect persona break patterns in Writer output
+     * Returns true if the output contains interactive assistant patterns
+     */
+    detectPersonaBreak(content: string): boolean;
 }
 //# sourceMappingURL=WriterAgent.d.ts.map
