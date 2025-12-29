@@ -7,6 +7,16 @@
 import { z } from "zod";
 
 /**
+ * Flexible type for fields that can be string, object, or array
+ * LLMs often return different formats for the same field
+ */
+export const FlexibleStringOrObject = z.union([
+  z.string(),
+  z.record(z.unknown()),
+  z.array(z.unknown()),
+]).optional();
+
+/**
  * Theme schema - can be a string or an object with name/description
  */
 const ThemeSchema = z.union([
@@ -87,18 +97,19 @@ export const CharactersArraySchema = z.array(CharacterSchema).min(1);
 
 /**
  * Worldbuilding schema (from WorldbuilderAgent)
+ * Uses FlexibleStringOrObject for fields that LLMs return in various formats
  */
 export const WorldbuildingSchema = z.object({
-  geography: z.record(z.unknown()).optional(),
-  timePeriod: z.string().optional(),
-  technology: z.string().optional(),
-  socialStructures: z.record(z.unknown()).optional(),
-  culture: z.record(z.unknown()).optional(),
-  economy: z.string().optional(),
-  magic: z.record(z.unknown()).optional(),
-  history: z.string().optional(),
-  sensory: z.record(z.unknown()).optional(),
-});
+  geography: z.union([z.string(), z.record(z.unknown())]).optional(),
+  timePeriod: FlexibleStringOrObject,
+  technology: FlexibleStringOrObject,
+  socialStructures: z.union([z.string(), z.record(z.unknown())]).optional(),
+  culture: z.union([z.string(), z.record(z.unknown())]).optional(),
+  economy: FlexibleStringOrObject,
+  magic: z.union([z.string(), z.record(z.unknown())]).optional(),
+  history: FlexibleStringOrObject,
+  sensory: z.union([z.string(), z.record(z.unknown())]).optional(),
+}).passthrough();
 
 /**
  * Outline schema (from StrategistAgent - Outlining phase)

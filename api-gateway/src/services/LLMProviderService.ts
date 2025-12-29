@@ -154,6 +154,183 @@ function capMaxTokensToModelLimit(model: string, requestedMaxTokens: number): nu
   return requestedMaxTokens;
 }
 
+/**
+ * Token limit error information extracted from provider error messages
+ */
+export interface TokenLimitError {
+  requested: number;
+  allowed: number;
+  provider: string;
+}
+
+/**
+ * Extract max output tokens limit from provider error messages
+ * Supports multiple provider error formats for auto-discovery of limits
+ * 
+ * @param provider - The LLM provider name
+ * @param error - The error object or message string
+ * @returns TokenLimitError if limit was extracted, null otherwise
+ */
+export function extractMaxOutputTokensFromError(
+  provider: string,
+  error: Error | string
+): TokenLimitError | null {
+  const errorMessage = typeof error === "string" ? error : error.message;
+
+  // Anthropic format: "max_tokens: 10240 > 8192, which is the maximum..."
+  const anthropicMatch = errorMessage.match(/max_tokens:\s*(\d+)\s*>\s*(\d+)/i);
+  if (anthropicMatch) {
+    return {
+      requested: parseInt(anthropicMatch[1]),
+      allowed: parseInt(anthropicMatch[2]),
+      provider,
+    };
+  }
+
+  // OpenAI format: "maximum context length is X tokens... you requested Y"
+  // Also handles: "This model's maximum context length is X tokens, however you requested Y tokens"
+  const openaiContextMatch = errorMessage.match(
+    /maximum.*?context.*?(\d+)\s*tokens.*requested\s*(\d+)/i
+  );
+  if (openaiContextMatch) {
+    return {
+      requested: parseInt(openaiContextMatch[2]),
+      allowed: parseInt(openaiContextMatch[1]),
+      provider,
+    };
+  }
+
+  // OpenAI max_tokens format: "max_tokens is too large: X. This model supports at most Y"
+  const openaiMaxTokensMatch = errorMessage.match(
+    /max_tokens.*?too large:\s*(\d+).*supports.*?(\d+)/i
+  );
+  if (openaiMaxTokensMatch) {
+    return {
+      requested: parseInt(openaiMaxTokensMatch[1]),
+      allowed: parseInt(openaiMaxTokensMatch[2]),
+      provider,
+    };
+  }
+
+  // Gemini format: "maxOutputTokens must be <= X"
+  const geminiMatch = errorMessage.match(/maxOutputTokens.*?<=\s*(\d+)/i);
+  if (geminiMatch) {
+    return {
+      requested: 0,
+      allowed: parseInt(geminiMatch[1]),
+      provider,
+    };
+  }
+
+  // DeepSeek format (similar to OpenAI): "max_tokens exceeds maximum of X"
+  const deepseekMatch = errorMessage.match(/max_tokens.*?maximum.*?(\d+)/i);
+  if (deepseekMatch) {
+    return {
+      requested: 0,
+      allowed: parseInt(deepseekMatch[1]),
+      provider,
+    };
+  }
+
+  // Generic format: "exceeds the maximum of X tokens"
+  const genericMatch = errorMessage.match(/exceeds.*?maximum.*?(\d+)\s*tokens/i);
+  if (genericMatch) {
+    return {
+      requested: 0,
+      allowed: parseInt(genericMatch[1]),
+      provider,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * In-memory cache for discovered token limits
+ * Persists limits to Redis if available for cross-instance sharing
+ */
+export class TokenLimitCache {
+  private memoryCache: Map<string, number> = new Map();
+  private redisClient: { get: (key: string) => Promise<string | null>; setex: (key: string, ttl: number, value: string) => Promise<unknown> } | null = null;
+  private static instance: TokenLimitCache | null = null;
+
+  private constructor() {}
+
+  static getInstance(): TokenLimitCache {
+    if (!TokenLimitCache.instance) {
+      TokenLimitCache.instance = new TokenLimitCache();
+    }
+    return TokenLimitCache.instance;
+  }
+
+  /**
+   * Set Redis client for persistent caching
+   */
+  setRedisClient(client: { get: (key: string) => Promise<string | null>; setex: (key: string, ttl: number, value: string) => Promise<unknown> }): void {
+    this.redisClient = client;
+  }
+
+  /**
+   * Get cached token limit for a model
+   * Checks memory first, then Redis if available
+   */
+  async get(model: string): Promise<number | null> {
+    const normalizedModel = this.normalizeModelName(model);
+
+    if (this.memoryCache.has(normalizedModel)) {
+      return this.memoryCache.get(normalizedModel)!;
+    }
+
+    if (this.redisClient) {
+      try {
+        const cached = await this.redisClient.get(`token_limit:${normalizedModel}`);
+        if (cached) {
+          const limit = parseInt(cached);
+          this.memoryCache.set(normalizedModel, limit);
+          return limit;
+        }
+      } catch (error) {
+        console.warn("[TokenLimitCache] Redis get failed:", error);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Cache a discovered token limit
+   * Stores in memory and Redis (with 7-day TTL)
+   */
+  async set(model: string, limit: number): Promise<void> {
+    const normalizedModel = this.normalizeModelName(model);
+    this.memoryCache.set(normalizedModel, limit);
+    console.log(`[TokenLimitCache] Discovered limit for ${normalizedModel}: ${limit}`);
+
+    if (this.redisClient) {
+      try {
+        const ttl = 7 * 24 * 60 * 60;
+        await this.redisClient.setex(`token_limit:${normalizedModel}`, ttl, limit.toString());
+      } catch (error) {
+        console.warn("[TokenLimitCache] Redis set failed:", error);
+      }
+    }
+  }
+
+  /**
+   * Normalize model name for consistent caching
+   */
+  private normalizeModelName(model: string): string {
+    return model.includes("/") ? model.split("/").pop()! : model;
+  }
+
+  /**
+   * Clear the cache (useful for testing)
+   */
+  clear(): void {
+    this.memoryCache.clear();
+  }
+}
+
 @Service()
 export class LLMProviderService {
   /**
@@ -608,7 +785,24 @@ export class LLMProviderService {
   }
 
   /**
+   * Check if an error is a token limit error that can be retried with a lower limit
+   */
+  private isTokenLimitError(error: unknown): boolean {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      return (
+        message.includes("max_tokens") ||
+        message.includes("maximum context") ||
+        message.includes("maxoutputtokens") ||
+        message.includes("exceeds") && message.includes("token")
+      );
+    }
+    return false;
+  }
+
+  /**
    * Create completion with automatic retry for transient errors
+   * Also handles token limit errors with auto-discovery and caching
    */
   async createCompletionWithRetry(
     options: CompletionOptions,
@@ -616,18 +810,36 @@ export class LLMProviderService {
     baseDelayMs: number = 1000
   ): Promise<LLMResponse> {
     let lastError: Error | null = null;
+    const tokenLimitCache = TokenLimitCache.getInstance();
+    let tokenLimitRetried = false;
+
+    const cachedLimit = await tokenLimitCache.get(options.model);
+    if (cachedLimit && options.maxTokens && options.maxTokens > cachedLimit) {
+      console.log(`[LLMProviderService] Using cached limit for ${options.model}: ${cachedLimit}`);
+      options = { ...options, maxTokens: cachedLimit };
+    }
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         return await this.createCompletion(options);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (this.isTokenLimitError(error) && !tokenLimitRetried) {
+          const limitError = extractMaxOutputTokensFromError(options.provider, lastError);
+          if (limitError) {
+            await tokenLimitCache.set(options.model, limitError.allowed);
+            console.log(`[LLMProviderService] Retrying with discovered limit: ${limitError.allowed}`);
+            options = { ...options, maxTokens: limitError.allowed };
+            tokenLimitRetried = true;
+            continue;
+          }
+        }
         
         if (!this.isRetryableError(error) || attempt === maxRetries - 1) {
           throw lastError;
         }
 
-        // Exponential backoff
         const delay = baseDelayMs * Math.pow(2, attempt);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
