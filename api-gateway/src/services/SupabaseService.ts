@@ -483,4 +483,47 @@ export class SupabaseService {
 
     return data;
   }
+
+  // ========================================================================
+  // Research Results Operations (Eternal Memory)
+  // ========================================================================
+
+  /**
+   * Get research history for a user
+   */
+  async getResearchHistory(limit: number = 20): Promise<unknown[]> {
+    const client = this.getClient();
+    const { data, error } = await client
+      .from("research_results")
+      .select("id, provider, model, seed_idea, target_audience, themes, moral_compass, content, prompt_context, citations, created_at")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throw new Error(`Failed to get research history: ${error.message}`);
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Get a specific research result by ID
+   */
+  async getResearchResult(id: string): Promise<unknown | null> {
+    const client = this.getClient();
+    const { data, error } = await client
+      .from("research_results")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) {
+      if (error.code === "PGRST116") {
+        return null;
+      }
+      throw new Error(`Failed to get research result: ${error.message}`);
+    }
+
+    return data;
+  }
 }
