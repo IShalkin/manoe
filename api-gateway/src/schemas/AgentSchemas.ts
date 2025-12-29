@@ -72,8 +72,9 @@ export const CharacterSchema = z.object({
   backstory: z.string().optional(),
   visual: z.string().optional(),
   voice: z.string().optional(),
-  // Accept both array and object for relationships
+  // Accept string, array, or object for relationships (LLM returns various formats)
   relationships: z.union([
+    z.string(),
     z.array(z.string()),
     z.record(z.unknown()),
   ]).optional(),
