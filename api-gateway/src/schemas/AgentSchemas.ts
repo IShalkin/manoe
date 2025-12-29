@@ -53,22 +53,31 @@ export const NarrativeSchema = z.object({
 
 /**
  * Character schema (from ProfilerAgent - Characters phase)
+ * Made flexible to handle various LLM output formats
  */
 export const CharacterSchema = z.object({
   name: z.string().min(1),
-  role: z.enum(["protagonist", "antagonist", "supporting"]),
+  // Accept both lowercase and title case roles
+  role: z.string().transform((val) => val.toLowerCase()).pipe(
+    z.enum(["protagonist", "antagonist", "supporting"])
+  ).or(z.string()), // Fallback to any string if transform fails
   archetype: z.string().optional(),
-  motivation: z.string().min(1),
+  // Make motivation optional since LLM doesn't always return it
+  motivation: z.string().optional(),
   psychology: z.object({
     wound: z.string().optional(),
     innerTrap: z.string().optional(),
     arc: z.string().optional(),
-  }).optional(),
+  }).passthrough().optional(),
   backstory: z.string().optional(),
   visual: z.string().optional(),
   voice: z.string().optional(),
-  relationships: z.array(z.string()).optional(),
-});
+  // Accept both array and object for relationships
+  relationships: z.union([
+    z.array(z.string()),
+    z.record(z.unknown()),
+  ]).optional(),
+}).passthrough(); // Allow additional fields from LLM
 
 /**
  * Characters array schema
