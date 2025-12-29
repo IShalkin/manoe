@@ -61,9 +61,16 @@ export class WriterAgent extends BaseAgent {
       // Apply guardrails
       await this.applyGuardrails(response, state.keyConstraints, runId);
       
+      // Emit the actual generated content for the frontend to display
+      await this.emitMessage(runId, { content: response, sceneNumber: state.currentScene }, phase);
+      
       // Emit completion thought
       if (phase === GenerationPhase.DRAFTING) {
         await this.emitThought(runId, "Draft complete. Awaiting Critic's feedback.", "neutral", AgentType.CRITIC);
+      } else if (phase === GenerationPhase.REVISION) {
+        await this.emitThought(runId, "Revision complete. Ready for re-evaluation.", "neutral", AgentType.CRITIC);
+      } else if (phase === GenerationPhase.POLISH) {
+        await this.emitThought(runId, "Polish complete. Scene finalized.", "excited");
       }
       
       return { content: response };
@@ -71,6 +78,8 @@ export class WriterAgent extends BaseAgent {
 
     // For other phases, parse as JSON
     const content = this.parseJSON(response);
+    // Emit the actual generated content for the frontend to display
+    await this.emitMessage(runId, content as Record<string, unknown>, phase);
     return { content: content as Record<string, unknown> };
   }
 
