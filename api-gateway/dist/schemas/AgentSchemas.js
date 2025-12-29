@@ -104,22 +104,32 @@ exports.WorldbuildingSchema = zod_1.z.object({
     sensory: zod_1.z.union([zod_1.z.string(), zod_1.z.record(zod_1.z.unknown())]).optional(),
 }).passthrough();
 /**
+ * Flexible type for scene fields that can be string or array
+ * LLMs often return dialogue, characters, etc. as arrays instead of strings
+ */
+const FlexibleSceneField = zod_1.z.union([
+    zod_1.z.string(),
+    zod_1.z.array(zod_1.z.string()),
+    zod_1.z.array(zod_1.z.unknown()),
+]).optional();
+/**
  * Outline schema (from StrategistAgent - Outlining phase)
+ * Made flexible to handle various LLM output formats
  */
 exports.OutlineSchema = zod_1.z.object({
     scenes: zod_1.z.array(zod_1.z.object({
         sceneNumber: zod_1.z.number().optional(),
         title: zod_1.z.string().min(1),
-        setting: zod_1.z.string().optional(),
-        characters: zod_1.z.array(zod_1.z.string()).optional(),
-        goal: zod_1.z.string().optional(),
-        conflict: zod_1.z.string().optional(),
-        emotionalBeat: zod_1.z.string().optional(),
-        dialogue: zod_1.z.string().optional(),
-        hook: zod_1.z.string().optional(),
+        setting: FlexibleSceneField,
+        characters: zod_1.z.union([zod_1.z.array(zod_1.z.string()), zod_1.z.array(zod_1.z.unknown()), zod_1.z.string()]).optional(),
+        goal: FlexibleSceneField,
+        conflict: FlexibleSceneField,
+        emotionalBeat: FlexibleSceneField,
+        dialogue: FlexibleSceneField,
+        hook: FlexibleSceneField,
         wordCount: zod_1.z.number().optional(),
-    })).min(1),
-});
+    }).passthrough()).min(1),
+}).passthrough();
 /**
  * Advanced Plan schema (from StrategistAgent - Advanced Planning phase)
  */
