@@ -188,13 +188,17 @@ export class StorytellerOrchestrator {
       $log.info(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
       await this.runGenesisPhase(runId, options);
       $log.info(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
-      if (this.shouldStop(runId)) {
+      const shouldStopAfterGenesis = this.shouldStop(runId);
+      $log.info(`[StorytellerOrchestrator] runGeneration: shouldStop after Genesis = ${shouldStopAfterGenesis}, runId: ${runId}`);
+      if (shouldStopAfterGenesis) {
         $log.info(`[StorytellerOrchestrator] runGeneration: shouldStop after Genesis, exiting, runId: ${runId}`);
         return;
       }
 
       // Phase 2: Characters
+      $log.info(`[StorytellerOrchestrator] runGeneration: about to call runCharactersPhase, runId: ${runId}`);
       await this.runCharactersPhase(runId, options);
+      $log.info(`[StorytellerOrchestrator] runGeneration: runCharactersPhase completed, runId: ${runId}`);
       if (this.shouldStop(runId)) return;
 
       // Phase 3: Worldbuilding
@@ -1011,12 +1015,22 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
    */
   private shouldStop(runId: string): boolean {
     const state = this.activeRuns.get(runId);
-    if (!state) return true;
-    if (state.isPaused) return true;
-    if (state.error) return true;
+    if (!state) {
+      $log.info(`[StorytellerOrchestrator] shouldStop: state not found, returning true, runId: ${runId}`);
+      return true;
+    }
+    if (state.isPaused) {
+      $log.info(`[StorytellerOrchestrator] shouldStop: isPaused=true, returning true, runId: ${runId}`);
+      return true;
+    }
+    if (state.error) {
+      $log.info(`[StorytellerOrchestrator] shouldStop: error=${state.error}, returning true, runId: ${runId}`);
+      return true;
+    }
 
     const pauseCallback = this.pauseCallbacks.get(runId);
     if (pauseCallback && pauseCallback()) {
+      $log.info(`[StorytellerOrchestrator] shouldStop: pauseCallback returned true, runId: ${runId}`);
       state.isPaused = true;
       return true;
     }
