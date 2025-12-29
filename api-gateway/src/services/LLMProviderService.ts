@@ -34,6 +34,50 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   venice: "https://api.venice.ai/api/v1",
 };
 
+/**
+ * Model context length limits (total tokens including prompt + completion)
+ * Used to cap max_tokens to avoid exceeding model limits
+ */
+const MODEL_CONTEXT_LENGTHS: Record<string, number> = {
+  // GPT-4 variants
+  "gpt-4": 8192,
+  "gpt-4-0314": 8192,
+  "gpt-4-0613": 8192,
+  "gpt-4-32k": 32768,
+  "gpt-4-32k-0314": 32768,
+  "gpt-4-32k-0613": 32768,
+  "gpt-4-turbo": 128000,
+  "gpt-4-turbo-preview": 128000,
+  "gpt-4-1106-preview": 128000,
+  "gpt-4-0125-preview": 128000,
+  "gpt-4o": 128000,
+  "gpt-4o-mini": 128000,
+  // GPT-3.5 variants
+  "gpt-3.5-turbo": 16385,
+  "gpt-3.5-turbo-16k": 16385,
+  "gpt-3.5-turbo-1106": 16385,
+  "gpt-3.5-turbo-0125": 16385,
+  // Default for unknown models (assume large context)
+  "default": 128000,
+};
+
+/**
+ * Get the context length for a model, with fallback to default
+ */
+function getModelContextLength(model: string): number {
+  // Check for exact match first
+  if (MODEL_CONTEXT_LENGTHS[model]) {
+    return MODEL_CONTEXT_LENGTHS[model];
+  }
+  // Check for prefix matches (e.g., "gpt-4o-2024-05-13" matches "gpt-4o")
+  for (const [key, value] of Object.entries(MODEL_CONTEXT_LENGTHS)) {
+    if (key !== "default" && model.startsWith(key)) {
+      return value;
+    }
+  }
+  return MODEL_CONTEXT_LENGTHS["default"];
+}
+
 @Service()
 export class LLMProviderService {
   /**
@@ -44,34 +88,42 @@ export class LLMProviderService {
    */
   async createCompletion(options: CompletionOptions): Promise<LLMResponse> {
     const startTime = Date.now();
+    console.log(`[LLMProviderService] Starting ${options.provider} completion with model ${options.model}`);
 
     let response: LLMResponse;
 
-    switch (options.provider) {
-      case LLMProvider.OPENAI:
-        response = await this.openAICompletion(options);
-        break;
-      case LLMProvider.ANTHROPIC:
-        response = await this.anthropicCompletion(options);
-        break;
-      case LLMProvider.GEMINI:
-        response = await this.geminiCompletion(options);
-        break;
-      case LLMProvider.OPENROUTER:
-        response = await this.openRouterCompletion(options);
-        break;
-      case LLMProvider.DEEPSEEK:
-        response = await this.deepSeekCompletion(options);
-        break;
-      case LLMProvider.VENICE:
-        response = await this.veniceCompletion(options);
-        break;
-      default:
-        throw new Error(`Unsupported provider: ${options.provider}`);
-    }
+    try {
+      switch (options.provider) {
+        case LLMProvider.OPENAI:
+          response = await this.openAICompletion(options);
+          break;
+        case LLMProvider.ANTHROPIC:
+          response = await this.anthropicCompletion(options);
+          break;
+        case LLMProvider.GEMINI:
+          response = await this.geminiCompletion(options);
+          break;
+        case LLMProvider.OPENROUTER:
+          response = await this.openRouterCompletion(options);
+          break;
+        case LLMProvider.DEEPSEEK:
+          response = await this.deepSeekCompletion(options);
+          break;
+        case LLMProvider.VENICE:
+          response = await this.veniceCompletion(options);
+          break;
+        default:
+          throw new Error(`Unsupported provider: ${options.provider}`);
+      }
 
-    response.latencyMs = Date.now() - startTime;
-    return response;
+      response.latencyMs = Date.now() - startTime;
+      console.log(`[LLMProviderService] ${options.provider} completion finished in ${response.latencyMs}ms, tokens: ${response.usage?.totalTokens ?? 0}`);
+      return response;
+    } catch (error) {
+      const elapsed = Date.now() - startTime;
+      console.error(`[LLMProviderService] ${options.provider} completion failed after ${elapsed}ms:`, error instanceof Error ? error.message : error);
+      throw error;
+    }
   }
 
   /**
@@ -133,6 +185,7 @@ export class LLMProviderService {
     const client = new OpenAI({
       apiKey,
       baseURL: PROVIDER_BASE_URLS.openai,
+      timeout: 120000, // 2 minute timeout
     });
 
     const requestParams: OpenAI.ChatCompletionCreateParams = {
@@ -142,18 +195,41 @@ export class LLMProviderService {
     };
 
     if (options.maxTokens) {
+      // Get model context length and cap max_tokens to leave room for prompt
+      // Estimate prompt tokens (rough estimate: 4 chars per token)
+      const estimatedPromptTokens = Math.ceil(
+        options.messages.reduce((acc, msg) => acc + msg.content.length, 0) / 4
+      );
+      const modelContextLength = getModelContextLength(options.model);
+      // Leave at least 500 tokens buffer for safety, and ensure we don't exceed context
+      const maxAllowedTokens = Math.max(500, modelContextLength - estimatedPromptTokens - 500);
+      const cappedMaxTokens = Math.min(options.maxTokens, maxAllowedTokens);
+      
+      console.log(`[LLMProviderService] Model ${options.model} context: ${modelContextLength}, estimated prompt: ${estimatedPromptTokens}, requested: ${options.maxTokens}, capped to: ${cappedMaxTokens}`);
+      
       // Newer models (gpt-5.x, o1, o3) use max_completion_tokens instead of max_tokens
       const usesNewTokenParam = options.model.startsWith("gpt-5") || 
                                  options.model.startsWith("o1") || 
                                  options.model.startsWith("o3");
       if (usesNewTokenParam) {
-        (requestParams as unknown as Record<string, unknown>).max_completion_tokens = options.maxTokens;
+        (requestParams as unknown as Record<string, unknown>).max_completion_tokens = cappedMaxTokens;
       } else {
-        requestParams.max_tokens = options.maxTokens;
+        requestParams.max_tokens = cappedMaxTokens;
       }
     }
 
-    if (options.responseFormat?.type === "json_object") {
+    // Only add response_format for models that support it
+    // gpt-4-0613 and older models don't support response_format
+    const supportsJsonMode = options.model.includes("turbo") || 
+                              options.model.includes("gpt-4o") ||
+                              options.model.includes("gpt-4-1106") ||
+                              options.model.includes("gpt-4-0125") ||
+                              options.model.includes("gpt-3.5-turbo-1106") ||
+                              options.model.startsWith("gpt-5") ||
+                              options.model.startsWith("o1") ||
+                              options.model.startsWith("o3");
+    
+    if (options.responseFormat?.type === "json_object" && supportsJsonMode) {
       requestParams.response_format = { type: "json_object" };
     }
 
@@ -179,6 +255,7 @@ export class LLMProviderService {
     const apiKey = this.getApiKey(LLMProvider.ANTHROPIC, options.apiKey);
     const client = new Anthropic({
       apiKey,
+      timeout: 120000, // 2 minute timeout
     });
 
     // Extract system message
@@ -287,6 +364,7 @@ export class LLMProviderService {
     const client = new OpenAI({
       apiKey,
       baseURL: PROVIDER_BASE_URLS.openrouter,
+      timeout: 120000, // 2 minute timeout
       defaultHeaders: {
         "HTTP-Referer": "https://manoe.iliashalkin.com",
         "X-Title": "MANOE",
@@ -330,6 +408,7 @@ export class LLMProviderService {
     const client = new OpenAI({
       apiKey,
       baseURL: PROVIDER_BASE_URLS.deepseek,
+      timeout: 120000, // 2 minute timeout
     });
 
     const requestParams: OpenAI.ChatCompletionCreateParams = {
@@ -369,6 +448,7 @@ export class LLMProviderService {
     const client = new OpenAI({
       apiKey,
       baseURL: PROVIDER_BASE_URLS.venice,
+      timeout: 120000, // 2 minute timeout
     });
 
     const requestParams: OpenAI.ChatCompletionCreateParams = {

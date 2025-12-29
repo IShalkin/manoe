@@ -29,6 +29,7 @@ import {
 } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { Request, Response } from "express";
+import { v4 as uuidv4 } from "uuid";
 import { StorytellerOrchestrator, GenerationOptions, RunStatus, LLMConfiguration } from "../services/StorytellerOrchestrator";
 import { RedisStreamsService } from "../services/RedisStreamsService";
 import { LLMProvider, GenerationPhase } from "../models/LLMModels";
@@ -278,38 +279,14 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
     @BodyParams() @Groups("!internal") request: GenerateRequestDTO
   ): Promise<GenerateResponseDTO> {
     // Support both new TypeScript format and legacy Python format
-    const projectId = request.projectId || request.supabase_project_id || `generated-${Date.now()}`;
+    // Generate a proper UUID if no projectId is provided (Supabase expects UUID format)
+    const projectId = request.projectId || request.supabase_project_id || uuidv4();
     const seedIdea = request.seedIdea || request.seed_idea || "";
     const provider = request.llmConfig?.provider || request.provider as LLMProvider;
     const model = request.llmConfig?.model || request.model || "";
     const apiKey = request.llmConfig?.apiKey || request.api_key || "";
     const mode = request.mode || request.generation_mode || "full";
 
-    // #region debug instrumentation
-    fetch("http://127.0.0.1:7242/ingest/4ed3716a-6e81-4213-8ba0-e923964d0642", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "pre-run",
-        hypothesisId: "H1",
-        location: "OrchestrationController.ts:startGeneration:entry",
-        message: "startGeneration entry",
-        data: {
-          provider,
-          model,
-          mode,
-          hasApiKey: !!apiKey,
-          hasLlmConfig: !!request.llmConfig,
-          bodyKeys: Object.keys(request || {}),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
-    // Force immediate output to ensure logs are visible
-    process.stdout.write(`[OrchestrationController] startGeneration called, projectId: ${projectId}, provider: ${provider}\n`);
     $log.info(`[OrchestrationController] startGeneration called, projectId: ${projectId}, seedIdea: ${seedIdea?.substring(0, 50)}...`);
     
     const options: GenerationOptions = {
@@ -325,36 +302,10 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
       settings: request.settings,
     };
 
-    // #region debug instrumentation
-    fetch("http://127.0.0.1:7242/ingest/4ed3716a-6e81-4213-8ba0-e923964d0642", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "pre-run",
-        hypothesisId: "H1",
-        location: "OrchestrationController.ts:startGeneration:options",
-        message: "startGeneration options",
-        data: {
-          projectId,
-          mode,
-          provider,
-          model,
-          hasApiKey: !!apiKey,
-          hasSettings: !!options.settings,
-          hasSeed: !!seedIdea,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
     try {
-      process.stdout.write(`[OrchestrationController] calling orchestrator.startGeneration, projectId: ${options.projectId}\n`);
-      $log.info(`[OrchestrationController] startGeneration: calling orchestrator.startGeneration, projectId: ${options.projectId}`);
+      $log.info(`[OrchestrationController] calling orchestrator.startGeneration, projectId: ${options.projectId}`);
       const runId = await this.orchestrator.startGeneration(options);
-      process.stdout.write(`[OrchestrationController] orchestrator.startGeneration returned runId: ${runId}\n`);
-      $log.info(`[OrchestrationController] startGeneration: orchestrator.startGeneration returned runId: ${runId}`);
+      $log.info(`[OrchestrationController] orchestrator.startGeneration returned runId: ${runId}`);
 
       return {
         runId,
@@ -364,24 +315,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
         streamUrl: `/stream/${runId}`,
       };
     } catch (error) {
-      // #region debug instrumentation
-      fetch("http://127.0.0.1:7242/ingest/4ed3716a-6e81-4213-8ba0-e923964d0642", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "debug-session",
-          runId: "pre-run",
-          hypothesisId: "H2",
-          location: "OrchestrationController.ts:startGeneration:error",
-          message: "startGeneration error",
-          data: {
-            errorMessage: (error as any)?.message ?? String(error),
-            errorStack: error instanceof Error ? error.stack : undefined,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      $log.error(`[OrchestrationController] startGeneration error:`, error);
       throw error;
     }
   }
@@ -442,9 +376,11 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     // Send initial connection event (no event: header so onmessage receives it)
     res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase })}\n\n`);
 
-    // Handle client disconnect
+    // Handle client disconnect - use res.on("close") instead of req.on("close")
+    // req.on("close") can fire prematurely in some Express/TsED configurations
     let isConnected = true;
-    req.on("close", () => {
+    res.on("close", () => {
+      console.log(`[OrchestrationController] SSE connection closed for runId: ${runId}`);
       isConnected = false;
     });
 
@@ -457,15 +393,16 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
 
     // First, send all existing events from the stream (catch up)
     // Track the last event ID to avoid race condition when switching to live streaming
+    // Using "$" would miss events published between catch-up read and live streaming start
     let lastEventId = "0";
     try {
       const existingEvents = await this.redisStreams.getEvents(runId, "0", 1000);
       console.log(`[OrchestrationController] Sending ${existingEvents.length} existing events for runId: ${runId}`);
       const cinematicCount = existingEvents.filter(e => e.type === "agent_thought" || e.type === "agent_dialogue").length;
       console.log(`[OrchestrationController] Found ${cinematicCount} cinematic events in existing events`);
+      
+      let sentCount = 0;
       for (const event of existingEvents) {
-        if (!isConnected) break;
-        
         // Log cinematic events
         if (event.type === "agent_thought" || event.type === "agent_dialogue") {
           console.log(`[OrchestrationController] Streaming existing cinematic event:`, event.type, `runId: ${runId}`, event.data);
@@ -481,13 +418,22 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           data: event.data,
         });
         res.write(`data: ${sseData}\n\n`);
+        sentCount++;
+        
+        // Track the last event ID for seamless transition to live streaming
+        if (event.id) {
+          lastEventId = event.id;
+        }
       }
+      console.log(`[OrchestrationController] Successfully sent ${sentCount} existing events for runId: ${runId}, lastEventId: ${lastEventId}`);
     } catch (error) {
       console.error(`[OrchestrationController] Error getting existing events:`, error, error instanceof Error ? error.stack : '');
     }
 
-    // Then stream new events from Redis (starting from the end)
-    const eventGenerator = this.redisStreams.streamEvents(runId, "$", 15000);
+    // Then stream new events from Redis, starting AFTER the last event we sent
+    // This prevents the "cursor gap" where events published between catch-up and live streaming are missed
+    console.log(`[OrchestrationController] Starting live streaming from lastEventId: ${lastEventId} for runId: ${runId}`);
+    const eventGenerator = this.redisStreams.streamEvents(runId, lastEventId, 15000);
 
     try {
       for await (const event of eventGenerator) {
