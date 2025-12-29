@@ -54,11 +54,16 @@ export class ProfilerAgent extends BaseAgent {
     if (phase === GenerationPhase.CHARACTERS) {
       const parsed = this.parseJSONArray(response);
       const validated = this.validateOutput(parsed, CharactersArraySchema, runId);
+      // Emit the actual generated content for the frontend to display
+      await this.emitMessage(runId, { characters: validated }, phase);
+      await this.emitThought(runId, "Character profiles complete. Ready for worldbuilding.", "neutral", AgentType.WORLDBUILDER);
       return { content: validated as Record<string, unknown>[] };
     }
 
     // For NARRATOR_DESIGN, return as-is (simple object)
     const content = this.parseJSON(response);
+    // Emit the actual generated content for the frontend to display
+    await this.emitMessage(runId, content as Record<string, unknown>, phase);
     return { content: content as Record<string, unknown> };
   }
 

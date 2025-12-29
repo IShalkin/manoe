@@ -240,6 +240,36 @@ export abstract class BaseAgent {
   }
 
   /**
+   * Emit agent message event with actual generated content
+   * This sends the LLM-generated content to the frontend for display in agent cards
+   */
+  protected async emitMessage(
+    runId: string,
+    content: string | Record<string, unknown>,
+    phase: GenerationPhase
+  ): Promise<void> {
+    if (this.redisStreams) {
+      // Convert content to string if it's an object
+      const contentStr = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+      // Truncate for logging but send full content
+      const logContent = contentStr.length > 200 ? contentStr.substring(0, 200) + "..." : contentStr;
+      console.log(`[${this.agentType}] Emitting message:`, logContent, `runId: ${runId}`);
+      try {
+        const eventId = await this.redisStreams.publishEvent(runId, "agent_message", {
+          agent: this.agentType,
+          content: contentStr,
+          phase,
+        });
+        console.log(`[${this.agentType}] Published message event with ID:`, eventId);
+      } catch (error) {
+        console.error(`[${this.agentType}] Error publishing message event:`, error);
+      }
+    } else {
+      console.warn(`[${this.agentType}] RedisStreams not available, cannot emit message`);
+    }
+  }
+
+  /**
    * Abstract method to be implemented by each agent
    */
   abstract execute(
