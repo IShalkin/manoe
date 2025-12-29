@@ -276,69 +276,114 @@ export declare const WorldbuildingSchema: z.ZodObject<{
 }, z.ZodTypeAny, "passthrough">>;
 /**
  * Outline schema (from StrategistAgent - Outlining phase)
+ * Made flexible to handle various LLM output formats
  */
 export declare const OutlineSchema: z.ZodObject<{
     scenes: z.ZodArray<z.ZodObject<{
         sceneNumber: z.ZodOptional<z.ZodNumber>;
         title: z.ZodString;
-        setting: z.ZodOptional<z.ZodString>;
-        characters: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
-        goal: z.ZodOptional<z.ZodString>;
-        conflict: z.ZodOptional<z.ZodString>;
-        emotionalBeat: z.ZodOptional<z.ZodString>;
-        dialogue: z.ZodOptional<z.ZodString>;
-        hook: z.ZodOptional<z.ZodString>;
+        setting: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        characters: z.ZodOptional<z.ZodUnion<[z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">, z.ZodString]>>;
+        goal: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        conflict: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        emotionalBeat: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        dialogue: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        hook: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
         wordCount: z.ZodOptional<z.ZodNumber>;
-    }, "strip", z.ZodTypeAny, {
-        title: string;
-        characters?: string[] | undefined;
-        sceneNumber?: number | undefined;
-        setting?: string | undefined;
-        emotionalBeat?: string | undefined;
-        wordCount?: number | undefined;
-        hook?: string | undefined;
-        goal?: string | undefined;
-        conflict?: string | undefined;
-        dialogue?: string | undefined;
-    }, {
-        title: string;
-        characters?: string[] | undefined;
-        sceneNumber?: number | undefined;
-        setting?: string | undefined;
-        emotionalBeat?: string | undefined;
-        wordCount?: number | undefined;
-        hook?: string | undefined;
-        goal?: string | undefined;
-        conflict?: string | undefined;
-        dialogue?: string | undefined;
-    }>, "many">;
-}, "strip", z.ZodTypeAny, {
-    scenes: {
-        title: string;
-        characters?: string[] | undefined;
-        sceneNumber?: number | undefined;
-        setting?: string | undefined;
-        emotionalBeat?: string | undefined;
-        wordCount?: number | undefined;
-        hook?: string | undefined;
-        goal?: string | undefined;
-        conflict?: string | undefined;
-        dialogue?: string | undefined;
-    }[];
-}, {
-    scenes: {
-        title: string;
-        characters?: string[] | undefined;
-        sceneNumber?: number | undefined;
-        setting?: string | undefined;
-        emotionalBeat?: string | undefined;
-        wordCount?: number | undefined;
-        hook?: string | undefined;
-        goal?: string | undefined;
-        conflict?: string | undefined;
-        dialogue?: string | undefined;
-    }[];
-}>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        sceneNumber: z.ZodOptional<z.ZodNumber>;
+        title: z.ZodString;
+        setting: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        characters: z.ZodOptional<z.ZodUnion<[z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">, z.ZodString]>>;
+        goal: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        conflict: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        emotionalBeat: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        dialogue: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        hook: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        wordCount: z.ZodOptional<z.ZodNumber>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        sceneNumber: z.ZodOptional<z.ZodNumber>;
+        title: z.ZodString;
+        setting: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        characters: z.ZodOptional<z.ZodUnion<[z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">, z.ZodString]>>;
+        goal: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        conflict: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        emotionalBeat: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        dialogue: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        hook: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        wordCount: z.ZodOptional<z.ZodNumber>;
+    }, z.ZodTypeAny, "passthrough">>, "many">;
+}, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+    scenes: z.ZodArray<z.ZodObject<{
+        sceneNumber: z.ZodOptional<z.ZodNumber>;
+        title: z.ZodString;
+        setting: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        characters: z.ZodOptional<z.ZodUnion<[z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">, z.ZodString]>>;
+        goal: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        conflict: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        emotionalBeat: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        dialogue: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        hook: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        wordCount: z.ZodOptional<z.ZodNumber>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        sceneNumber: z.ZodOptional<z.ZodNumber>;
+        title: z.ZodString;
+        setting: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        characters: z.ZodOptional<z.ZodUnion<[z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">, z.ZodString]>>;
+        goal: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        conflict: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        emotionalBeat: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        dialogue: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        hook: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        wordCount: z.ZodOptional<z.ZodNumber>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        sceneNumber: z.ZodOptional<z.ZodNumber>;
+        title: z.ZodString;
+        setting: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        characters: z.ZodOptional<z.ZodUnion<[z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">, z.ZodString]>>;
+        goal: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        conflict: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        emotionalBeat: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        dialogue: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        hook: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        wordCount: z.ZodOptional<z.ZodNumber>;
+    }, z.ZodTypeAny, "passthrough">>, "many">;
+}, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+    scenes: z.ZodArray<z.ZodObject<{
+        sceneNumber: z.ZodOptional<z.ZodNumber>;
+        title: z.ZodString;
+        setting: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        characters: z.ZodOptional<z.ZodUnion<[z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">, z.ZodString]>>;
+        goal: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        conflict: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        emotionalBeat: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        dialogue: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        hook: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        wordCount: z.ZodOptional<z.ZodNumber>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        sceneNumber: z.ZodOptional<z.ZodNumber>;
+        title: z.ZodString;
+        setting: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        characters: z.ZodOptional<z.ZodUnion<[z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">, z.ZodString]>>;
+        goal: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        conflict: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        emotionalBeat: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        dialogue: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        hook: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        wordCount: z.ZodOptional<z.ZodNumber>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        sceneNumber: z.ZodOptional<z.ZodNumber>;
+        title: z.ZodString;
+        setting: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        characters: z.ZodOptional<z.ZodUnion<[z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">, z.ZodString]>>;
+        goal: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        conflict: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        emotionalBeat: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        dialogue: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        hook: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString, "many">, z.ZodArray<z.ZodUnknown, "many">]>>;
+        wordCount: z.ZodOptional<z.ZodNumber>;
+    }, z.ZodTypeAny, "passthrough">>, "many">;
+}, z.ZodTypeAny, "passthrough">>;
 /**
  * Advanced Plan schema (from StrategistAgent - Advanced Planning phase)
  */

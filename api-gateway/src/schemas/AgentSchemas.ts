@@ -112,22 +112,33 @@ export const WorldbuildingSchema = z.object({
 }).passthrough();
 
 /**
+ * Flexible type for scene fields that can be string or array
+ * LLMs often return dialogue, characters, etc. as arrays instead of strings
+ */
+const FlexibleSceneField = z.union([
+  z.string(),
+  z.array(z.string()),
+  z.array(z.unknown()),
+]).optional();
+
+/**
  * Outline schema (from StrategistAgent - Outlining phase)
+ * Made flexible to handle various LLM output formats
  */
 export const OutlineSchema = z.object({
   scenes: z.array(z.object({
     sceneNumber: z.number().optional(),
     title: z.string().min(1),
-    setting: z.string().optional(),
-    characters: z.array(z.string()).optional(),
-    goal: z.string().optional(),
-    conflict: z.string().optional(),
-    emotionalBeat: z.string().optional(),
-    dialogue: z.string().optional(),
-    hook: z.string().optional(),
+    setting: FlexibleSceneField,
+    characters: z.union([z.array(z.string()), z.array(z.unknown()), z.string()]).optional(),
+    goal: FlexibleSceneField,
+    conflict: FlexibleSceneField,
+    emotionalBeat: FlexibleSceneField,
+    dialogue: FlexibleSceneField,
+    hook: FlexibleSceneField,
     wordCount: z.number().optional(),
-  })).min(1),
-});
+  }).passthrough()).min(1),
+}).passthrough();
 
 /**
  * Advanced Plan schema (from StrategistAgent - Advanced Planning phase)
