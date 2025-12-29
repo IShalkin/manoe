@@ -76,49 +76,47 @@ export class CriticAgent extends BaseAgent {
 
   /**
    * Determine if revision is needed based on critique
-   * IMPORTANT: This method was previously too lenient (always approving)
-   * Now it enforces stricter quality checks including word count
+   * Uses Guard Clause Pattern: check failure conditions first, then success conditions
+   * This prevents bugs where high scores could bypass issue checks
    */
   private isRevisionNeeded(critique: Record<string, unknown>): boolean {
-    // Check word count compliance first - this is a hard requirement
-    // LLMs often claim "Word count: 1900" when they only wrote 400 words
+    const hasIssues = Array.isArray(critique.issues) && critique.issues.length > 0;
+    const hasRevisionRequests = Array.isArray(critique.revisionRequests) && critique.revisionRequests.length > 0;
+    const score = typeof critique.score === "number" ? critique.score : null;
+
+    // 1. Check hard failures first (guard clauses)
+    // Word count compliance is a hard requirement - LLMs often lie about word counts
     if (critique.wordCountCompliance === false) {
       return true;
     }
 
-    // Check explicit approval - but only if score is also high
-    if (critique.approved === true && typeof critique.score === "number" && critique.score >= 8) {
-      return false;
-    }
-
-    // Check score threshold with stricter rules
-    if (typeof critique.score === "number") {
-      // Score below 7 always needs revision
-      if (critique.score < 7) {
-        return true;
-      }
-      // Score 7-8 needs revision if there are any issues
-      if (critique.score < 8 && Array.isArray(critique.issues) && critique.issues.length > 0) {
-        return true;
-      }
-    }
-
-    // Check if there are issues that need addressing
-    if (Array.isArray(critique.issues) && critique.issues.length > 0) {
+    // Score below 7 always needs revision
+    if (score !== null && score < 7) {
       return true;
     }
 
-    // Check if there are revision requests
-    if (Array.isArray(critique.revisionRequests) && critique.revisionRequests.length > 0) {
+    // Score 7-8 needs revision if there are any issues
+    if (score !== null && score < 8 && hasIssues) {
       return true;
     }
 
-    // Default to NOT needing revision only if score is high enough
-    if (typeof critique.score === "number" && critique.score >= 8) {
+    // Any issues or revision requests require revision (even with high score)
+    if (hasIssues || hasRevisionRequests) {
+      return true;
+    }
+
+    // 2. Check success conditions
+    // Only approve if explicitly approved AND score is high
+    if (critique.approved === true && score !== null && score >= 8) {
       return false;
     }
 
-    // If no score provided, default to needing revision (be strict)
+    // High score without issues is approved
+    if (score !== null && score >= 8) {
+      return false;
+    }
+
+    // 3. Default to safe behavior - require revision if uncertain
     return true;
   }
 
