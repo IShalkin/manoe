@@ -44,34 +44,42 @@ export class LLMProviderService {
    */
   async createCompletion(options: CompletionOptions): Promise<LLMResponse> {
     const startTime = Date.now();
+    console.log(`[LLMProviderService] Starting ${options.provider} completion with model ${options.model}`);
 
     let response: LLMResponse;
 
-    switch (options.provider) {
-      case LLMProvider.OPENAI:
-        response = await this.openAICompletion(options);
-        break;
-      case LLMProvider.ANTHROPIC:
-        response = await this.anthropicCompletion(options);
-        break;
-      case LLMProvider.GEMINI:
-        response = await this.geminiCompletion(options);
-        break;
-      case LLMProvider.OPENROUTER:
-        response = await this.openRouterCompletion(options);
-        break;
-      case LLMProvider.DEEPSEEK:
-        response = await this.deepSeekCompletion(options);
-        break;
-      case LLMProvider.VENICE:
-        response = await this.veniceCompletion(options);
-        break;
-      default:
-        throw new Error(`Unsupported provider: ${options.provider}`);
-    }
+    try {
+      switch (options.provider) {
+        case LLMProvider.OPENAI:
+          response = await this.openAICompletion(options);
+          break;
+        case LLMProvider.ANTHROPIC:
+          response = await this.anthropicCompletion(options);
+          break;
+        case LLMProvider.GEMINI:
+          response = await this.geminiCompletion(options);
+          break;
+        case LLMProvider.OPENROUTER:
+          response = await this.openRouterCompletion(options);
+          break;
+        case LLMProvider.DEEPSEEK:
+          response = await this.deepSeekCompletion(options);
+          break;
+        case LLMProvider.VENICE:
+          response = await this.veniceCompletion(options);
+          break;
+        default:
+          throw new Error(`Unsupported provider: ${options.provider}`);
+      }
 
-    response.latencyMs = Date.now() - startTime;
-    return response;
+      response.latencyMs = Date.now() - startTime;
+      console.log(`[LLMProviderService] ${options.provider} completion finished in ${response.latencyMs}ms, tokens: ${response.usage?.totalTokens ?? 0}`);
+      return response;
+    } catch (error) {
+      const elapsed = Date.now() - startTime;
+      console.error(`[LLMProviderService] ${options.provider} completion failed after ${elapsed}ms:`, error instanceof Error ? error.message : error);
+      throw error;
+    }
   }
 
   /**
@@ -133,6 +141,7 @@ export class LLMProviderService {
     const client = new OpenAI({
       apiKey,
       baseURL: PROVIDER_BASE_URLS.openai,
+      timeout: 120000, // 2 minute timeout
     });
 
     const requestParams: OpenAI.ChatCompletionCreateParams = {
@@ -179,6 +188,7 @@ export class LLMProviderService {
     const apiKey = this.getApiKey(LLMProvider.ANTHROPIC, options.apiKey);
     const client = new Anthropic({
       apiKey,
+      timeout: 120000, // 2 minute timeout
     });
 
     // Extract system message
@@ -287,6 +297,7 @@ export class LLMProviderService {
     const client = new OpenAI({
       apiKey,
       baseURL: PROVIDER_BASE_URLS.openrouter,
+      timeout: 120000, // 2 minute timeout
       defaultHeaders: {
         "HTTP-Referer": "https://manoe.iliashalkin.com",
         "X-Title": "MANOE",
@@ -330,6 +341,7 @@ export class LLMProviderService {
     const client = new OpenAI({
       apiKey,
       baseURL: PROVIDER_BASE_URLS.deepseek,
+      timeout: 120000, // 2 minute timeout
     });
 
     const requestParams: OpenAI.ChatCompletionCreateParams = {
@@ -369,6 +381,7 @@ export class LLMProviderService {
     const client = new OpenAI({
       apiKey,
       baseURL: PROVIDER_BASE_URLS.venice,
+      timeout: 120000, // 2 minute timeout
     });
 
     const requestParams: OpenAI.ChatCompletionCreateParams = {
