@@ -384,9 +384,41 @@ export function DashboardPage() {
     }
     
     try {
+      // Create or update project FIRST to get the projectId
+      // This ensures the project exists in Supabase before the orchestrator tries to save artifacts
+      let projectId: string;
+      
+      if (editingProject) {
+        await updateProject(editingProject.id, {
+          name: formData.name || 'Untitled Project',
+          seedIdea: formData.seedIdea,
+          moralCompass: formData.moralCompass,
+          targetAudience: formData.targetAudience,
+          themes: formData.themes,
+          outputFormat: formData.outputFormat,
+          readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
+          status: 'pending',
+          result: null,
+        });
+        projectId = editingProject.id;
+      } else {
+        const newProject = await createProject({
+          name: formData.name || 'Untitled Project',
+          seedIdea: formData.seedIdea,
+          moralCompass: formData.moralCompass,
+          targetAudience: formData.targetAudience,
+          themes: formData.themes,
+          outputFormat: formData.outputFormat,
+          readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
+        });
+        projectId = newProject.id;
+      }
+      
+      // Now call generate with the projectId so orchestrator uses the same ID
       const response = await orchestratorFetch('/generate', {
         method: 'POST',
         body: JSON.stringify({
+          projectId: projectId,
           provider: architectConfig.provider,
           model: architectConfig.model,
           api_key: apiKey,
@@ -412,34 +444,6 @@ export function DashboardPage() {
       const data = await response.json();
       
       if (data.success && data.run_id) {
-        let projectId: string;
-        
-        if (editingProject) {
-          await updateProject(editingProject.id, {
-            name: formData.name || 'Untitled Project',
-            seedIdea: formData.seedIdea,
-            moralCompass: formData.moralCompass,
-            targetAudience: formData.targetAudience,
-            themes: formData.themes,
-            outputFormat: formData.outputFormat,
-            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
-            status: 'pending',
-            result: null,
-          });
-          projectId = editingProject.id;
-        } else {
-          const newProject = await createProject({
-            name: formData.name || 'Untitled Project',
-            seedIdea: formData.seedIdea,
-            moralCompass: formData.moralCompass,
-            targetAudience: formData.targetAudience,
-            themes: formData.themes,
-            outputFormat: formData.outputFormat,
-            readerSensibilities: formData.readerSensibilities as unknown as Record<string, unknown>,
-          });
-          projectId = newProject.id;
-        }
-        
         await startGeneration(projectId, data.run_id);
         
         closeProjectModal();
@@ -448,7 +452,7 @@ export function DashboardPage() {
       } else {
         setError(data.error || 'Failed to start generation. Please try again.');
       }
-    } catch (err) {
+    }catch (err) {
       console.error('[DashboardPage] Generation error:', err);
       let errorMsg = 'Unknown error';
       if (err instanceof Error) {
