@@ -22,7 +22,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 var LLMProviderService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LLMProviderService = void 0;
+exports.LLMProviderService = exports.TokenLimitCache = void 0;
+exports.extractMaxOutputTokensFromError = extractMaxOutputTokensFromError;
 const di_1 = require("@tsed/di");
 const openai_1 = __importDefault(require("openai"));
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
@@ -64,6 +65,47 @@ const MODEL_CONTEXT_LENGTHS = {
     "default": 128000,
 };
 /**
+ * Model max OUTPUT token limits (completion tokens only)
+ * Different from context length - this is the max tokens the model can generate
+ * Used to prevent "max_tokens exceeds model limit" errors
+ */
+const MODEL_MAX_OUTPUT_TOKENS = {
+    // Claude models (Anthropic)
+    "claude-3-5-haiku": 8192,
+    "claude-3-5-sonnet": 8192,
+    "claude-3-haiku": 4096,
+    "claude-3-sonnet": 4096,
+    "claude-3-opus": 4096,
+    "claude-opus-4": 16384,
+    "claude-sonnet-4": 16384,
+    // GPT-4 variants (OpenAI)
+    "gpt-4": 8192,
+    "gpt-4-0314": 8192,
+    "gpt-4-0613": 8192,
+    "gpt-4-32k": 8192,
+    "gpt-4-turbo": 4096,
+    "gpt-4-1106": 4096,
+    "gpt-4-0125": 4096,
+    "gpt-4o": 16384,
+    "gpt-4o-mini": 16384,
+    "gpt-5": 32768,
+    "o1": 32768,
+    "o3": 32768,
+    // GPT-3.5 variants
+    "gpt-3.5-turbo": 4096,
+    // Gemini models
+    "gemini-3-pro": 8192,
+    "gemini-3-flash": 8192,
+    "gemini-2": 8192,
+    "gemini-1.5-pro": 8192,
+    "gemini-1.5-flash": 8192,
+    // DeepSeek models
+    "deepseek-v3": 8192,
+    "deepseek-r1": 8192,
+    // Default (conservative)
+    "default": 4096,
+};
+/**
  * Get the context length for a model, with fallback to default
  */
 function getModelContextLength(model) {
@@ -79,6 +121,181 @@ function getModelContextLength(model) {
     }
     return MODEL_CONTEXT_LENGTHS["default"];
 }
+/**
+ * Get the max output tokens for a model, with fallback to default
+ * Handles both direct model names and OpenRouter-style names (provider/model)
+ */
+function getModelMaxOutputTokens(model) {
+    // Normalize model name: remove provider prefix if present (e.g., "anthropic/claude-3-5-haiku" -> "claude-3-5-haiku")
+    const normalizedModel = model.includes("/") ? model.split("/").pop() : model;
+    // Check for exact match first
+    if (MODEL_MAX_OUTPUT_TOKENS[normalizedModel]) {
+        return MODEL_MAX_OUTPUT_TOKENS[normalizedModel];
+    }
+    // Check for prefix matches (e.g., "claude-3-5-haiku-20241022" matches "claude-3-5-haiku")
+    for (const [key, value] of Object.entries(MODEL_MAX_OUTPUT_TOKENS)) {
+        if (key !== "default" && normalizedModel.startsWith(key)) {
+            return value;
+        }
+    }
+    return MODEL_MAX_OUTPUT_TOKENS["default"];
+}
+/**
+ * Cap max_tokens to the model's output limit
+ * Returns the capped value and logs if capping occurred
+ */
+function capMaxTokensToModelLimit(model, requestedMaxTokens) {
+    const modelLimit = getModelMaxOutputTokens(model);
+    if (requestedMaxTokens > modelLimit) {
+        console.log(`[LLMProviderService] Capping max_tokens for ${model}: requested ${requestedMaxTokens}, model limit ${modelLimit}`);
+        return modelLimit;
+    }
+    return requestedMaxTokens;
+}
+/**
+ * Extract max output tokens limit from provider error messages
+ * Supports multiple provider error formats for auto-discovery of limits
+ *
+ * @param provider - The LLM provider name
+ * @param error - The error object or message string
+ * @returns TokenLimitError if limit was extracted, null otherwise
+ */
+function extractMaxOutputTokensFromError(provider, error) {
+    const errorMessage = typeof error === "string" ? error : error.message;
+    // Anthropic format: "max_tokens: 10240 > 8192, which is the maximum..."
+    const anthropicMatch = errorMessage.match(/max_tokens:\s*(\d+)\s*>\s*(\d+)/i);
+    if (anthropicMatch) {
+        return {
+            requested: parseInt(anthropicMatch[1]),
+            allowed: parseInt(anthropicMatch[2]),
+            provider,
+        };
+    }
+    // OpenAI format: "maximum context length is X tokens... you requested Y"
+    // Also handles: "This model's maximum context length is X tokens, however you requested Y tokens"
+    const openaiContextMatch = errorMessage.match(/maximum.*?context.*?(\d+)\s*tokens.*requested\s*(\d+)/i);
+    if (openaiContextMatch) {
+        return {
+            requested: parseInt(openaiContextMatch[2]),
+            allowed: parseInt(openaiContextMatch[1]),
+            provider,
+        };
+    }
+    // OpenAI max_tokens format: "max_tokens is too large: X. This model supports at most Y"
+    const openaiMaxTokensMatch = errorMessage.match(/max_tokens.*?too large:\s*(\d+).*supports.*?(\d+)/i);
+    if (openaiMaxTokensMatch) {
+        return {
+            requested: parseInt(openaiMaxTokensMatch[1]),
+            allowed: parseInt(openaiMaxTokensMatch[2]),
+            provider,
+        };
+    }
+    // Gemini format: "maxOutputTokens must be <= X"
+    const geminiMatch = errorMessage.match(/maxOutputTokens.*?<=\s*(\d+)/i);
+    if (geminiMatch) {
+        return {
+            requested: 0,
+            allowed: parseInt(geminiMatch[1]),
+            provider,
+        };
+    }
+    // DeepSeek format (similar to OpenAI): "max_tokens exceeds maximum of X"
+    const deepseekMatch = errorMessage.match(/max_tokens.*?maximum.*?(\d+)/i);
+    if (deepseekMatch) {
+        return {
+            requested: 0,
+            allowed: parseInt(deepseekMatch[1]),
+            provider,
+        };
+    }
+    // Generic format: "exceeds the maximum of X tokens"
+    const genericMatch = errorMessage.match(/exceeds.*?maximum.*?(\d+)\s*tokens/i);
+    if (genericMatch) {
+        return {
+            requested: 0,
+            allowed: parseInt(genericMatch[1]),
+            provider,
+        };
+    }
+    return null;
+}
+/**
+ * In-memory cache for discovered token limits
+ * Persists limits to Redis if available for cross-instance sharing
+ */
+class TokenLimitCache {
+    memoryCache = new Map();
+    redisClient = null;
+    static instance = null;
+    constructor() { }
+    static getInstance() {
+        if (!TokenLimitCache.instance) {
+            TokenLimitCache.instance = new TokenLimitCache();
+        }
+        return TokenLimitCache.instance;
+    }
+    /**
+     * Set Redis client for persistent caching
+     */
+    setRedisClient(client) {
+        this.redisClient = client;
+    }
+    /**
+     * Get cached token limit for a model
+     * Checks memory first, then Redis if available
+     */
+    async get(model) {
+        const normalizedModel = this.normalizeModelName(model);
+        if (this.memoryCache.has(normalizedModel)) {
+            return this.memoryCache.get(normalizedModel);
+        }
+        if (this.redisClient) {
+            try {
+                const cached = await this.redisClient.get(`token_limit:${normalizedModel}`);
+                if (cached) {
+                    const limit = parseInt(cached);
+                    this.memoryCache.set(normalizedModel, limit);
+                    return limit;
+                }
+            }
+            catch (error) {
+                console.warn("[TokenLimitCache] Redis get failed:", error);
+            }
+        }
+        return null;
+    }
+    /**
+     * Cache a discovered token limit
+     * Stores in memory and Redis (with 7-day TTL)
+     */
+    async set(model, limit) {
+        const normalizedModel = this.normalizeModelName(model);
+        this.memoryCache.set(normalizedModel, limit);
+        console.log(`[TokenLimitCache] Discovered limit for ${normalizedModel}: ${limit}`);
+        if (this.redisClient) {
+            try {
+                const ttl = 7 * 24 * 60 * 60;
+                await this.redisClient.setex(`token_limit:${normalizedModel}`, ttl, limit.toString());
+            }
+            catch (error) {
+                console.warn("[TokenLimitCache] Redis set failed:", error);
+            }
+        }
+    }
+    /**
+     * Normalize model name for consistent caching
+     */
+    normalizeModelName(model) {
+        return model.includes("/") ? model.split("/").pop() : model;
+    }
+    /**
+     * Clear the cache (useful for testing)
+     */
+    clear() {
+        this.memoryCache.clear();
+    }
+}
+exports.TokenLimitCache = TokenLimitCache;
 let LLMProviderService = class LLMProviderService {
     static { LLMProviderService_1 = this; }
     /**
@@ -254,9 +471,12 @@ let LLMProviderService = class LLMProviderService {
         if (options.responseFormat?.type === "json_object") {
             systemMessage += "\n\nYou MUST respond with valid JSON only, no other text.";
         }
+        // Cap max_tokens to model's output limit to prevent "max_tokens exceeds model limit" errors
+        const requestedMaxTokens = options.maxTokens ?? 4096;
+        const cappedMaxTokens = capMaxTokensToModelLimit(options.model, requestedMaxTokens);
         const response = await client.messages.create({
             model: options.model,
-            max_tokens: options.maxTokens ?? 4096,
+            max_tokens: cappedMaxTokens,
             system: systemMessage,
             messages: chatMessages,
             temperature: options.temperature ?? 0.7,
@@ -302,11 +522,15 @@ let LLMProviderService = class LLMProviderService {
         if (options.responseFormat?.type === "json_object") {
             fullPrompt += "\n\nYou MUST respond with valid JSON only, no other text.";
         }
+        // Cap maxOutputTokens to model's output limit
+        const cappedMaxTokens = options.maxTokens
+            ? capMaxTokensToModelLimit(options.model, options.maxTokens)
+            : undefined;
         const result = await model.generateContent({
             contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
             generationConfig: {
                 temperature: options.temperature ?? 0.7,
-                maxOutputTokens: options.maxTokens,
+                maxOutputTokens: cappedMaxTokens,
             },
         });
         const response = result.response;
@@ -343,7 +567,8 @@ let LLMProviderService = class LLMProviderService {
             temperature: options.temperature ?? 0.7,
         };
         if (options.maxTokens) {
-            requestParams.max_tokens = options.maxTokens;
+            // Cap max_tokens to model's output limit
+            requestParams.max_tokens = capMaxTokensToModelLimit(options.model, options.maxTokens);
         }
         if (options.responseFormat?.type === "json_object") {
             requestParams.response_format = { type: "json_object" };
@@ -377,7 +602,8 @@ let LLMProviderService = class LLMProviderService {
             temperature: options.temperature ?? 0.7,
         };
         if (options.maxTokens) {
-            requestParams.max_tokens = options.maxTokens;
+            // Cap max_tokens to model's output limit
+            requestParams.max_tokens = capMaxTokensToModelLimit(options.model, options.maxTokens);
         }
         if (options.responseFormat?.type === "json_object") {
             requestParams.response_format = { type: "json_object" };
@@ -411,7 +637,8 @@ let LLMProviderService = class LLMProviderService {
             temperature: options.temperature ?? 0.7,
         };
         if (options.maxTokens) {
-            requestParams.max_tokens = options.maxTokens;
+            // Cap max_tokens to model's output limit
+            requestParams.max_tokens = capMaxTokensToModelLimit(options.model, options.maxTokens);
         }
         if (options.responseFormat?.type === "json_object") {
             requestParams.response_format = { type: "json_object" };
@@ -461,20 +688,50 @@ let LLMProviderService = class LLMProviderService {
         return false;
     }
     /**
+     * Check if an error is a token limit error that can be retried with a lower limit
+     */
+    isTokenLimitError(error) {
+        if (error instanceof Error) {
+            const message = error.message.toLowerCase();
+            return (message.includes("max_tokens") ||
+                message.includes("maximum context") ||
+                message.includes("maxoutputtokens") ||
+                message.includes("exceeds") && message.includes("token"));
+        }
+        return false;
+    }
+    /**
      * Create completion with automatic retry for transient errors
+     * Also handles token limit errors with auto-discovery and caching
      */
     async createCompletionWithRetry(options, maxRetries = 3, baseDelayMs = 1000) {
         let lastError = null;
+        const tokenLimitCache = TokenLimitCache.getInstance();
+        let tokenLimitRetried = false;
+        const cachedLimit = await tokenLimitCache.get(options.model);
+        if (cachedLimit && options.maxTokens && options.maxTokens > cachedLimit) {
+            console.log(`[LLMProviderService] Using cached limit for ${options.model}: ${cachedLimit}`);
+            options = { ...options, maxTokens: cachedLimit };
+        }
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
                 return await this.createCompletion(options);
             }
             catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
+                if (this.isTokenLimitError(error) && !tokenLimitRetried) {
+                    const limitError = extractMaxOutputTokensFromError(options.provider, lastError);
+                    if (limitError) {
+                        await tokenLimitCache.set(options.model, limitError.allowed);
+                        console.log(`[LLMProviderService] Retrying with discovered limit: ${limitError.allowed}`);
+                        options = { ...options, maxTokens: limitError.allowed };
+                        tokenLimitRetried = true;
+                        continue;
+                    }
+                }
                 if (!this.isRetryableError(error) || attempt === maxRetries - 1) {
                     throw lastError;
                 }
-                // Exponential backoff
                 const delay = baseDelayMs * Math.pow(2, attempt);
                 await new Promise((resolve) => setTimeout(resolve, delay));
             }

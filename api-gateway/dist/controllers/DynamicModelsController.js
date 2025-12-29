@@ -32,7 +32,7 @@ let DynamicModelsController = class DynamicModelsController {
             };
         }
         catch (error) {
-            console.error(`[DynamicModelsController] Error fetching models for ${provider}:`, error);
+            common_1.$log.error(`[DynamicModelsController] Error fetching models for ${provider}:`, error);
             return {
                 success: false,
                 error: error instanceof Error ? error.message : "Failed to fetch models",

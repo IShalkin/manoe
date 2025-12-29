@@ -8,6 +8,10 @@
  * - Real-time event streaming to SSE endpoints
  * - Event persistence and replay capability
  * - Heartbeat support for connection keep-alive
+ *
+ * IMPORTANT: Uses separate Redis connections for reading and writing to avoid
+ * head-of-line blocking. XREAD BLOCK commands on a shared connection would
+ * block all other commands (including XADD publishes) until the block times out.
  */
 var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
     var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
@@ -26,7 +30,14 @@ exports.RedisStreamsService = void 0;
 const di_1 = require("@tsed/di");
 const ioredis_1 = __importDefault(require("ioredis"));
 let RedisStreamsService = class RedisStreamsService {
-    client = null;
+    // Dedicated writer client - never blocked by XREAD
+    writerClient = null;
+    // Redis URL for creating reader connections
+    redisUrl = "";
+    // Legacy alias for backward compatibility
+    get client() {
+        return this.writerClient;
+    }
     // Stream name templates
     STREAM_EVENTS = "manoe:events:{runId}";
     STREAM_GLOBAL = "manoe:events:global";
@@ -36,26 +47,39 @@ let RedisStreamsService = class RedisStreamsService {
         this.connect();
     }
     /**
-     * Establish connection to Redis
+     * Establish connection to Redis (writer client only)
+     * Reader connections are created per-stream to avoid head-of-line blocking
      */
     connect() {
-        const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
-        this.client = new ioredis_1.default(redisUrl);
-        this.client.on("error", (err) => {
-            console.error("Redis Streams connection error:", err);
+        this.redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+        this.writerClient = new ioredis_1.default(this.redisUrl);
+        this.writerClient.on("error", (err) => {
+            console.error("Redis Streams writer connection error:", err);
         });
-        this.client.on("connect", () => {
-            console.log("Redis Streams connected");
+        this.writerClient.on("connect", () => {
+            console.log("Redis Streams writer connected");
         });
     }
     /**
-     * Get Redis client
+     * Get the writer Redis client (for XADD, XRANGE, etc.)
+     * This client is never blocked by XREAD operations
      */
     getClient() {
-        if (!this.client) {
-            throw new Error("Redis client not initialized");
+        if (!this.writerClient) {
+            throw new Error("Redis writer client not initialized");
         }
-        return this.client;
+        return this.writerClient;
+    }
+    /**
+     * Create a dedicated reader connection for streaming
+     * Each SSE connection gets its own reader to avoid blocking other operations
+     */
+    createReaderConnection() {
+        const reader = new ioredis_1.default(this.redisUrl);
+        reader.on("error", (err) => {
+            console.error("Redis Streams reader connection error:", err);
+        });
+        return reader;
     }
     /**
      * Get the stream key for a specific run
@@ -110,49 +134,67 @@ let RedisStreamsService = class RedisStreamsService {
     /**
      * Stream events from a run-specific stream (async generator)
      *
+     * IMPORTANT: Creates a dedicated Redis connection for this stream to avoid
+     * head-of-line blocking. The XREAD BLOCK command would otherwise block all
+     * other Redis operations on a shared connection (including XADD publishes).
+     *
      * @param runId - Unique identifier for the generation run
      * @param startId - Start reading from this ID ("$" for new events only)
      * @param blockMs - Block timeout in milliseconds
      */
     async *streamEvents(runId, startId = "$", blockMs = 5000) {
-        const client = this.getClient();
+        // Create a dedicated reader connection for this stream
+        // This prevents XREAD BLOCK from blocking XADD operations on the writer
+        const readerClient = this.createReaderConnection();
         const streamKey = this.getStreamKey(runId);
         let lastId = startId;
-        while (true) {
-            try {
-                const entries = await client.call("XREAD", "BLOCK", blockMs.toString(), "COUNT", "10", "STREAMS", streamKey, lastId);
-                if (entries && entries.length > 0) {
-                    for (const [, streamEntries] of entries) {
-                        for (const [entryId, fields] of streamEntries) {
-                            lastId = entryId;
-                            yield this.parseStreamEntry(entryId, fields);
+        try {
+            while (true) {
+                try {
+                    const entries = await readerClient.call("XREAD", "BLOCK", blockMs.toString(), "COUNT", "10", "STREAMS", streamKey, lastId);
+                    if (entries && entries.length > 0) {
+                        for (const [, streamEntries] of entries) {
+                            for (const [entryId, fields] of streamEntries) {
+                                lastId = entryId;
+                                yield this.parseStreamEntry(entryId, fields);
+                            }
                         }
                     }
+                    else {
+                        // No new events, yield heartbeat
+                        yield {
+                            id: "heartbeat",
+                            type: "heartbeat",
+                            runId: runId,
+                            timestamp: new Date().toISOString(),
+                            data: {},
+                        };
+                    }
                 }
-                else {
-                    // No new events, yield heartbeat
+                catch (error) {
+                    if (error.message?.includes("NOGROUP")) {
+                        break;
+                    }
+                    // Log error and yield error event
                     yield {
-                        id: "heartbeat",
-                        type: "heartbeat",
+                        id: "error",
+                        type: "error",
                         runId: runId,
                         timestamp: new Date().toISOString(),
-                        data: {},
+                        data: { error: String(error) },
                     };
+                    await this.sleep(1000);
                 }
             }
-            catch (error) {
-                if (error.message?.includes("NOGROUP")) {
-                    break;
-                }
-                // Log error and yield error event
-                yield {
-                    id: "error",
-                    type: "error",
-                    runId: runId,
-                    timestamp: new Date().toISOString(),
-                    data: { error: String(error) },
-                };
-                await this.sleep(1000);
+        }
+        finally {
+            // Clean up the dedicated reader connection when the generator ends
+            // This happens when the SSE connection closes or the generator is stopped
+            try {
+                await readerClient.quit();
+            }
+            catch (e) {
+                // Ignore cleanup errors
             }
         }
     }
@@ -284,12 +326,13 @@ let RedisStreamsService = class RedisStreamsService {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
     /**
-     * Disconnect from Redis
+     * Disconnect from Redis (writer client)
+     * Note: Reader connections are cleaned up automatically when their generators end
      */
     async disconnect() {
-        if (this.client) {
-            await this.client.quit();
-            this.client = null;
+        if (this.writerClient) {
+            await this.writerClient.quit();
+            this.writerClient = null;
         }
     }
 };

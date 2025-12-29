@@ -1,19 +1,4 @@
-interface ResearchHistoryItem {
-    id: string;
-    provider: string;
-    model?: string;
-    seed_idea: string;
-    target_audience?: string;
-    themes?: string[];
-    moral_compass?: string;
-    content: string;
-    prompt_context?: string;
-    citations?: Array<{
-        url: string;
-        title?: string;
-    }>;
-    created_at: string;
-}
+import { ResearchHistoryItem } from "../services/SupabaseService";
 interface ResearchHistoryResponse {
     success: boolean;
     research: ResearchHistoryItem[];
