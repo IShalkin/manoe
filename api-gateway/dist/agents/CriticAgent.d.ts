@@ -15,6 +15,8 @@ export declare class CriticAgent extends BaseAgent {
     execute(context: AgentContext, options: GenerationOptions): Promise<AgentOutput>;
     /**
      * Determine if revision is needed based on critique
+     * Uses Guard Clause Pattern: check failure conditions first, then success conditions
+     * This prevents bugs where high scores could bypass issue checks
      */
     private isRevisionNeeded;
     /**

@@ -48,25 +48,40 @@ class CriticAgent extends BaseAgent_1.BaseAgent {
     }
     /**
      * Determine if revision is needed based on critique
+     * Uses Guard Clause Pattern: check failure conditions first, then success conditions
+     * This prevents bugs where high scores could bypass issue checks
      */
     isRevisionNeeded(critique) {
-        // Check explicit approval
-        if (critique.approved === true) {
-            return false;
-        }
-        // Check score threshold (8+ is approved)
-        if (typeof critique.score === "number" && critique.score >= 8) {
-            return false;
-        }
-        // Check if there are issues that need addressing
-        if (Array.isArray(critique.issues) && critique.issues.length > 0) {
+        const hasIssues = Array.isArray(critique.issues) && critique.issues.length > 0;
+        const hasRevisionRequests = Array.isArray(critique.revisionRequests) && critique.revisionRequests.length > 0;
+        const score = typeof critique.score === "number" ? critique.score : null;
+        // 1. Check hard failures first (guard clauses)
+        // Word count compliance is a hard requirement - LLMs often lie about word counts
+        if (critique.wordCountCompliance === false) {
             return true;
         }
-        // Check if there are revision requests
-        if (Array.isArray(critique.revisionRequests) && critique.revisionRequests.length > 0) {
+        // Score below 7 always needs revision
+        if (score !== null && score < 7) {
             return true;
         }
-        // Default to needing revision if not explicitly approved
+        // Score 7-8 needs revision if there are any issues
+        if (score !== null && score < 8 && hasIssues) {
+            return true;
+        }
+        // Any issues or revision requests require revision (even with high score)
+        if (hasIssues || hasRevisionRequests) {
+            return true;
+        }
+        // 2. Check success conditions
+        // Only approve if explicitly approved AND score is high
+        if (critique.approved === true && score !== null && score >= 8) {
+            return false;
+        }
+        // High score without issues is approved
+        if (score !== null && score >= 8) {
+            return false;
+        }
+        // 3. Default to safe behavior - require revision if uncertain
         return true;
     }
     /**
@@ -120,9 +135,23 @@ Key Constraints: ${variables.keyConstraints || "No constraints established yet."
             if (!draft) {
                 throw new Error(`No draft found for scene ${sceneNum}`);
             }
+            // Get target word count from outline
+            const outline = state.outline;
+            const scenes = outline?.scenes || [];
+            const sceneOutline = scenes[sceneNum - 1] || {};
+            const targetWordCount = sceneOutline.wordCount ?? 1500;
+            // Calculate actual word count (don't trust LLM's self-reported count)
+            const actualWordCount = String(draft.content || "").split(/\s+/).filter(w => w.length > 0).length;
+            const wordCountRatio = actualWordCount / Number(targetWordCount);
             return `Critique Scene ${sceneNum}:
 
 ${draft.content}
+
+WORD COUNT CHECK (CRITICAL):
+- Target word count: ${targetWordCount} words
+- Actual word count: ${actualWordCount} words
+- Compliance: ${wordCountRatio >= 0.7 ? "PASS" : "FAIL"} (${Math.round(wordCountRatio * 100)}% of target)
+${wordCountRatio < 0.7 ? "⚠️ SCENE IS TOO SHORT - MUST REQUEST EXPANSION" : ""}
 
 Evaluate:
 1. Prose quality (clarity, flow, voice)
@@ -132,16 +161,18 @@ Evaluate:
 5. Dialogue authenticity
 6. Sensory details
 7. Constraint adherence
+8. Word count compliance (MUST be at least 70% of target)
 
 KEY CONSTRAINTS TO CHECK:
 ${constraintsBlock}
 
 Output JSON with:
-- approved: boolean (true if no major issues)
-- score: number (1-10)
+- approved: boolean (true ONLY if no major issues AND word count >= 70% of target)
+- score: number (1-10, max 6 if word count is below 70%)
+- wordCountCompliance: boolean (true if actual >= 70% of target)
 - strengths: string[]
-- issues: string[]
-- revisionRequests: string[] (specific changes needed)`;
+- issues: string[] (MUST include "Scene too short" if word count < 70%)
+- revisionRequests: string[] (MUST include "Expand scene to at least ${Math.round(Number(targetWordCount) * 0.7)} words" if too short)`;
         }
         if (phase === LLMModels_1.GenerationPhase.REVISION) {
             // Critic may be consulted during revision, but Writer is primary

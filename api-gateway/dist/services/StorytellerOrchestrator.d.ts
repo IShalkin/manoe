@@ -73,6 +73,12 @@ export declare class StorytellerOrchestrator {
      */
     private runGenesisPhase;
     /**
+     * Add immutable seed constraints from Genesis phase
+     * These constraints have sceneNumber=0 and are never overwritten by Archivist
+     * Prevents context drift where LLM "forgets" the original story concept
+     */
+    private addSeedConstraints;
+    /**
      * Characters Phase - Character creation
      */
     private runCharactersPhase;

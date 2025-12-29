@@ -107,6 +107,9 @@ __decorate([
 /**
  * Key constraint for continuity tracking
  * Uses semantic keys instead of UUIDs for deterministic superseding
+ *
+ * Immutable constraints (sceneNumber=0) are set during Genesis and never overwritten
+ * by Archivist. This prevents context drift (e.g., protagonist name changing mid-story).
  */
 class KeyConstraint {
     key;
@@ -115,6 +118,11 @@ class KeyConstraint {
     sceneNumber;
     timestamp;
     reasoning;
+    /**
+     * If true, this constraint cannot be overwritten by Archivist
+     * Used for seed constraints (genre, premise, tone, etc.)
+     */
+    immutable;
 }
 exports.KeyConstraint = KeyConstraint;
 __decorate([
@@ -128,7 +136,7 @@ __decorate([
     __metadata("design:type", String)
 ], KeyConstraint.prototype, "value", void 0);
 __decorate([
-    (0, schema_1.Required)(),
+    (0, schema_1.Optional)(),
     (0, schema_1.Property)(),
     __metadata("design:type", String)
 ], KeyConstraint.prototype, "source", void 0);
@@ -147,6 +155,11 @@ __decorate([
     (0, schema_1.Property)(),
     __metadata("design:type", String)
 ], KeyConstraint.prototype, "reasoning", void 0);
+__decorate([
+    (0, schema_1.Optional)(),
+    (0, schema_1.Property)(),
+    __metadata("design:type", Boolean)
+], KeyConstraint.prototype, "immutable", void 0);
 /**
  * Raw fact from agents (before Archivist processing)
  */

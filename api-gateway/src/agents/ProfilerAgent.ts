@@ -128,7 +128,25 @@ Narrative context: ${variables.narrative || "No narrative yet"}`;
     phase: GenerationPhase
   ): string {
     if (phase === GenerationPhase.CHARACTERS) {
-      return `Based on the narrative concept, create detailed character profiles.
+      // CRITICAL: Include the narrative context in the user prompt
+      // This was missing and caused Profiler to say "you didn't provide context"
+      const narrative = context.state.narrative;
+      const narrativeContext = narrative 
+        ? `NARRATIVE CONTEXT (from Architect):
+Genre: ${(narrative as Record<string, unknown>).genre || "Not specified"}
+Premise: ${(narrative as Record<string, unknown>).premise || "Not specified"}
+Hook: ${(narrative as Record<string, unknown>).hook || "Not specified"}
+Themes: ${JSON.stringify((narrative as Record<string, unknown>).themes || [])}
+Tone: ${(narrative as Record<string, unknown>).tone || "Not specified"}
+Arc: ${(narrative as Record<string, unknown>).arc || "Not specified"}
+Audience: ${(narrative as Record<string, unknown>).audience || "Not specified"}
+
+Seed Idea: ${options.seedIdea}`
+        : `Seed Idea: ${options.seedIdea}`;
+
+      return `${narrativeContext}
+
+Based on the narrative concept above, create detailed character profiles that fit this story.
 
 For each character include:
 1. Name and role (protagonist, antagonist, supporting)
@@ -141,6 +159,7 @@ For each character include:
 8. Voice and speech patterns
 9. Relationships to other characters
 
+IMPORTANT: Characters MUST match the genre, tone, and setting described above.
 Create at least 3-5 main characters.
 Output as JSON array with character objects.`;
     }
