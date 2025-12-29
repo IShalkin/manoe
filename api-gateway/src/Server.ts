@@ -23,6 +23,7 @@ import { OrchestrationController } from "./controllers/OrchestrationController";
 import { StateController } from "./controllers/StateController";
 import { TracesController } from "./controllers/TracesController";
 import { ResearchController } from "./controllers/ResearchController";
+import { DynamicModelsController } from "./controllers/DynamicModelsController";
 
 const rootDir = __dirname;
 
@@ -39,12 +40,13 @@ const rootDir = __dirname;
       ModelsController,
       HealthController,
     ],
-        "/orchestrate": [
-          OrchestrationController,
-          StateController,
-          TracesController,
-          ResearchController,
-        ],
+                "/orchestrate": [
+                  OrchestrationController,
+                  StateController,
+                  TracesController,
+                  ResearchController,
+                  DynamicModelsController,
+                ],
   },
   swagger: [
     {
