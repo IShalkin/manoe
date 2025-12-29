@@ -392,8 +392,9 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     }, 15000); // Every 15 seconds
 
     // First, send all existing events from the stream (catch up)
-    // IMPORTANT: Do NOT check isConnected here - we want to send all existing events
-    // even if the connection seems closed (it may be a false positive from req.on("close"))
+    // Track the last event ID to avoid race condition when switching to live streaming
+    // Using "$" would miss events published between catch-up read and live streaming start
+    let lastEventId = "0";
     try {
       const existingEvents = await this.redisStreams.getEvents(runId, "0", 1000);
       console.log(`[OrchestrationController] Sending ${existingEvents.length} existing events for runId: ${runId}`);
@@ -418,14 +419,21 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
         });
         res.write(`data: ${sseData}\n\n`);
         sentCount++;
+        
+        // Track the last event ID for seamless transition to live streaming
+        if (event.id) {
+          lastEventId = event.id;
+        }
       }
-      console.log(`[OrchestrationController] Successfully sent ${sentCount} existing events for runId: ${runId}`);
+      console.log(`[OrchestrationController] Successfully sent ${sentCount} existing events for runId: ${runId}, lastEventId: ${lastEventId}`);
     } catch (error) {
       console.error(`[OrchestrationController] Error getting existing events:`, error, error instanceof Error ? error.stack : '');
     }
 
-    // Then stream new events from Redis (starting from the end)
-    const eventGenerator = this.redisStreams.streamEvents(runId, "$", 15000);
+    // Then stream new events from Redis, starting AFTER the last event we sent
+    // This prevents the "cursor gap" where events published between catch-up and live streaming are missed
+    console.log(`[OrchestrationController] Starting live streaming from lastEventId: ${lastEventId} for runId: ${runId}`);
+    const eventGenerator = this.redisStreams.streamEvents(runId, lastEventId, 15000);
 
     try {
       for await (const event of eventGenerator) {
