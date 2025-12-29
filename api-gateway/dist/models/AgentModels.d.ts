@@ -102,14 +102,22 @@ export declare class AgentMessage {
 /**
  * Key constraint for continuity tracking
  * Uses semantic keys instead of UUIDs for deterministic superseding
+ *
+ * Immutable constraints (sceneNumber=0) are set during Genesis and never overwritten
+ * by Archivist. This prevents context drift (e.g., protagonist name changing mid-story).
  */
 export declare class KeyConstraint {
     key: string;
     value: string;
-    source: AgentType;
+    source?: AgentType;
     sceneNumber: number;
     timestamp: string;
     reasoning?: string;
+    /**
+     * If true, this constraint cannot be overwritten by Archivist
+     * Used for seed constraints (genre, premise, tone, etc.)
+     */
+    immutable?: boolean;
 }
 /**
  * Raw fact from agents (before Archivist processing)
