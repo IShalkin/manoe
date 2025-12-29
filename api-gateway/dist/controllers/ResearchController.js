@@ -24,11 +24,11 @@ let ResearchController = class ResearchController {
             const research = await this.supabaseService.getResearchHistory(limit);
             return {
                 success: true,
-                research: research,
+                research,
             };
         }
         catch (error) {
-            console.error("[ResearchController] Error getting research history:", error);
+            common_1.$log.error("[ResearchController] Error getting research history:", error);
             return {
                 success: false,
                 research: [],
@@ -47,11 +47,11 @@ let ResearchController = class ResearchController {
             }
             return {
                 success: true,
-                research: research,
+                research,
             };
         }
         catch (error) {
-            console.error("[ResearchController] Error getting research result:", error);
+            common_1.$log.error("[ResearchController] Error getting research result:", error);
             return {
                 success: false,
                 error: error instanceof Error ? error.message : "Failed to load research result",

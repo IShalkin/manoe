@@ -51,6 +51,18 @@ export declare abstract class BaseAgent {
      */
     protected validateOutput<T>(data: unknown, schema: z.ZodSchema<T>, runId: string): T;
     /**
+     * Validate output with repair retry for persistent failures
+     * If initial validation fails, attempts to repair the JSON using LLM
+     *
+     * @param data - Data to validate
+     * @param schema - Zod schema to validate against
+     * @param runId - Run ID for tracing
+     * @param llmConfig - LLM configuration for repair call
+     * @param repairHint - Optional hint for the repair prompt
+     * @returns Validated data
+     */
+    protected validateWithRepair<T>(data: unknown, schema: z.ZodSchema<T>, runId: string, llmConfig: LLMConfiguration, repairHint?: string): Promise<T>;
+    /**
      * Apply guardrails to content
      * Returns array of guardrail results
      */

@@ -51,6 +51,22 @@ interface AuditLog {
     duration_ms?: number;
     created_at: string;
 }
+export interface ResearchHistoryItem {
+    id: string;
+    provider: string;
+    model?: string;
+    seed_idea: string;
+    target_audience?: string;
+    themes?: string[];
+    moral_compass?: string;
+    content: string;
+    prompt_context?: string;
+    citations?: Array<{
+        url: string;
+        title?: string;
+    }>;
+    created_at: string;
+}
 export declare class SupabaseService {
     private client;
     constructor();
@@ -102,11 +118,11 @@ export declare class SupabaseService {
     /**
      * Get research history for a user
      */
-    getResearchHistory(limit?: number): Promise<unknown[]>;
+    getResearchHistory(limit?: number): Promise<ResearchHistoryItem[]>;
     /**
      * Get a specific research result by ID
      */
-    getResearchResult(id: string): Promise<unknown | null>;
+    getResearchResult(id: string): Promise<ResearchHistoryItem | null>;
     /**
      * Get all interrupted run state snapshots for recovery after restart
      * Returns runs that were saved during graceful shutdown and haven't been completed

@@ -5,8 +5,17 @@
  * Validates LLM outputs from all agents to ensure data quality and type safety
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ValidationError = exports.ArchivistOutputSchema = exports.ImpactReportSchema = exports.OriginalityReportSchema = exports.CritiqueSchema = exports.AdvancedPlanSchema = exports.OutlineSchema = exports.WorldbuildingSchema = exports.CharactersArraySchema = exports.CharacterSchema = exports.NarrativeSchema = void 0;
+exports.ValidationError = exports.ArchivistOutputSchema = exports.ImpactReportSchema = exports.OriginalityReportSchema = exports.CritiqueSchema = exports.AdvancedPlanSchema = exports.OutlineSchema = exports.WorldbuildingSchema = exports.CharactersArraySchema = exports.CharacterSchema = exports.NarrativeSchema = exports.FlexibleStringOrObject = void 0;
 const zod_1 = require("zod");
+/**
+ * Flexible type for fields that can be string, object, or array
+ * LLMs often return different formats for the same field
+ */
+exports.FlexibleStringOrObject = zod_1.z.union([
+    zod_1.z.string(),
+    zod_1.z.record(zod_1.z.unknown()),
+    zod_1.z.array(zod_1.z.unknown()),
+]).optional();
 /**
  * Theme schema - can be a string or an object with name/description
  */
@@ -81,18 +90,19 @@ exports.CharacterSchema = zod_1.z.object({
 exports.CharactersArraySchema = zod_1.z.array(exports.CharacterSchema).min(1);
 /**
  * Worldbuilding schema (from WorldbuilderAgent)
+ * Uses FlexibleStringOrObject for fields that LLMs return in various formats
  */
 exports.WorldbuildingSchema = zod_1.z.object({
-    geography: zod_1.z.record(zod_1.z.unknown()).optional(),
-    timePeriod: zod_1.z.string().optional(),
-    technology: zod_1.z.string().optional(),
-    socialStructures: zod_1.z.record(zod_1.z.unknown()).optional(),
-    culture: zod_1.z.record(zod_1.z.unknown()).optional(),
-    economy: zod_1.z.string().optional(),
-    magic: zod_1.z.record(zod_1.z.unknown()).optional(),
-    history: zod_1.z.string().optional(),
-    sensory: zod_1.z.record(zod_1.z.unknown()).optional(),
-});
+    geography: zod_1.z.union([zod_1.z.string(), zod_1.z.record(zod_1.z.unknown())]).optional(),
+    timePeriod: exports.FlexibleStringOrObject,
+    technology: exports.FlexibleStringOrObject,
+    socialStructures: zod_1.z.union([zod_1.z.string(), zod_1.z.record(zod_1.z.unknown())]).optional(),
+    culture: zod_1.z.union([zod_1.z.string(), zod_1.z.record(zod_1.z.unknown())]).optional(),
+    economy: exports.FlexibleStringOrObject,
+    magic: zod_1.z.union([zod_1.z.string(), zod_1.z.record(zod_1.z.unknown())]).optional(),
+    history: exports.FlexibleStringOrObject,
+    sensory: zod_1.z.union([zod_1.z.string(), zod_1.z.record(zod_1.z.unknown())]).optional(),
+}).passthrough();
 /**
  * Outline schema (from StrategistAgent - Outlining phase)
  */

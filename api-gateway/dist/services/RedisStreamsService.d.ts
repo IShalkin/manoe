@@ -7,6 +7,10 @@
  * - Real-time event streaming to SSE endpoints
  * - Event persistence and replay capability
  * - Heartbeat support for connection keep-alive
+ *
+ * IMPORTANT: Uses separate Redis connections for reading and writing to avoid
+ * head-of-line blocking. XREAD BLOCK commands on a shared connection would
+ * block all other commands (including XADD publishes) until the block times out.
  */
 /**
  * Event structure for Redis Streams
@@ -29,19 +33,28 @@ export interface StreamInfo {
     exists: boolean;
 }
 export declare class RedisStreamsService {
-    private client;
+    private writerClient;
+    private redisUrl;
+    private get client();
     private readonly STREAM_EVENTS;
     private readonly STREAM_GLOBAL;
     private readonly CONSUMER_GROUP;
     constructor();
     /**
-     * Establish connection to Redis
+     * Establish connection to Redis (writer client only)
+     * Reader connections are created per-stream to avoid head-of-line blocking
      */
     private connect;
     /**
-     * Get Redis client
+     * Get the writer Redis client (for XADD, XRANGE, etc.)
+     * This client is never blocked by XREAD operations
      */
     private getClient;
+    /**
+     * Create a dedicated reader connection for streaming
+     * Each SSE connection gets its own reader to avoid blocking other operations
+     */
+    private createReaderConnection;
     /**
      * Get the stream key for a specific run
      */
@@ -67,6 +80,10 @@ export declare class RedisStreamsService {
     getEvents(runId: string, startId?: string, count?: number): Promise<StreamEvent[]>;
     /**
      * Stream events from a run-specific stream (async generator)
+     *
+     * IMPORTANT: Creates a dedicated Redis connection for this stream to avoid
+     * head-of-line blocking. The XREAD BLOCK command would otherwise block all
+     * other Redis operations on a shared connection (including XADD publishes).
      *
      * @param runId - Unique identifier for the generation run
      * @param startId - Start reading from this ID ("$" for new events only)
@@ -124,7 +141,8 @@ export declare class RedisStreamsService {
      */
     private sleep;
     /**
-     * Disconnect from Redis
+     * Disconnect from Redis (writer client)
+     * Note: Reader connections are cleaned up automatically when their generators end
      */
     disconnect(): Promise<void>;
 }
