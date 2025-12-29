@@ -34,6 +34,50 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   venice: "https://api.venice.ai/api/v1",
 };
 
+/**
+ * Model context length limits (total tokens including prompt + completion)
+ * Used to cap max_tokens to avoid exceeding model limits
+ */
+const MODEL_CONTEXT_LENGTHS: Record<string, number> = {
+  // GPT-4 variants
+  "gpt-4": 8192,
+  "gpt-4-0314": 8192,
+  "gpt-4-0613": 8192,
+  "gpt-4-32k": 32768,
+  "gpt-4-32k-0314": 32768,
+  "gpt-4-32k-0613": 32768,
+  "gpt-4-turbo": 128000,
+  "gpt-4-turbo-preview": 128000,
+  "gpt-4-1106-preview": 128000,
+  "gpt-4-0125-preview": 128000,
+  "gpt-4o": 128000,
+  "gpt-4o-mini": 128000,
+  // GPT-3.5 variants
+  "gpt-3.5-turbo": 16385,
+  "gpt-3.5-turbo-16k": 16385,
+  "gpt-3.5-turbo-1106": 16385,
+  "gpt-3.5-turbo-0125": 16385,
+  // Default for unknown models (assume large context)
+  "default": 128000,
+};
+
+/**
+ * Get the context length for a model, with fallback to default
+ */
+function getModelContextLength(model: string): number {
+  // Check for exact match first
+  if (MODEL_CONTEXT_LENGTHS[model]) {
+    return MODEL_CONTEXT_LENGTHS[model];
+  }
+  // Check for prefix matches (e.g., "gpt-4o-2024-05-13" matches "gpt-4o")
+  for (const [key, value] of Object.entries(MODEL_CONTEXT_LENGTHS)) {
+    if (key !== "default" && model.startsWith(key)) {
+      return value;
+    }
+  }
+  return MODEL_CONTEXT_LENGTHS["default"];
+}
+
 @Service()
 export class LLMProviderService {
   /**
@@ -151,14 +195,26 @@ export class LLMProviderService {
     };
 
     if (options.maxTokens) {
+      // Get model context length and cap max_tokens to leave room for prompt
+      // Estimate prompt tokens (rough estimate: 4 chars per token)
+      const estimatedPromptTokens = Math.ceil(
+        options.messages.reduce((acc, msg) => acc + msg.content.length, 0) / 4
+      );
+      const modelContextLength = getModelContextLength(options.model);
+      // Leave at least 500 tokens buffer for safety, and ensure we don't exceed context
+      const maxAllowedTokens = Math.max(500, modelContextLength - estimatedPromptTokens - 500);
+      const cappedMaxTokens = Math.min(options.maxTokens, maxAllowedTokens);
+      
+      console.log(`[LLMProviderService] Model ${options.model} context: ${modelContextLength}, estimated prompt: ${estimatedPromptTokens}, requested: ${options.maxTokens}, capped to: ${cappedMaxTokens}`);
+      
       // Newer models (gpt-5.x, o1, o3) use max_completion_tokens instead of max_tokens
       const usesNewTokenParam = options.model.startsWith("gpt-5") || 
                                  options.model.startsWith("o1") || 
                                  options.model.startsWith("o3");
       if (usesNewTokenParam) {
-        (requestParams as unknown as Record<string, unknown>).max_completion_tokens = options.maxTokens;
+        (requestParams as unknown as Record<string, unknown>).max_completion_tokens = cappedMaxTokens;
       } else {
-        requestParams.max_tokens = options.maxTokens;
+        requestParams.max_tokens = cappedMaxTokens;
       }
     }
 
