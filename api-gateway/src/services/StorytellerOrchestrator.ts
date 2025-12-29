@@ -283,13 +283,19 @@ export class StorytellerOrchestrator {
     runId: string,
     options: GenerationOptions
   ): Promise<void> {
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase called, runId: ${runId}`);
     const state = this.activeRuns.get(runId);
-    if (!state || !state.narrative) return;
+    if (!state || !state.narrative) {
+      $log.info(`[StorytellerOrchestrator] runCharactersPhase: state or narrative not found, returning, runId: ${runId}`);
+      return;
+    }
 
     state.phase = GenerationPhase.CHARACTERS;
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase: phase set to CHARACTERS, runId: ${runId}`);
     await this.publishPhaseStart(runId, GenerationPhase.CHARACTERS);
 
     // Use ProfilerAgent through AgentFactory
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase: getting ProfilerAgent from factory, runId: ${runId}`);
     const agent = this.agentFactory.getAgent(AgentType.PROFILER);
     const context: AgentContext = {
       runId,
@@ -297,17 +303,32 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase: calling agent.execute, runId: ${runId}`);
     const output = await agent.execute(context, options);
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase: agent.execute completed, output.content type: ${typeof output.content}, isArray: ${Array.isArray(output.content)}, runId: ${runId}`);
     state.characters = output.content as Record<string, unknown>[];
     state.updatedAt = new Date().toISOString();
 
     // Store characters in Qdrant for semantic search
-    for (const character of state.characters) {
-      await this.qdrantMemory.storeCharacter(options.projectId, character);
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase: storing ${state.characters?.length || 0} characters in Qdrant, runId: ${runId}`);
+    try {
+      if (Array.isArray(state.characters)) {
+        for (const character of state.characters) {
+          $log.info(`[StorytellerOrchestrator] runCharactersPhase: storing character in Qdrant, runId: ${runId}`);
+          await this.qdrantMemory.storeCharacter(options.projectId, character);
+        }
+      } else {
+        $log.warn(`[StorytellerOrchestrator] runCharactersPhase: state.characters is not an array, skipping Qdrant storage, runId: ${runId}`);
+      }
+    } catch (qdrantError) {
+      $log.error(`[StorytellerOrchestrator] runCharactersPhase: Qdrant storage failed, continuing anyway, runId: ${runId}`, qdrantError);
     }
 
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase: saving artifact, runId: ${runId}`);
     await this.saveArtifact(runId, options.projectId, "characters", state.characters);
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase: publishing phase complete, runId: ${runId}`);
     await this.publishPhaseComplete(runId, GenerationPhase.CHARACTERS, state.characters);
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase: completed, runId: ${runId}`);
   }
 
   /**
