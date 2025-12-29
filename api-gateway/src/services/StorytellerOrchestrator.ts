@@ -270,10 +270,76 @@ export class StorytellerOrchestrator {
     state.narrative = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
+    // CRITICAL: Add seed constraints immediately after Genesis
+    // These are immutable and prevent context drift (e.g., Mara Venn → Elena Rodriguez)
+    this.addSeedConstraints(state, options.seedIdea);
+
     // Save to Supabase
     await this.saveArtifact(runId, options.projectId, "narrative", state.narrative);
 
     await this.publishPhaseComplete(runId, GenerationPhase.GENESIS, state.narrative);
+  }
+
+  /**
+   * Add immutable seed constraints from Genesis phase
+   * These constraints have sceneNumber=0 and are never overwritten by Archivist
+   * Prevents context drift where LLM "forgets" the original story concept
+   */
+  private addSeedConstraints(state: GenerationState, seedIdea: string): void {
+    const narrative = state.narrative as Record<string, unknown>;
+    const timestamp = new Date().toISOString();
+
+    // Add seed idea as immutable constraint
+    state.keyConstraints.push({
+      key: "seed_idea",
+      value: seedIdea,
+      sceneNumber: 0,
+      timestamp,
+      immutable: true,
+    });
+
+    // Extract key story elements from narrative
+    if (narrative.genre) {
+      state.keyConstraints.push({
+        key: "genre",
+        value: String(narrative.genre),
+        sceneNumber: 0,
+        timestamp,
+        immutable: true,
+      });
+    }
+
+    if (narrative.premise) {
+      state.keyConstraints.push({
+        key: "premise",
+        value: String(narrative.premise),
+        sceneNumber: 0,
+        timestamp,
+        immutable: true,
+      });
+    }
+
+    if (narrative.tone) {
+      state.keyConstraints.push({
+        key: "tone",
+        value: String(narrative.tone),
+        sceneNumber: 0,
+        timestamp,
+        immutable: true,
+      });
+    }
+
+    if (narrative.arc) {
+      state.keyConstraints.push({
+        key: "narrative_arc",
+        value: String(narrative.arc),
+        sceneNumber: 0,
+        timestamp,
+        immutable: true,
+      });
+    }
+
+    $log.info(`[StorytellerOrchestrator] Added ${state.keyConstraints.length} seed constraints`);
   }
 
   /**
@@ -719,11 +785,18 @@ export class StorytellerOrchestrator {
       // Update constraints from Archivist output
       const newConstraints = result.constraints as KeyConstraint[];
       // Merge with existing, resolving conflicts by timestamp
+      // IMPORTANT: Never overwrite immutable constraints (seed constraints from Genesis)
       for (const newConstraint of newConstraints) {
         const existingIndex = state.keyConstraints.findIndex(c => c.key === newConstraint.key);
         if (existingIndex >= 0) {
-          // Replace if new constraint is more recent
           const existing = state.keyConstraints[existingIndex];
+          // CRITICAL: Never overwrite immutable constraints
+          // These are seed constraints (genre, premise, tone, etc.) that prevent context drift
+          if (existing.immutable === true) {
+            console.log(`[Archivist] Skipping immutable constraint: ${existing.key}`);
+            continue;
+          }
+          // Replace if new constraint is more recent
           if (new Date(newConstraint.timestamp) > new Date(existing.timestamp)) {
             state.keyConstraints[existingIndex] = newConstraint;
           }
