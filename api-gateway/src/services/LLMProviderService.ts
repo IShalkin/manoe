@@ -162,7 +162,18 @@ export class LLMProviderService {
       }
     }
 
-    if (options.responseFormat?.type === "json_object") {
+    // Only add response_format for models that support it
+    // gpt-4-0613 and older models don't support response_format
+    const supportsJsonMode = options.model.includes("turbo") || 
+                              options.model.includes("gpt-4o") ||
+                              options.model.includes("gpt-4-1106") ||
+                              options.model.includes("gpt-4-0125") ||
+                              options.model.includes("gpt-3.5-turbo-1106") ||
+                              options.model.startsWith("gpt-5") ||
+                              options.model.startsWith("o1") ||
+                              options.model.startsWith("o3");
+    
+    if (options.responseFormat?.type === "json_object" && supportsJsonMode) {
       requestParams.response_format = { type: "json_object" };
     }
 
