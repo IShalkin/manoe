@@ -96,6 +96,11 @@ export declare class StorytellerOrchestrator {
     private runAdvancedPlanningPhase;
     /**
      * Drafting Loop - Draft, Critique, Revise for each scene
+     *
+     * Key improvements:
+     * 1. Word count validation with expansion loop before Critic
+     * 2. Polish only runs if scene was approved (not after failed revisions)
+     * 3. Strips fake "Word count:" claims from Writer output
      */
     private runDraftingLoop;
     /**
@@ -110,6 +115,17 @@ export declare class StorytellerOrchestrator {
      * Revise a scene based on critique
      */
     private reviseScene;
+    /**
+     * Expand a scene by continuing from where it left off
+     * Used when scene is too short before calling Critic
+     * This prevents the Critic↔Writer deadlock
+     */
+    private expandScene;
+    /**
+     * Strip fake "Word count: X" claims from Writer output
+     * LLMs hallucinate word counts - we compute them programmatically instead
+     */
+    private stripFakeWordCount;
     /**
      * Polish a scene (final refinement)
      */

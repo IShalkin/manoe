@@ -149,6 +149,11 @@ export declare class GenerationState {
     keyConstraints: KeyConstraint[];
     rawFactsLog: RawFact[];
     lastArchivistScene: number;
+    /**
+     * Current scene outline being processed
+     * Used to pass expansion mode context to WriterAgent
+     */
+    currentSceneOutline?: Record<string, unknown>;
     isPaused: boolean;
     isCompleted: boolean;
     error?: string;
