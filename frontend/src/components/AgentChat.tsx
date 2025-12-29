@@ -425,7 +425,11 @@ function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
             for (const [itemKey, itemValue] of Object.entries(item as Record<string, unknown>)) {
               const formattedItemKey = itemKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
               if (itemValue !== null && itemValue !== undefined && itemValue !== '') {
-                itemLines.push(`**${formattedItemKey}**: ${itemValue}`);
+                // Stringify objects/arrays to prevent [object Object]
+                const displayValue = typeof itemValue === 'object' 
+                  ? JSON.stringify(itemValue, null, 2)
+                  : String(itemValue);
+                itemLines.push(`**${formattedItemKey}**: ${displayValue}`);
               }
             }
             if (itemLines.length > 0) {
@@ -1476,9 +1480,41 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     return null;
   }, [agentStates]);
 
-  // Extract final result from messages - prefer clean story text over JSON
+  // Extract final result from messages - prefer assembled scene events over individual agent messages
   const finalResult = useMemo(() => {
-    // Collect all Polish agent messages and extract clean story text from each
+    // PRIORITY 1: Use scene_polish_complete events with finalContent (canonical source of truth)
+    const polishCompleteEvents = messages.filter(
+      m => m.type === 'scene_polish_complete' && m.data.finalContent
+    );
+    if (polishCompleteEvents.length > 0) {
+      // Sort by scene number and join
+      const sortedScenes = polishCompleteEvents
+        .sort((a, b) => (a.data.sceneNum || 0) - (b.data.sceneNum || 0))
+        .map(m => m.data.finalContent as string)
+        .filter(text => text?.trim());
+      
+      if (sortedScenes.length > 0) {
+        return sortedScenes.join('\n\n---\n\n');
+      }
+    }
+
+    // PRIORITY 2: Use scene_expand_complete events with assembledContent (for scenes without polish)
+    const expandCompleteEvents = messages.filter(
+      m => m.type === 'scene_expand_complete' && m.data.assembledContent
+    );
+    if (expandCompleteEvents.length > 0) {
+      // Sort by scene number and join
+      const sortedScenes = expandCompleteEvents
+        .sort((a, b) => (a.data.sceneNum || 0) - (b.data.sceneNum || 0))
+        .map(m => m.data.assembledContent as string)
+        .filter(text => text?.trim());
+      
+      if (sortedScenes.length > 0) {
+        return sortedScenes.join('\n\n---\n\n');
+      }
+    }
+
+    // PRIORITY 3: Collect all Polish agent messages and extract clean story text from each
     const polishMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.agent === 'Polish' && m.data.content?.trim()
     );
@@ -1494,7 +1530,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       }
     }
     
-    // Fall back to Writer's messages (draft story content)
+    // PRIORITY 4: Fall back to Writer's messages (draft story content)
     const writerMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
     );
@@ -1509,7 +1545,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       }
     }
     
-    // Try generation_complete result_summary as fallback
+    // PRIORITY 5: Try generation_complete result_summary as fallback
     const completeEvent = messages.find(m => m.type === 'generation_complete');
     if (completeEvent?.data.result_summary) {
       // Try to extract story text from result_summary too
@@ -1525,7 +1561,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         : JSON.stringify(completeEvent.data.result_summary, null, 2);
     }
     
-    // Fall back to last substantial agent message (extract story text if possible)
+    // PRIORITY 6: Fall back to last substantial agent message (extract story text if possible)
     const agentMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.content?.trim()
     );
