@@ -11,6 +11,59 @@
  * - Venice AI (Dolphin Mistral, Llama 4 Maverick)
  */
 import { LLMResponse, CompletionOptions } from "../models/LLMModels";
+/**
+ * Token limit error information extracted from provider error messages
+ */
+export interface TokenLimitError {
+    requested: number;
+    allowed: number;
+    provider: string;
+}
+/**
+ * Extract max output tokens limit from provider error messages
+ * Supports multiple provider error formats for auto-discovery of limits
+ *
+ * @param provider - The LLM provider name
+ * @param error - The error object or message string
+ * @returns TokenLimitError if limit was extracted, null otherwise
+ */
+export declare function extractMaxOutputTokensFromError(provider: string, error: Error | string): TokenLimitError | null;
+/**
+ * In-memory cache for discovered token limits
+ * Persists limits to Redis if available for cross-instance sharing
+ */
+export declare class TokenLimitCache {
+    private memoryCache;
+    private redisClient;
+    private static instance;
+    private constructor();
+    static getInstance(): TokenLimitCache;
+    /**
+     * Set Redis client for persistent caching
+     */
+    setRedisClient(client: {
+        get: (key: string) => Promise<string | null>;
+        setex: (key: string, ttl: number, value: string) => Promise<unknown>;
+    }): void;
+    /**
+     * Get cached token limit for a model
+     * Checks memory first, then Redis if available
+     */
+    get(model: string): Promise<number | null>;
+    /**
+     * Cache a discovered token limit
+     * Stores in memory and Redis (with 7-day TTL)
+     */
+    set(model: string, limit: number): Promise<void>;
+    /**
+     * Normalize model name for consistent caching
+     */
+    private normalizeModelName;
+    /**
+     * Clear the cache (useful for testing)
+     */
+    clear(): void;
+}
 export declare class LLMProviderService {
     /**
      * Create a chat completion using the specified provider
@@ -63,7 +116,12 @@ export declare class LLMProviderService {
      */
     isRetryableError(error: unknown): boolean;
     /**
+     * Check if an error is a token limit error that can be retried with a lower limit
+     */
+    private isTokenLimitError;
+    /**
      * Create completion with automatic retry for transient errors
+     * Also handles token limit errors with auto-discovery and caching
      */
     createCompletionWithRetry(options: CompletionOptions, maxRetries?: number, baseDelayMs?: number): Promise<LLMResponse>;
 }

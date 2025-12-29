@@ -49,6 +49,14 @@ export abstract class BaseAgent {
 
     const spanId = this.langfuse.startSpan(runId, `${this.agentType}_call`, { phase });
 
+    const expectsArray =
+      userPrompt.includes("Output as JSON array") ||
+      userPrompt.includes("Output JSON array") ||
+      userPrompt.includes("Return a JSON array");
+    const expectsObject =
+      (userPrompt.includes("Output as JSON") || userPrompt.includes("Output JSON")) &&
+      !expectsArray;
+
     try {
       const response = await this.llmProvider.createCompletionWithRetry({
         messages,
@@ -57,9 +65,7 @@ export abstract class BaseAgent {
         apiKey: llmConfig.apiKey,
         temperature: llmConfig.temperature ?? 0.7,
         maxTokens: getMaxTokensForPhase(phase),
-        responseFormat: userPrompt.includes("Output as JSON") || userPrompt.includes("Output JSON")
-          ? { type: "json_object" }
-          : undefined,
+        responseFormat: expectsObject ? { type: "json_object" } : undefined,
       });
 
       // Track in Langfuse
@@ -130,15 +136,80 @@ export abstract class BaseAgent {
   ): T {
     const result = schema.safeParse(data);
     if (!result.success) {
-      // Log validation error to Langfuse
       this.langfuse.addEvent(runId, "validation_error", {
         agent: this.agentType,
         errors: result.error.errors,
-        data: JSON.stringify(data).substring(0, 500), // Truncate for logging
+        data: JSON.stringify(data).substring(0, 500),
       });
       throw new ValidationError(result.error, this.agentType);
     }
     return result.data;
+  }
+
+  /**
+   * Validate output with repair retry for persistent failures
+   * If initial validation fails, attempts to repair the JSON using LLM
+   * 
+   * @param data - Data to validate
+   * @param schema - Zod schema to validate against
+   * @param runId - Run ID for tracing
+   * @param llmConfig - LLM configuration for repair call
+   * @param repairHint - Optional hint for the repair prompt
+   * @returns Validated data
+   */
+  protected async validateWithRepair<T>(
+    data: unknown,
+    schema: z.ZodSchema<T>,
+    runId: string,
+    llmConfig: LLMConfiguration,
+    repairHint?: string
+  ): Promise<T> {
+    const result = schema.safeParse(data);
+    if (result.success) {
+      return result.data;
+    }
+
+    console.warn(`[${this.agentType}] Validation failed, attempting repair`);
+    this.langfuse.addEvent(runId, "validation_repair_attempt", {
+      agent: this.agentType,
+      errors: result.error.errors,
+    });
+
+    const repairSystemPrompt = `You are a JSON repair assistant. Your task is to fix the provided JSON data to match the required schema. Only output valid JSON, no explanations.`;
+
+    const repairUserPrompt = `The following JSON data failed validation:
+
+\`\`\`json
+${JSON.stringify(data, null, 2)}
+\`\`\`
+
+Validation errors:
+${JSON.stringify(result.error.errors, null, 2)}
+
+${repairHint ? `Hint: ${repairHint}` : ""}
+
+Please fix the JSON to resolve these validation errors. Output only the corrected JSON.`;
+
+    try {
+      const repairResponse = await this.callLLM(
+        runId,
+        repairSystemPrompt,
+        repairUserPrompt,
+        llmConfig,
+        GenerationPhase.GENESIS
+      );
+
+      const repairedData = this.parseJSON(repairResponse);
+      return this.validateOutput(repairedData, schema, runId);
+    } catch (repairError) {
+      console.error(`[${this.agentType}] Repair attempt failed:`, repairError);
+      this.langfuse.addEvent(runId, "validation_repair_failed", {
+        agent: this.agentType,
+        originalErrors: result.error.errors,
+        repairError: String(repairError),
+      });
+      throw new ValidationError(result.error, this.agentType);
+    }
   }
 
   /**

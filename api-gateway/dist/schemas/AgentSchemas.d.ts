@@ -5,6 +5,11 @@
  */
 import { z } from "zod";
 /**
+ * Flexible type for fields that can be string, object, or array
+ * LLMs often return different formats for the same field
+ */
+export declare const FlexibleStringOrObject: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+/**
  * Narrative schema (from ArchitectAgent - Genesis phase)
  * Flexible to handle various LLM output formats
  */
@@ -236,38 +241,39 @@ export declare const CharactersArraySchema: z.ZodArray<z.ZodObject<{
 }, z.ZodTypeAny, "passthrough">>, "many">;
 /**
  * Worldbuilding schema (from WorldbuilderAgent)
+ * Uses FlexibleStringOrObject for fields that LLMs return in various formats
  */
 export declare const WorldbuildingSchema: z.ZodObject<{
-    geography: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-    timePeriod: z.ZodOptional<z.ZodString>;
-    technology: z.ZodOptional<z.ZodString>;
-    socialStructures: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-    culture: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-    economy: z.ZodOptional<z.ZodString>;
-    magic: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-    history: z.ZodOptional<z.ZodString>;
-    sensory: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-}, "strip", z.ZodTypeAny, {
-    geography?: Record<string, unknown> | undefined;
-    timePeriod?: string | undefined;
-    technology?: string | undefined;
-    socialStructures?: Record<string, unknown> | undefined;
-    culture?: Record<string, unknown> | undefined;
-    economy?: string | undefined;
-    magic?: Record<string, unknown> | undefined;
-    history?: string | undefined;
-    sensory?: Record<string, unknown> | undefined;
-}, {
-    geography?: Record<string, unknown> | undefined;
-    timePeriod?: string | undefined;
-    technology?: string | undefined;
-    socialStructures?: Record<string, unknown> | undefined;
-    culture?: Record<string, unknown> | undefined;
-    economy?: string | undefined;
-    magic?: Record<string, unknown> | undefined;
-    history?: string | undefined;
-    sensory?: Record<string, unknown> | undefined;
-}>;
+    geography: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    timePeriod: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    technology: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    socialStructures: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    culture: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    economy: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    magic: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    history: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    sensory: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+}, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+    geography: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    timePeriod: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    technology: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    socialStructures: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    culture: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    economy: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    magic: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    history: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    sensory: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+}, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+    geography: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    timePeriod: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    technology: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    socialStructures: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    culture: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    economy: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    magic: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    history: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodArray<z.ZodUnknown, "many">]>>;
+    sensory: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+}, z.ZodTypeAny, "passthrough">>;
 /**
  * Outline schema (from StrategistAgent - Outlining phase)
  */

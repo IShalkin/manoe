@@ -16,6 +16,11 @@ export declare class StrategistAgent extends BaseAgent {
     private getSystemPrompt;
     private getFallbackPrompt;
     private compileFallbackPrompt;
+    /**
+     * Normalize scene data to ensure required fields exist
+     * Maps alternative field names to expected schema fields
+     */
+    private normalizeScenes;
     private buildUserPrompt;
 }
 //# sourceMappingURL=StrategistAgent.d.ts.map
