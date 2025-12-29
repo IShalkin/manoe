@@ -376,9 +376,11 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     // Send initial connection event (no event: header so onmessage receives it)
     res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase })}\n\n`);
 
-    // Handle client disconnect
+    // Handle client disconnect - use res.on("close") instead of req.on("close")
+    // req.on("close") can fire prematurely in some Express/TsED configurations
     let isConnected = true;
-    req.on("close", () => {
+    res.on("close", () => {
+      console.log(`[OrchestrationController] SSE connection closed for runId: ${runId}`);
       isConnected = false;
     });
 
@@ -390,16 +392,16 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     }, 15000); // Every 15 seconds
 
     // First, send all existing events from the stream (catch up)
-    // Track the last event ID to avoid race condition when switching to live streaming
-    let lastEventId = "0";
+    // IMPORTANT: Do NOT check isConnected here - we want to send all existing events
+    // even if the connection seems closed (it may be a false positive from req.on("close"))
     try {
       const existingEvents = await this.redisStreams.getEvents(runId, "0", 1000);
       console.log(`[OrchestrationController] Sending ${existingEvents.length} existing events for runId: ${runId}`);
       const cinematicCount = existingEvents.filter(e => e.type === "agent_thought" || e.type === "agent_dialogue").length;
       console.log(`[OrchestrationController] Found ${cinematicCount} cinematic events in existing events`);
+      
+      let sentCount = 0;
       for (const event of existingEvents) {
-        if (!isConnected) break;
-        
         // Log cinematic events
         if (event.type === "agent_thought" || event.type === "agent_dialogue") {
           console.log(`[OrchestrationController] Streaming existing cinematic event:`, event.type, `runId: ${runId}`, event.data);
@@ -415,7 +417,9 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           data: event.data,
         });
         res.write(`data: ${sseData}\n\n`);
+        sentCount++;
       }
+      console.log(`[OrchestrationController] Successfully sent ${sentCount} existing events for runId: ${runId}`);
     } catch (error) {
       console.error(`[OrchestrationController] Error getting existing events:`, error, error instanceof Error ? error.stack : '');
     }
