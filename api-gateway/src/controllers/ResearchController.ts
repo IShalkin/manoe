@@ -1,21 +1,7 @@
-import { Controller, Get, PathParams, QueryParams } from "@tsed/common";
+import { Controller, Get, PathParams, QueryParams, $log } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
-import { SupabaseService } from "../services/SupabaseService";
-
-interface ResearchHistoryItem {
-  id: string;
-  provider: string;
-  model?: string;
-  seed_idea: string;
-  target_audience?: string;
-  themes?: string[];
-  moral_compass?: string;
-  content: string;
-  prompt_context?: string;
-  citations?: Array<{ url: string; title?: string }>;
-  created_at: string;
-}
+import { SupabaseService, ResearchHistoryItem } from "../services/SupabaseService";
 
 interface ResearchHistoryResponse {
   success: boolean;
@@ -47,10 +33,10 @@ export class ResearchController {
       const research = await this.supabaseService.getResearchHistory(limit);
       return {
         success: true,
-        research: research as ResearchHistoryItem[],
+        research,
       };
     } catch (error) {
-      console.error("[ResearchController] Error getting research history:", error);
+      $log.error("[ResearchController] Error getting research history:", error);
       return {
         success: false,
         research: [],
@@ -76,10 +62,10 @@ export class ResearchController {
       }
       return {
         success: true,
-        research: research as ResearchHistoryItem,
+        research,
       };
     } catch (error) {
-      console.error("[ResearchController] Error getting research result:", error);
+      $log.error("[ResearchController] Error getting research result:", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : "Failed to load research result",

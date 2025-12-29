@@ -59,6 +59,20 @@ interface AuditLog {
   created_at: string;
 }
 
+export interface ResearchHistoryItem {
+  id: string;
+  provider: string;
+  model?: string;
+  seed_idea: string;
+  target_audience?: string;
+  themes?: string[];
+  moral_compass?: string;
+  content: string;
+  prompt_context?: string;
+  citations?: Array<{ url: string; title?: string }>;
+  created_at: string;
+}
+
 @Service()
 export class SupabaseService {
   private client: SupabaseClient | null = null;
@@ -514,7 +528,7 @@ export class SupabaseService {
   /**
    * Get research history for a user
    */
-  async getResearchHistory(limit: number = 20): Promise<unknown[]> {
+  async getResearchHistory(limit: number = 20): Promise<ResearchHistoryItem[]> {
     const client = this.getClient();
     const { data, error } = await client
       .from("research_results")
@@ -532,7 +546,7 @@ export class SupabaseService {
   /**
    * Get a specific research result by ID
    */
-  async getResearchResult(id: string): Promise<unknown | null> {
+  async getResearchResult(id: string): Promise<ResearchHistoryItem | null> {
     const client = this.getClient();
     const { data, error } = await client
       .from("research_results")
