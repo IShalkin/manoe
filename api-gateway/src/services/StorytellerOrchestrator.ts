@@ -816,7 +816,12 @@ export class StorytellerOrchestrator {
     state.currentSceneOutline = sceneOutline;
 
     await this.saveArtifact(runId, options.projectId, `expanded_scene_${sceneNum}`, expanded);
-    await this.publishEvent(runId, "scene_expand_complete", { sceneNum, wordCount: expanded.wordCount });
+    // Include full assembled content in event so frontend has canonical source of truth
+    await this.publishEvent(runId, "scene_expand_complete", { 
+      sceneNum, 
+      wordCount: expanded.wordCount,
+      assembledContent: combinedContent 
+    });
   }
 
   /**
@@ -907,7 +912,13 @@ export class StorytellerOrchestrator {
     state.updatedAt = new Date().toISOString();
 
     await this.saveArtifact(runId, options.projectId, `final_scene_${sceneNum}`, polished);
-    await this.publishEvent(runId, "scene_polish_complete", { sceneNum, polishStatus });
+    // Include final content in event so frontend has canonical source of truth
+    await this.publishEvent(runId, "scene_polish_complete", { 
+      sceneNum, 
+      polishStatus,
+      finalContent,
+      wordCount: finalWordCount 
+    });
   }
 
   /**
