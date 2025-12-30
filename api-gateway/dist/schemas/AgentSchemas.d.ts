@@ -474,9 +474,11 @@ export declare const ImpactReportSchema: z.ZodObject<{
 }>;
 /**
  * Archivist Output schema (from ArchivistAgent)
+ * Uses preprocessing to filter out invalid constraints (null values, empty strings)
+ * before validation to handle LLM returning malformed data
  */
 export declare const ArchivistOutputSchema: z.ZodObject<{
-    constraints: z.ZodOptional<z.ZodArray<z.ZodObject<{
+    constraints: z.ZodEffects<z.ZodOptional<z.ZodArray<z.ZodObject<{
         key: z.ZodString;
         value: z.ZodString;
         sceneNumber: z.ZodNumber;
@@ -491,7 +493,12 @@ export declare const ArchivistOutputSchema: z.ZodObject<{
         key: string;
         value: string;
         reasoning?: string | undefined;
-    }>, "many">>;
+    }>, "many">>, {
+        sceneNumber: number;
+        key: string;
+        value: string;
+        reasoning?: string | undefined;
+    }[] | undefined, unknown>;
     conflicts_resolved: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     discarded_facts: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
 }, "strip", z.ZodTypeAny, {
@@ -504,12 +511,7 @@ export declare const ArchivistOutputSchema: z.ZodObject<{
     conflicts_resolved?: string[] | undefined;
     discarded_facts?: string[] | undefined;
 }, {
-    constraints?: {
-        sceneNumber: number;
-        key: string;
-        value: string;
-        reasoning?: string | undefined;
-    }[] | undefined;
+    constraints?: unknown;
     conflicts_resolved?: string[] | undefined;
     discarded_facts?: string[] | undefined;
 }>;
