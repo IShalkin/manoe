@@ -447,14 +447,19 @@ export class SupabaseService {
     // Derive phase from artifact type if not provided
     const phase = params.phase || this.derivePhaseFromArtifactType(params.artifactType);
     
-    const { error } = await client.from("run_artifacts").upsert({
-      run_id: params.runId,
-      project_id: params.projectId,
-      artifact_type: params.artifactType,
-      phase: phase,
-      content: params.content,
-      created_at: new Date().toISOString(),
-    });
+    const { error } = await client.from("run_artifacts").upsert(
+      {
+        run_id: params.runId,
+        project_id: params.projectId,
+        artifact_type: params.artifactType,
+        phase: phase,
+        content: params.content,
+        created_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "run_id,phase,artifact_type",
+      }
+    );
 
     if (error) {
       throw new Error(`Failed to save run artifact: ${error.message}`);
