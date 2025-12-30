@@ -54,7 +54,7 @@ class ArchivistAgent extends BaseAgent_1.BaseAgent {
                     key: constraint.key,
                     value: constraint.value,
                     source: AgentModels_1.AgentType.ARCHIVIST,
-                    sceneNumber: constraint.sceneNumber || sceneNumber,
+                    sceneNumber: constraint.sceneNumber ?? sceneNumber,
                     timestamp: new Date().toISOString(),
                     reasoning: constraint.reasoning,
                 });
