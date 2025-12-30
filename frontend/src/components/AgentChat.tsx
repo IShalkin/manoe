@@ -1487,14 +1487,26 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   }, [agentStates]);
 
   // Extract final result from messages - prefer assembled scene events over individual agent messages
+  // CRITICAL: Deduplicate by sceneNum to prevent text duplication from SSE reconnects/replays
   const finalResult = useMemo(() => {
+    // Helper to deduplicate events by sceneNum, keeping the latest one per scene
+    const dedupeBySceneNum = <T extends { data: { sceneNum?: number } }>(events: T[]): T[] => {
+      const sceneMap = new Map<number, T>();
+      events.forEach(event => {
+        const sceneNum = event.data.sceneNum ?? 0;
+        sceneMap.set(sceneNum, event); // Later events overwrite earlier ones
+      });
+      return Array.from(sceneMap.values());
+    };
+
     // PRIORITY 1: Use scene_polish_complete events with finalContent (canonical source of truth)
     const polishCompleteEvents = messages.filter(
       m => m.type === 'scene_polish_complete' && m.data.finalContent
     );
     if (polishCompleteEvents.length > 0) {
-      // Sort by scene number and join
-      const sortedScenes = polishCompleteEvents
+      // Deduplicate by scene number, then sort and join
+      const dedupedEvents = dedupeBySceneNum(polishCompleteEvents);
+      const sortedScenes = dedupedEvents
         .sort((a, b) => (a.data.sceneNum || 0) - (b.data.sceneNum || 0))
         .map(m => m.data.finalContent as string)
         .filter(text => text?.trim());
@@ -1509,8 +1521,9 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       m => m.type === 'scene_expand_complete' && m.data.assembledContent
     );
     if (expandCompleteEvents.length > 0) {
-      // Sort by scene number and join
-      const sortedScenes = expandCompleteEvents
+      // Deduplicate by scene number, then sort and join
+      const dedupedEvents = dedupeBySceneNum(expandCompleteEvents);
+      const sortedScenes = dedupedEvents
         .sort((a, b) => (a.data.sceneNum || 0) - (b.data.sceneNum || 0))
         .map(m => m.data.assembledContent as string)
         .filter(text => text?.trim());
@@ -1520,34 +1533,49 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       }
     }
 
-    // PRIORITY 3: Collect all Polish agent messages and extract clean story text from each
+    // PRIORITY 3: Collect Polish agent messages, deduplicate by sceneNum
     const polishMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.agent === 'Polish' && m.data.content?.trim()
     );
     if (polishMessages.length > 0) {
-      // Extract story text from all Polish messages and concatenate
-      const storyTexts = polishMessages
-        .map(m => extractStoryText(m.data.content || '', 'Polish'))
-        .filter(text => text.trim());
+      // Deduplicate by sceneNum - keep only the latest Polish message per scene
+      const sceneMap = new Map<number, string>();
+      polishMessages.forEach(m => {
+        const sceneNum = m.data.sceneNum ?? 0;
+        const text = extractStoryText(m.data.content || '', 'Polish');
+        if (text.trim()) {
+          sceneMap.set(sceneNum, text);
+        }
+      });
       
-      if (storyTexts.length > 0) {
-        // Join multiple scenes with separator
-        return storyTexts.join('\n\n---\n\n');
+      if (sceneMap.size > 0) {
+        const sortedScenes = Array.from(sceneMap.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([, text]) => text);
+        return sortedScenes.join('\n\n---\n\n');
       }
     }
     
-    // PRIORITY 4: Fall back to Writer's messages (draft story content)
+    // PRIORITY 4: Fall back to Writer's messages, deduplicate by sceneNum
     const writerMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
     );
     if (writerMessages.length > 0) {
-      // Extract story text from all Writer messages and concatenate
-      const storyTexts = writerMessages
-        .map(m => extractStoryText(m.data.content || '', 'Writer'))
-        .filter(text => text.trim());
+      // Deduplicate by sceneNum - keep only the latest Writer message per scene
+      const sceneMap = new Map<number, string>();
+      writerMessages.forEach(m => {
+        const sceneNum = m.data.sceneNum ?? 0;
+        const text = extractStoryText(m.data.content || '', 'Writer');
+        if (text.trim()) {
+          sceneMap.set(sceneNum, text);
+        }
+      });
       
-      if (storyTexts.length > 0) {
-        return storyTexts.join('\n\n---\n\n');
+      if (sceneMap.size > 0) {
+        const sortedScenes = Array.from(sceneMap.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([, text]) => text);
+        return sortedScenes.join('\n\n---\n\n');
       }
     }
     
@@ -1567,12 +1595,15 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         : JSON.stringify(completeEvent.data.result_summary, null, 2);
     }
     
-    // PRIORITY 6: Fall back to last substantial agent message (extract story text if possible)
-    const agentMessages = messages.filter(
-      m => m.type === 'agent_message' && m.data.content?.trim()
+    // PRIORITY 6: Fall back to last substantial STORY agent message only (Writer or Polish)
+    // Exclude non-story agents like Architect, Worldbuilder, Strategist, etc.
+    const storyAgentMessages = messages.filter(
+      m => m.type === 'agent_message' && 
+           (m.data.agent === 'Writer' || m.data.agent === 'Polish') &&
+           m.data.content?.trim()
     );
-    if (agentMessages.length > 0) {
-      const lastMsg = agentMessages[agentMessages.length - 1];
+    if (storyAgentMessages.length > 0) {
+      const lastMsg = storyAgentMessages[storyAgentMessages.length - 1];
       const extracted = extractStoryText(lastMsg.data.content || '', 'other');
       if (extracted) return extracted;
       return lastMsg.data.content || '';
