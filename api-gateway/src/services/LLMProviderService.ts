@@ -62,6 +62,61 @@ const MODEL_CONTEXT_LENGTHS: Record<string, number> = {
 };
 
 /**
+ * Models that do NOT support the temperature parameter
+ * These models only accept temperature=1 (default) or no temperature at all
+ * Includes OpenAI reasoning models (o1, o3 series) and some provider-specific models
+ */
+const MODELS_WITHOUT_TEMPERATURE_SUPPORT: string[] = [
+  // OpenAI reasoning models
+  "o1",
+  "o1-mini",
+  "o1-preview",
+  "o3",
+  "o3-mini",
+  // OpenRouter variants
+  "openai/o1",
+  "openai/o1-mini",
+  "openai/o1-preview",
+  "openai/o3",
+  "openai/o3-mini",
+];
+
+/**
+ * Check if a model supports the temperature parameter
+ * Returns false for reasoning models that only accept default temperature
+ */
+function modelSupportsTemperature(model: string): boolean {
+  const normalizedModel = model.toLowerCase();
+  
+  // Check exact matches first
+  if (MODELS_WITHOUT_TEMPERATURE_SUPPORT.some(m => normalizedModel === m.toLowerCase())) {
+    return false;
+  }
+  
+  // Check prefix patterns for o1/o3 series (catches o1-2024-12-17, etc.)
+  if (normalizedModel.match(/^(openai\/)?(o1|o3)(-|$)/)) {
+    return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Check if an error is a temperature-related unsupported parameter error
+ */
+function isTemperatureUnsupportedError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    return (
+      (message.includes("temperature") && message.includes("unsupported")) ||
+      (message.includes("temperature") && message.includes("does not support")) ||
+      (message.includes("temperature") && message.includes("only") && message.includes("default"))
+    );
+  }
+  return false;
+}
+
+/**
  * Model max OUTPUT token limits (completion tokens only)
  * Different from context length - this is the max tokens the model can generate
  * Used to prevent "max_tokens exceeds model limit" errors
@@ -444,8 +499,15 @@ export class LLMProviderService {
     const requestParams: OpenAI.ChatCompletionCreateParams = {
       model: options.model,
       messages: this.formatMessagesForOpenAI(options.messages),
-      temperature: options.temperature ?? 0.7,
     };
+
+    // Only include temperature for models that support it
+    // Reasoning models (o1, o3 series) don't support temperature parameter
+    if (modelSupportsTemperature(options.model)) {
+      requestParams.temperature = options.temperature ?? 0.7;
+    } else {
+      console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+    }
 
     if (options.maxTokens) {
       // Get model context length and cap max_tokens to leave room for prompt
@@ -535,13 +597,21 @@ export class LLMProviderService {
     const requestedMaxTokens = options.maxTokens ?? 4096;
     const cappedMaxTokens = capMaxTokensToModelLimit(options.model, requestedMaxTokens);
 
-    const response = await client.messages.create({
+    // Build request options - only include temperature for models that support it
+    const requestOptions: Anthropic.MessageCreateParams = {
       model: options.model,
       max_tokens: cappedMaxTokens,
       system: systemMessage,
       messages: chatMessages,
-      temperature: options.temperature ?? 0.7,
-    });
+    };
+
+    if (modelSupportsTemperature(options.model)) {
+      requestOptions.temperature = options.temperature ?? 0.7;
+    } else {
+      console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+    }
+
+    const response = await client.messages.create(requestOptions);
 
     const content = response.content[0]?.type === "text" 
       ? response.content[0].text 
@@ -594,12 +664,20 @@ export class LLMProviderService {
       ? capMaxTokensToModelLimit(options.model, options.maxTokens)
       : undefined;
 
+    // Build generation config - only include temperature for models that support it
+    const generationConfig: { temperature?: number; maxOutputTokens?: number } = {
+      maxOutputTokens: cappedMaxTokens,
+    };
+
+    if (modelSupportsTemperature(options.model)) {
+      generationConfig.temperature = options.temperature ?? 0.7;
+    } else {
+      console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+    }
+
     const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
-      generationConfig: {
-        temperature: options.temperature ?? 0.7,
-        maxOutputTokens: cappedMaxTokens,
-      },
+      generationConfig,
     });
 
     const response = result.response;
@@ -636,8 +714,14 @@ export class LLMProviderService {
     const requestParams: OpenAI.ChatCompletionCreateParams = {
       model: options.model,
       messages: this.formatMessagesForOpenAI(options.messages),
-      temperature: options.temperature ?? 0.7,
     };
+
+    // Only include temperature for models that support it
+    if (modelSupportsTemperature(options.model)) {
+      requestParams.temperature = options.temperature ?? 0.7;
+    } else {
+      console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+    }
 
     if (options.maxTokens) {
       // Cap max_tokens to model's output limit
@@ -677,8 +761,14 @@ export class LLMProviderService {
     const requestParams: OpenAI.ChatCompletionCreateParams = {
       model: options.model,
       messages: this.formatMessagesForOpenAI(options.messages),
-      temperature: options.temperature ?? 0.7,
     };
+
+    // Only include temperature for models that support it
+    if (modelSupportsTemperature(options.model)) {
+      requestParams.temperature = options.temperature ?? 0.7;
+    } else {
+      console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+    }
 
     if (options.maxTokens) {
       // Cap max_tokens to model's output limit
@@ -718,8 +808,14 @@ export class LLMProviderService {
     const requestParams: OpenAI.ChatCompletionCreateParams = {
       model: options.model,
       messages: this.formatMessagesForOpenAI(options.messages),
-      temperature: options.temperature ?? 0.7,
     };
+
+    // Only include temperature for models that support it
+    if (modelSupportsTemperature(options.model)) {
+      requestParams.temperature = options.temperature ?? 0.7;
+    } else {
+      console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+    }
 
     if (options.maxTokens) {
       // Cap max_tokens to model's output limit
