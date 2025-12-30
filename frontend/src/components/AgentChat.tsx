@@ -1288,9 +1288,11 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         }
         
         // Close connection when generation is complete or errored
-        if (data.type === 'generation_complete' || data.type === 'generation_error') {
+        // Note: Backend sends 'generation_completed', but we also accept 'generation_complete' for compatibility
+        const isGenerationComplete = data.type === 'generation_complete' || data.type === 'generation_completed';
+        if (isGenerationComplete || data.type === 'generation_error') {
           const isInterruptedRun = data.type === 'generation_error' && data.data.status === 'interrupted';
-          setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : (isInterruptedRun ? 'Interrupted' : 'Error'));
+          setCurrentPhase(isGenerationComplete ? 'Complete' : (isInterruptedRun ? 'Interrupted' : 'Error'));
           setIsComplete(true);
           if (eventSource) eventSource.close();
           setIsConnected(false);
@@ -1343,8 +1345,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                 return;
               }
               
-              // Try generation_complete result_summary
-              const completeEvent = allMessages.find(m => m.type === 'generation_complete');
+              // Try generation_complete/generation_completed result_summary
+              const completeEvent = allMessages.find(m => m.type === 'generation_complete' || m.type === 'generation_completed');
               if (completeEvent?.data.result_summary) {
                 onComplete({
                   story: completeEvent.data.result_summary,
@@ -1606,8 +1608,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       }
     }
     
-    // PRIORITY 5: Try generation_complete result_summary as fallback
-    const completeEvent = messages.find(m => m.type === 'generation_complete');
+    // PRIORITY 5: Try generation_complete/generation_completed result_summary as fallback
+    const completeEvent = messages.find(m => m.type === 'generation_complete' || m.type === 'generation_completed');
     if (completeEvent?.data.result_summary) {
       // Try to extract story text from result_summary too
       const extracted = extractStoryText(
