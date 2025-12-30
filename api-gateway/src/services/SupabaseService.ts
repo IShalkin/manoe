@@ -398,19 +398,17 @@ export class SupabaseService {
     revisionNumber: number;
   }): Promise<void> {
     const client = this.getClient();
+    // Map to actual table schema
     const { error } = await client.from("critiques").insert({
       project_id: params.projectId,
-      run_id: params.runId,
       scene_number: params.sceneNumber,
-      score: params.critique.score,
-      approved: params.critique.approved,
-      word_count_compliance: params.critique.wordCountCompliance,
-      scope_adherence: params.critique.scopeAdherence,
+      overall_score: params.critique.score ?? 5,
+      approved: params.critique.approved ?? false,
+      feedback_items: params.critique.issues || [],
       strengths: params.critique.strengths,
-      issues: params.critique.issues,
-      revision_requests: params.critique.revisionRequests,
-      revision_number: params.revisionNumber,
-      created_at: new Date().toISOString(),
+      weaknesses: params.critique.issues,
+      revision_required: params.critique.revision_needed ?? true,
+      revision_focus: params.critique.revisionRequests,
     });
 
     if (error) {
@@ -431,18 +429,27 @@ export class SupabaseService {
     const client = this.getClient();
     
     for (const char of characters) {
+      // Map character fields to actual table schema columns
       const { error } = await client.from("characters").upsert({
         project_id: projectId,
-        run_id: runId,
-        name: char.name || char.fullName,
+        name: String(char.name || char.fullName || "Unknown"),
         archetype: char.archetype || char.role,
         core_motivation: char.coreMotivation || char.motivation,
         inner_trap: char.innerTrap || char.flaw,
         psychological_wound: char.psychologicalWound || char.wound,
         visual_signature: char.visualSignature || char.appearance,
-        backstory: typeof char.backstory === "string" ? char.backstory : JSON.stringify(char.backstory || {}),
-        relationships: typeof char.relationships === "string" ? char.relationships : JSON.stringify(char.relationships || {}),
-        created_at: new Date().toISOString(),
+        // Map additional fields to table columns
+        coping_mechanism: char.copingMechanism,
+        deepest_fear: char.deepestFear,
+        breaking_point: char.breakingPoint,
+        occupation_role: char.occupationRole || char.occupation || char.role,
+        public_goal: char.publicGoal,
+        hidden_goal: char.hiddenGoal,
+        defining_moment: char.definingMoment,
+        family_background: char.familyBackground,
+        special_skill: char.specialSkill,
+        moral_stance: char.moralStance,
+        potential_arc: char.potentialArc || char.arc,
       }, {
         onConflict: "project_id,name",
       });
@@ -467,15 +474,14 @@ export class SupabaseService {
     revisionCount: number;
   }): Promise<void> {
     const client = this.getClient();
+    // Map to actual table schema - uses narrative_content instead of content
     const { error } = await client.from("drafts").upsert({
       project_id: params.projectId,
-      run_id: params.runId,
       scene_number: params.sceneNumber,
-      content: params.content,
+      narrative_content: params.content,
       word_count: params.wordCount,
       status: params.status,
       revision_count: params.revisionCount,
-      created_at: new Date().toISOString(),
     }, {
       onConflict: "project_id,scene_number",
     });
