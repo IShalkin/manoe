@@ -1522,11 +1522,35 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       return Array.from(sceneMap.values());
     };
 
+    // DEBUG: Log all scene-related events for debugging duplication issues
+    const scenePolishEvents = messages.filter(m => m.type === 'scene_polish_complete');
+    const sceneExpandEvents = messages.filter(m => m.type === 'scene_expand_complete');
+    const writerMsgs = messages.filter(m => m.type === 'agent_message' && m.data.agent === 'Writer');
+    console.log('[finalResult DEBUG] Event counts:', {
+      scene_polish_complete: scenePolishEvents.length,
+      scene_polish_with_finalContent: scenePolishEvents.filter(m => m.data.finalContent).length,
+      scene_expand_complete: sceneExpandEvents.length,
+      writer_messages: writerMsgs.length,
+      writer_with_sceneNum: writerMsgs.filter(m => m.data.sceneNum !== undefined).length,
+    });
+    if (scenePolishEvents.length > 0) {
+      console.log('[finalResult DEBUG] scene_polish_complete events:', scenePolishEvents.map(m => ({
+        sceneNum: m.data.sceneNum,
+        hasFinalContent: !!m.data.finalContent,
+        polishStatus: m.data.polishStatus,
+        wordCount: m.data.wordCount,
+      })));
+    }
+    if (writerMsgs.length > 0) {
+      console.log('[finalResult DEBUG] Writer messages sceneNums:', writerMsgs.map(m => m.data.sceneNum));
+    }
+
     // PRIORITY 1: Use scene_polish_complete events with finalContent (canonical source of truth)
     const polishCompleteEvents = messages.filter(
       m => m.type === 'scene_polish_complete' && m.data.finalContent
     );
     if (polishCompleteEvents.length > 0) {
+      console.log('[finalResult] Using PRIORITY 1: scene_polish_complete events');
       // Deduplicate by scene number, then sort and join
       const dedupedEvents = dedupeBySceneNum(polishCompleteEvents);
       const sortedScenes = dedupedEvents
@@ -1535,6 +1559,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         .filter(text => text?.trim());
       
       if (sortedScenes.length > 0) {
+        console.log('[finalResult] PRIORITY 1: Returning', sortedScenes.length, 'scenes');
         return sortedScenes.join('\n\n---\n\n');
       }
     }
@@ -1544,6 +1569,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       m => m.type === 'scene_expand_complete' && m.data.assembledContent
     );
     if (expandCompleteEvents.length > 0) {
+      console.log('[finalResult] Using PRIORITY 2: scene_expand_complete events');
       // Deduplicate by scene number, then sort and join
       const dedupedEvents = dedupeBySceneNum(expandCompleteEvents);
       const sortedScenes = dedupedEvents
@@ -1552,6 +1578,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         .filter(text => text?.trim());
       
       if (sortedScenes.length > 0) {
+        console.log('[finalResult] PRIORITY 2: Returning', sortedScenes.length, 'scenes');
         return sortedScenes.join('\n\n---\n\n');
       }
     }
@@ -1565,10 +1592,14 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       m => m.type === 'agent_message' && m.data.agent === 'Polish' && m.data.content?.trim()
     );
     if (polishMessages.length > 0) {
+      console.log('[finalResult] Using PRIORITY 3: Polish agent messages');
       // Deduplicate by sceneNum - keep only the latest Polish message per scene
       const sceneMap = new Map<number, string>();
       polishMessages.forEach(m => {
         const sceneNum = m.data.sceneNum ?? 0;
+        if (sceneNum === 0) {
+          console.warn('[finalResult] WARNING: Polish message has no sceneNum, using fallback index 0');
+        }
         const text = extractStoryText(m.data.content || '', 'Polish');
         if (text.trim()) {
           sceneMap.set(sceneNum, text);
@@ -1579,6 +1610,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         const sortedScenes = Array.from(sceneMap.entries())
           .sort((a, b) => a[0] - b[0])
           .map(([, text]) => text);
+        console.log('[finalResult] PRIORITY 3: Returning', sortedScenes.length, 'scenes from sceneMap');
         return sortedScenes.join('\n\n---\n\n');
       }
     }
@@ -1588,10 +1620,14 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
     );
     if (writerMessages.length > 0) {
+      console.log('[finalResult] Using PRIORITY 4: Writer agent messages');
       // Deduplicate by sceneNum - keep only the latest Writer message per scene
       const sceneMap = new Map<number, string>();
       writerMessages.forEach(m => {
         const sceneNum = m.data.sceneNum ?? 0;
+        if (sceneNum === 0) {
+          console.warn('[finalResult] WARNING: Writer message has no sceneNum, using fallback index 0');
+        }
         const text = extractStoryText(m.data.content || '', 'Writer');
         if (text.trim()) {
           sceneMap.set(sceneNum, text);
@@ -1602,6 +1638,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
         const sortedScenes = Array.from(sceneMap.entries())
           .sort((a, b) => a[0] - b[0])
           .map(([, text]) => text);
+        console.log('[finalResult] PRIORITY 4: Returning', sortedScenes.length, 'scenes from sceneMap');
         return sortedScenes.join('\n\n---\n\n');
       }
     }
@@ -1609,6 +1646,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     // PRIORITY 5: Try generation_complete result_summary as fallback
     const completeEvent = messages.find(m => m.type === 'generation_complete');
     if (completeEvent?.data.result_summary) {
+      console.log('[finalResult] Using PRIORITY 5: generation_complete result_summary');
       // Try to extract story text from result_summary too
       const extracted = extractStoryText(
         typeof completeEvent.data.result_summary === 'string' 
@@ -1630,12 +1668,14 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
            m.data.content?.trim()
     );
     if (storyAgentMessages.length > 0) {
+      console.log('[finalResult] Using PRIORITY 6: Last story agent message');
       const lastMsg = storyAgentMessages[storyAgentMessages.length - 1];
       const extracted = extractStoryText(lastMsg.data.content || '', 'other');
       if (extracted) return extracted;
       return lastMsg.data.content || '';
     }
     
+    console.log('[finalResult] No content found, returning empty string');
     return '';
   }, [messages]);
 

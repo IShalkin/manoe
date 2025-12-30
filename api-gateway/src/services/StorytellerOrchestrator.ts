@@ -1517,12 +1517,23 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
   /**
    * Publish event to Redis Streams
+   * DEBUG: Log scene-related events to help diagnose duplication issues
    */
   private async publishEvent(
     runId: string,
     eventType: string,
     data: Record<string, unknown>
   ): Promise<void> {
+    // DEBUG: Log scene-related events for debugging duplication issues
+    if (eventType.startsWith('scene_')) {
+      console.log(`[StorytellerOrchestrator] Publishing ${eventType}:`, {
+        runId,
+        sceneNum: data.sceneNum,
+        polishStatus: data.polishStatus,
+        hasFinalContent: !!data.finalContent,
+        wordCount: data.wordCount,
+      });
+    }
     await this.redisStreams.publishEvent(runId, eventType, data);
   }
 

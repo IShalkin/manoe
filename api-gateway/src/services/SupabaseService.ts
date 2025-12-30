@@ -386,6 +386,105 @@ export class SupabaseService {
     return data || [];
   }
 
+  /**
+   * Save a critique for a scene
+   * Phase 5.1: Integrate write-path for critiques table
+   */
+  async saveCritique(params: {
+    projectId: string;
+    runId: string;
+    sceneNumber: number;
+    critique: Record<string, unknown>;
+    revisionNumber: number;
+  }): Promise<void> {
+    const client = this.getClient();
+    const { error } = await client.from("critiques").insert({
+      project_id: params.projectId,
+      run_id: params.runId,
+      scene_number: params.sceneNumber,
+      score: params.critique.score,
+      approved: params.critique.approved,
+      word_count_compliance: params.critique.wordCountCompliance,
+      scope_adherence: params.critique.scopeAdherence,
+      strengths: params.critique.strengths,
+      issues: params.critique.issues,
+      revision_requests: params.critique.revisionRequests,
+      revision_number: params.revisionNumber,
+      created_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      // Log but don't throw - critique persistence is not critical path
+      console.error(`Failed to save critique: ${error.message}`);
+    }
+  }
+
+  /**
+   * Upsert characters for a project
+   * Phase 5.1: Integrate write-path for characters table
+   */
+  async upsertCharacters(
+    projectId: string,
+    runId: string,
+    characters: Record<string, unknown>[]
+  ): Promise<void> {
+    const client = this.getClient();
+    
+    for (const char of characters) {
+      const { error } = await client.from("characters").upsert({
+        project_id: projectId,
+        run_id: runId,
+        name: char.name || char.fullName,
+        archetype: char.archetype || char.role,
+        core_motivation: char.coreMotivation || char.motivation,
+        inner_trap: char.innerTrap || char.flaw,
+        psychological_wound: char.psychologicalWound || char.wound,
+        visual_signature: char.visualSignature || char.appearance,
+        backstory: typeof char.backstory === "string" ? char.backstory : JSON.stringify(char.backstory || {}),
+        relationships: typeof char.relationships === "string" ? char.relationships : JSON.stringify(char.relationships || {}),
+        created_at: new Date().toISOString(),
+      }, {
+        onConflict: "project_id,name",
+      });
+
+      if (error) {
+        console.error(`Failed to upsert character ${char.name}: ${error.message}`);
+      }
+    }
+  }
+
+  /**
+   * Upsert a draft for a scene
+   * Phase 5.1: Integrate write-path for drafts table
+   */
+  async upsertDraft(params: {
+    projectId: string;
+    runId: string;
+    sceneNumber: number;
+    content: string;
+    wordCount: number;
+    status: string;
+    revisionCount: number;
+  }): Promise<void> {
+    const client = this.getClient();
+    const { error } = await client.from("drafts").upsert({
+      project_id: params.projectId,
+      run_id: params.runId,
+      scene_number: params.sceneNumber,
+      content: params.content,
+      word_count: params.wordCount,
+      status: params.status,
+      revision_count: params.revisionCount,
+      created_at: new Date().toISOString(),
+    }, {
+      onConflict: "project_id,scene_number",
+    });
+
+    if (error) {
+      console.error(`Failed to upsert draft: ${error.message}`);
+    }
+  }
+
   // ========================================================================
   // Audit Log Operations
   // ========================================================================
