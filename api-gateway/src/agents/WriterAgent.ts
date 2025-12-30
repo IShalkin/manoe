@@ -62,7 +62,8 @@ export class WriterAgent extends BaseAgent {
       await this.applyGuardrails(response, state.keyConstraints, runId);
       
       // Emit the actual generated content for the frontend to display
-      await this.emitMessage(runId, { content: response, sceneNumber: state.currentScene }, phase);
+      // Pass sceneNum as fourth parameter for frontend deduplication
+      await this.emitMessage(runId, { content: response, sceneNumber: state.currentScene }, phase, state.currentScene);
       
       // Emit completion thought
       if (phase === GenerationPhase.DRAFTING) {
@@ -169,20 +170,24 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
         const existingContent = String(sceneOutline.existingContent ?? "");
         const additionalWordsNeeded = Number(sceneOutline.additionalWordsNeeded ?? 500);
         
+        // Get the last 100 characters as context marker for the LLM
+        const lastChars = existingContent.slice(-100);
+        
         return `Continue Scene ${sceneNum}: "${sceneTitle}"
 
-The scene so far (DO NOT REWRITE - continue from where it ends):
----
-${existingContent}
----
+CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text. Start exactly from where the scene left off.
 
-Continue the scene from where it left off. Write approximately ${additionalWordsNeeded} more words.
+The scene ends with:
+"...${lastChars}"
+
+Write approximately ${additionalWordsNeeded} more words to continue from that exact point.
 
 Requirements:
-- Continue seamlessly from the last paragraph
-- Maintain the same voice, tone, and style
+- Start your response with NEW content only - the very next word/sentence after the existing text
+- DO NOT include any text that already exists in the scene
+- DO NOT repeat the ending shown above
+- Continue seamlessly maintaining the same voice, tone, and style
 - Progress the scene toward its conclusion
-- DO NOT repeat or summarize what was already written
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}

@@ -838,6 +838,11 @@ export class StorytellerOrchestrator {
 
     // Append continuation to existing content
     const existingContent = String(draft.content ?? "");
+    
+    // CRITICAL: Detect and strip overlap if Writer returned full text instead of just continuation
+    // This prevents text duplication when LLM ignores the "return only continuation" instruction
+    continuation = this.stripOverlap(existingContent, continuation);
+    
     const combinedContent = existingContent + "\n\n" + continuation;
 
     const expanded = {
@@ -875,6 +880,91 @@ export class StorytellerOrchestrator {
       .replace(/\[?\*?\*?Word count:?\*?\*?\s*[\d,]+\s*(?:words?)?\]?\.?/gi, "")
       .replace(/\n\s*\n\s*\n/g, "\n\n") // Clean up extra newlines
       .trim();
+  }
+
+  /**
+   * Strip overlap from continuation if Writer returned full text instead of just continuation
+   * This prevents text duplication when LLM ignores the "return only continuation" instruction
+   * 
+   * Algorithm: Find the longest suffix of existingContent that matches a prefix of continuation,
+   * then strip that overlap from continuation.
+   */
+  private stripOverlap(existingContent: string, continuation: string): string {
+    if (!existingContent || !continuation) {
+      return continuation;
+    }
+
+    // Normalize whitespace for comparison
+    const existingNormalized = existingContent.trim();
+    const continuationNormalized = continuation.trim();
+
+    // Check if continuation starts with a significant portion of existing content
+    // This indicates the LLM returned the full text instead of just continuation
+    const existingWords = existingNormalized.split(/\s+/);
+    const continuationWords = continuationNormalized.split(/\s+/);
+
+    // If continuation is shorter than existing, no overlap possible
+    if (continuationWords.length <= existingWords.length * 0.3) {
+      return continuation;
+    }
+
+    // Check for large overlap (more than 30% of existing content appears at start of continuation)
+    // Use a sliding window approach to find where the overlap ends
+    const minOverlapWords = Math.floor(existingWords.length * 0.3);
+    
+    // Try to find where existing content ends in continuation
+    // Look for the last 50 words of existing content in continuation
+    const lastNWords = Math.min(50, existingWords.length);
+    const existingEnding = existingWords.slice(-lastNWords).join(" ").toLowerCase();
+    
+    // Search for this ending in the continuation
+    const continuationLower = continuationNormalized.toLowerCase();
+    const endingIndex = continuationLower.indexOf(existingEnding);
+    
+    if (endingIndex !== -1) {
+      // Found the ending of existing content in continuation
+      // Strip everything up to and including this ending
+      const overlapEndPosition = endingIndex + existingEnding.length;
+      const strippedContinuation = continuationNormalized.substring(overlapEndPosition).trim();
+      
+      // Only use stripped version if it's substantial (more than 100 chars)
+      if (strippedContinuation.length > 100) {
+        $log.info(`[StorytellerOrchestrator] Stripped ${overlapEndPosition} chars of overlap from continuation`);
+        return strippedContinuation;
+      }
+    }
+
+    // Alternative: Check if continuation starts with a large chunk of existing content
+    // by comparing first N words
+    const checkWords = Math.min(100, Math.floor(existingWords.length * 0.5));
+    if (checkWords > 20) {
+      const existingStart = existingWords.slice(0, checkWords).join(" ").toLowerCase();
+      const continuationStart = continuationWords.slice(0, checkWords).join(" ").toLowerCase();
+      
+      // If more than 80% of words match, this is likely a full rewrite
+      const matchingWords = existingStart.split(" ").filter((word, i) => {
+        const contWords = continuationStart.split(" ");
+        return i < contWords.length && contWords[i] === word;
+      }).length;
+      
+      if (matchingWords / checkWords > 0.8) {
+        // Find where existing content ends in continuation and strip
+        // Use the last 30 words as anchor
+        const anchorWords = existingWords.slice(-30).join(" ").toLowerCase();
+        const anchorIndex = continuationLower.indexOf(anchorWords);
+        
+        if (anchorIndex !== -1) {
+          const strippedContinuation = continuationNormalized.substring(anchorIndex + anchorWords.length).trim();
+          if (strippedContinuation.length > 100) {
+            $log.info(`[StorytellerOrchestrator] Stripped overlap using anchor method`);
+            return strippedContinuation;
+          }
+        }
+      }
+    }
+
+    // No significant overlap detected, return original
+    return continuation;
   }
 
   /**

@@ -6,6 +6,7 @@ export interface AgentMessage {
   type: string;
   data: Record<string, unknown>;
   timestamp?: string;
+  eventId?: string;  // Unique event ID for deduplication
 }
 
 export interface FactUpdate {
@@ -61,6 +62,8 @@ export function useGenerationStream({
   const [isCancelled, setIsCancelled] = useState(false);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  // Track seen eventIds to prevent duplicate messages from SSE reconnects/replays
+  const seenEventIdsRef = useRef<Set<string>>(new Set());
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {
@@ -101,6 +104,7 @@ export function useGenerationStream({
             const normalizedData: AgentMessage = {
               type: rawData.type ?? 'unknown',
               timestamp: rawData.timestamp,
+              eventId: rawData.eventId,  // Include eventId for deduplication
               data: rawData.data ?? {},
             };
             
@@ -185,6 +189,16 @@ export function useGenerationStream({
             ) {
               // These are handled specially in CinematicAgentPanel
               console.log('[useGenerationStream] Cinematic event received:', data.type, data);
+            }
+
+            // CRITICAL: Deduplicate events by eventId before storing
+            // This prevents duplicate messages from SSE reconnects/replays
+            if (data.eventId) {
+              if (seenEventIdsRef.current.has(data.eventId)) {
+                console.log('[useGenerationStream] Skipping duplicate event:', data.eventId);
+                return;
+              }
+              seenEventIdsRef.current.add(data.eventId);
             }
 
             // Store message
