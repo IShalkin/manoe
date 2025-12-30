@@ -645,19 +645,22 @@ export class StorytellerOrchestrator {
     state.phase = GenerationPhase.DRAFTING;
     state.currentScene = sceneNum;
     
-    // CRITICAL: Set currentSceneOutline at the start of each scene
-    // This ensures WriterAgent always has the correct outline for this scene
-    // and prevents state contamination from previous scenes
-    state.currentSceneOutline = sceneOutline;
-    
     await this.publishEvent(runId, "scene_draft_start", { sceneNum });
 
     const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
 
-    // Note: Characters are already available in state.characters from the Characters phase.
-    // WriterAgent accesses them via context.state. Qdrant semantic search is used for
-    // cross-project "eternal memory" but not needed in the hot path since all characters
-    // for this run are already in memory.
+    // Retrieve relevant context from Qdrant for hallucination prevention
+    // This provides the Writer with semantic memory of characters, worldbuilding, and previous scenes
+    const relevantContext = await this.getRelevantContext(options.projectId, sceneOutline);
+    
+    // CRITICAL: Set currentSceneOutline at the start of each scene
+    // This ensures WriterAgent always has the correct outline for this scene
+    // and prevents state contamination from previous scenes
+    // Include retrieved context for hallucination prevention
+    state.currentSceneOutline = {
+      ...sceneOutline,
+      retrievedContext: relevantContext,  // Add Qdrant context for Writer
+    };
 
     // Store scene outline in state for WriterAgent to access
     const outline = state.outline as Record<string, unknown>;
@@ -1239,6 +1242,98 @@ export class StorytellerOrchestrator {
     return constraints
       .map((c) => `- ${c.key}: ${c.value} (Scene ${c.sceneNumber})`)
       .join("\n");
+  }
+
+  /**
+   * Retrieve relevant context from Qdrant for hallucination prevention
+   * 
+   * This method searches Qdrant for relevant characters, worldbuilding elements,
+   * and previous scenes that are semantically related to the current scene.
+   * The retrieved context helps the Writer maintain consistency with established facts.
+   * 
+   * @param projectId - Project ID for filtering
+   * @param sceneOutline - Current scene outline to use as search query
+   * @returns Formatted context string for inclusion in Writer prompt
+   */
+  private async getRelevantContext(
+    projectId: string,
+    sceneOutline: Record<string, unknown>
+  ): Promise<string> {
+    const contextParts: string[] = [];
+
+    // Build search query from scene outline
+    const sceneTitle = String(sceneOutline.title ?? "");
+    const sceneSetting = String(sceneOutline.setting ?? "");
+    const sceneCharacters = Array.isArray(sceneOutline.characters) 
+      ? sceneOutline.characters.join(", ") 
+      : String(sceneOutline.characters ?? "");
+    const searchQuery = `${sceneTitle} ${sceneSetting} ${sceneCharacters}`.trim();
+
+    if (!searchQuery) {
+      return "";
+    }
+
+    try {
+      // Search for relevant characters
+      const relevantCharacters = await this.qdrantMemory.searchCharacters(projectId, searchQuery, 3);
+      if (relevantCharacters.length > 0) {
+        const charContext = relevantCharacters
+          .filter(r => r.score > 0.5)  // Only include high-relevance matches
+          .map(r => {
+            const char = r.payload.character;
+            return `- ${r.payload.name}: ${char.role ?? ""} ${char.coreMotivation ?? ""}`.trim();
+          })
+          .join("\n");
+        
+        if (charContext) {
+          contextParts.push(`RELEVANT CHARACTERS:\n${charContext}`);
+        }
+      }
+
+      // Search for relevant worldbuilding elements
+      const relevantWorld = await this.qdrantMemory.searchWorldbuilding(projectId, searchQuery, 3);
+      if (relevantWorld.length > 0) {
+        const worldContext = relevantWorld
+          .filter(r => r.score > 0.5)
+          .map(r => {
+            const elem = r.payload.element;
+            return `- ${r.payload.elementType}: ${elem.name ?? ""} - ${elem.description ?? ""}`.trim();
+          })
+          .join("\n");
+        
+        if (worldContext) {
+          contextParts.push(`RELEVANT WORLDBUILDING:\n${worldContext}`);
+        }
+      }
+
+      // Search for relevant previous scenes (for continuity)
+      const relevantScenes = await this.qdrantMemory.searchScenes(projectId, searchQuery, 2);
+      if (relevantScenes.length > 0) {
+        const sceneContext = relevantScenes
+          .filter(r => r.score > 0.5)
+          .map(r => {
+            const scene = r.payload.scene as Record<string, unknown>;
+            const content = String(scene.content ?? "");
+            // Include only a summary (first 200 chars) to avoid context bloat
+            const summary = content.length > 200 ? content.substring(0, 200) + "..." : content;
+            return `- Scene ${r.payload.sceneNumber} "${scene.title ?? ""}": ${summary}`;
+          })
+          .join("\n");
+        
+        if (sceneContext) {
+          contextParts.push(`PREVIOUS SCENES (for continuity):\n${sceneContext}`);
+        }
+      }
+    } catch (error) {
+      // Log error but don't fail the generation
+      console.warn(`[Orchestrator] Failed to retrieve Qdrant context: ${error}`);
+    }
+
+    if (contextParts.length === 0) {
+      return "";
+    }
+
+    return `\n\nRELEVANT CONTEXT FROM MEMORY (use for consistency):\n${contextParts.join("\n\n")}`;
   }
 
   /**

@@ -194,6 +194,9 @@ ${constraintsBlock}
 ${autonomousInstruction}`;
       }
 
+      // Include retrieved context from Qdrant for hallucination prevention
+      const retrievedContext = String(sceneOutline.retrievedContext ?? "");
+
       return `Write Scene ${sceneNum}: "${sceneTitle}"
 
 Scene outline:
@@ -208,6 +211,7 @@ Requirements:
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
+${retrievedContext}
 ${autonomousInstruction}`;
     }
 
