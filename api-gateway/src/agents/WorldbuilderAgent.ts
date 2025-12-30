@@ -82,10 +82,22 @@ export class WorldbuilderAgent extends BaseAgent {
   }
 
   private getFallbackPrompt(variables: Record<string, string>): string {
+    // Parse narrative to extract genre for system prompt emphasis
+    let genreInstruction = "";
+    try {
+      const narrative = JSON.parse(variables.narrative || "{}");
+      const genre = this.extractStringValue(narrative?.genre);
+      if (genre) {
+        genreInstruction = `\n\nCRITICAL GENRE CONSTRAINT: The story genre is "${genre}". You MUST strictly adhere to this genre. DO NOT introduce elements that contradict it (e.g., no fantasy/magic in sci-fi, no sci-fi tech in historical fiction).`;
+      }
+    } catch {
+      // Ignore parse errors
+    }
+    
     return `You are the Worldbuilder, a creator of immersive settings and worlds.
 Your role is to develop rich, consistent worlds that enhance the narrative.
 Narrative: ${variables.narrative || "No narrative yet"}
-Characters: ${variables.characters || "No characters yet"}`;
+Characters: ${variables.characters || "No characters yet"}${genreInstruction}`;
   }
 
   private compileFallbackPrompt(variables: Record<string, string>): string {
@@ -107,6 +119,9 @@ Characters: ${variables.characters || "No characters yet"}`;
     const genre = this.extractStringValue(narrative?.genre);
     const tone = this.extractStringValue(narrative?.tone);
     const premise = this.extractStringValue(narrative?.premise);
+    
+    // Log extracted values for debugging genre adherence issues
+    console.log(`[Worldbuilder] Extracted from narrative - Genre: "${genre || 'NOT FOUND'}", Tone: "${tone || 'NOT FOUND'}", Premise: "${premise?.substring(0, 50) || 'NOT FOUND'}..."`);
     
     // Build immutable constraints block from seed constraints (sceneNumber=0)
     const seedConstraints = keyConstraints
