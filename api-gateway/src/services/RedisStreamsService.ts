@@ -23,6 +23,7 @@ export interface StreamEvent {
   id: string;
   type: string;
   runId: string;
+  eventId: string;  // Unique event ID for frontend deduplication
   timestamp: string;
   data: Record<string, unknown>;
 }
@@ -127,9 +128,14 @@ export class RedisStreamsService {
     const client = this.getClient();
     const streamKey = this.getStreamKey(runId);
 
+    // Generate unique eventId for deduplication on frontend
+    // Format: timestamp-random to ensure uniqueness even for events in same millisecond
+    const eventId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
     const event = {
       type: eventType,
       runId: runId,
+      eventId: eventId,
       timestamp: new Date().toISOString(),
       data: JSON.stringify(data),
     };
@@ -238,6 +244,7 @@ export class RedisStreamsService {
               id: "heartbeat",
               type: "heartbeat",
               runId: runId,
+              eventId: `heartbeat-${Date.now()}`,  // Unique eventId for heartbeat
               timestamp: new Date().toISOString(),
               data: {},
             };
@@ -251,6 +258,7 @@ export class RedisStreamsService {
             id: "error",
             type: "error",
             runId: runId,
+            eventId: `error-${Date.now()}`,  // Unique eventId for error
             timestamp: new Date().toISOString(),
             data: { error: String(error) },
           };
@@ -386,6 +394,7 @@ export class RedisStreamsService {
       id,
       type: fieldMap.type ?? "unknown",
       runId: fieldMap.runId ?? "",
+      eventId: fieldMap.eventId ?? id,  // Fall back to stream entry ID if eventId not present
       timestamp: fieldMap.timestamp ?? new Date().toISOString(),
       data: fieldMap.data ? JSON.parse(fieldMap.data) : {},
     };
