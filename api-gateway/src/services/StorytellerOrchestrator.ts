@@ -1370,7 +1370,7 @@ export class StorytellerOrchestrator {
   }
 
   /**
-   * Extract raw facts from generated content
+   * Extract raw facts from generated content and emit to frontend
    */
   private async extractRawFacts(
     runId: string,
@@ -1385,18 +1385,52 @@ export class StorytellerOrchestrator {
     const factPatterns = [
       /(\w+) (was|is|became|had|has) (wounded|injured|killed|married|born|died)/gi,
       /(\w+)'s (health|status|location|relationship) (changed|is|was)/gi,
+      // Additional patterns for character actions and state changes
+      /(\w+) (discovered|found|learned|realized|understood)/gi,
+      /(\w+) (entered|left|arrived|departed|traveled)/gi,
+      /(\w+) (met|encountered|confronted|spoke with)/gi,
     ];
+
+    const newFacts: Array<{ subject: string; change: string; category: 'char' | 'world' | 'plot' }> = [];
 
     for (const pattern of factPatterns) {
       const matches = content.matchAll(pattern);
       for (const match of matches) {
+        const fact = match[0];
+        const subject = match[1] || "Unknown";
+        const action = match[2] || "";
+        const detail = match[3] || "";
+        
+        // Determine category based on action type
+        let category: 'char' | 'world' | 'plot' = 'plot';
+        if (['wounded', 'injured', 'killed', 'died', 'born', 'married'].includes(detail.toLowerCase())) {
+          category = 'char';
+        } else if (['entered', 'left', 'arrived', 'departed', 'traveled'].includes(action.toLowerCase())) {
+          category = 'world';
+        }
+
         state.rawFactsLog.push({
-          fact: match[0],
+          fact,
           source,
           sceneNumber: sceneNum,
           timestamp: new Date().toISOString(),
         });
+
+        newFacts.push({
+          subject,
+          change: `${action} ${detail}`.trim(),
+          category,
+        });
       }
+    }
+
+    // Emit new_developments_collected event for frontend World State panel
+    if (newFacts.length > 0) {
+      await this.publishEvent(runId, "new_developments_collected", {
+        sceneNum,
+        developments: newFacts,
+        totalFacts: state.rawFactsLog.length,
+      });
     }
   }
 
