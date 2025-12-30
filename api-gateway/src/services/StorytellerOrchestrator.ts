@@ -645,19 +645,22 @@ export class StorytellerOrchestrator {
     state.phase = GenerationPhase.DRAFTING;
     state.currentScene = sceneNum;
     
-    // CRITICAL: Set currentSceneOutline at the start of each scene
-    // This ensures WriterAgent always has the correct outline for this scene
-    // and prevents state contamination from previous scenes
-    state.currentSceneOutline = sceneOutline;
-    
     await this.publishEvent(runId, "scene_draft_start", { sceneNum });
 
     const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
 
-    // Note: Characters are already available in state.characters from the Characters phase.
-    // WriterAgent accesses them via context.state. Qdrant semantic search is used for
-    // cross-project "eternal memory" but not needed in the hot path since all characters
-    // for this run are already in memory.
+    // Retrieve relevant context from Qdrant for hallucination prevention
+    // This provides the Writer with semantic memory of characters, worldbuilding, and previous scenes
+    const relevantContext = await this.getRelevantContext(options.projectId, sceneOutline);
+    
+    // CRITICAL: Set currentSceneOutline at the start of each scene
+    // This ensures WriterAgent always has the correct outline for this scene
+    // and prevents state contamination from previous scenes
+    // Include retrieved context for hallucination prevention
+    state.currentSceneOutline = {
+      ...sceneOutline,
+      retrievedContext: relevantContext,  // Add Qdrant context for Writer
+    };
 
     // Store scene outline in state for WriterAgent to access
     const outline = state.outline as Record<string, unknown>;
@@ -838,7 +841,19 @@ export class StorytellerOrchestrator {
 
     // Append continuation to existing content
     const existingContent = String(draft.content ?? "");
-    const combinedContent = existingContent + "\n\n" + continuation;
+    
+    // CRITICAL: Detect and strip overlap if Writer returned full text instead of just continuation
+    // This prevents text duplication when LLM ignores the "return only continuation" instruction
+    continuation = this.stripOverlap(existingContent, continuation);
+    
+    // Handle case where stripOverlap returns empty string (all content was overlap)
+    // In this case, keep the existing content unchanged
+    if (!continuation || continuation.trim().length === 0) {
+      $log.warn(`[StorytellerOrchestrator] stripOverlap returned empty continuation, keeping existing content`);
+      continuation = "";
+    }
+    
+    const combinedContent = existingContent + (continuation ? "\n\n" + continuation : "");
 
     const expanded = {
       sceneNum,
@@ -875,6 +890,94 @@ export class StorytellerOrchestrator {
       .replace(/\[?\*?\*?Word count:?\*?\*?\s*[\d,]+\s*(?:words?)?\]?\.?/gi, "")
       .replace(/\n\s*\n\s*\n/g, "\n\n") // Clean up extra newlines
       .trim();
+  }
+
+  /**
+   * Strip overlap from continuation if Writer returned full text instead of just continuation
+   * This prevents text duplication when LLM ignores the "return only continuation" instruction
+   * 
+   * Algorithm: Find the longest suffix of existingContent that matches a prefix of continuation,
+   * then strip that overlap from continuation.
+   */
+  private stripOverlap(existingContent: string, continuation: string): string {
+    if (!existingContent || !continuation) {
+      return continuation;
+    }
+
+    // Normalize whitespace for comparison
+    const existingNormalized = existingContent.trim();
+    const continuationNormalized = continuation.trim();
+
+    // Check if continuation starts with a significant portion of existing content
+    // This indicates the LLM returned the full text instead of just continuation
+    const existingWords = existingNormalized.split(/\s+/);
+    const continuationWords = continuationNormalized.split(/\s+/);
+
+    // If continuation is too short to contain meaningful overlap, skip detection
+    // Use absolute minimum rather than percentage of existing content
+    const MIN_WORDS_FOR_OVERLAP_DETECTION = 100;
+    if (continuationWords.length < MIN_WORDS_FOR_OVERLAP_DETECTION) {
+      return continuation;
+    }
+
+    // Check for large overlap (more than 30% of existing content appears at start of continuation)
+    // Use a sliding window approach to find where the overlap ends
+    const minOverlapWords = Math.floor(existingWords.length * 0.3);
+    
+    // Try to find where existing content ends in continuation
+    // Look for the last 50 words of existing content in continuation
+    const lastNWords = Math.min(50, existingWords.length);
+    const existingEnding = existingWords.slice(-lastNWords).join(" ").toLowerCase();
+    
+    // Search for this ending in the continuation
+    const continuationLower = continuationNormalized.toLowerCase();
+    const endingIndex = continuationLower.indexOf(existingEnding);
+    
+    if (endingIndex !== -1) {
+      // Found the ending of existing content in continuation
+      // Strip everything up to and including this ending
+      const overlapEndPosition = endingIndex + existingEnding.length;
+      const strippedContinuation = continuationNormalized.substring(overlapEndPosition).trim();
+      
+      // Only use stripped version if it's substantial (more than 100 chars)
+      if (strippedContinuation.length > 100) {
+        $log.info(`[StorytellerOrchestrator] Stripped ${overlapEndPosition} chars of overlap from continuation`);
+        return strippedContinuation;
+      }
+    }
+
+    // Alternative: Check if continuation starts with a large chunk of existing content
+    // by comparing first N words
+    const checkWords = Math.min(100, Math.floor(existingWords.length * 0.5));
+    if (checkWords > 20) {
+      const existingStart = existingWords.slice(0, checkWords).join(" ").toLowerCase();
+      const continuationStart = continuationWords.slice(0, checkWords).join(" ").toLowerCase();
+      
+      // If more than 80% of words match, this is likely a full rewrite
+      // Split once before the filter to avoid repeated splitting inside the callback
+      const contWords = continuationStart.split(" ");
+      const matchingWords = existingStart.split(" ").filter((word, i) => {
+        return i < contWords.length && contWords[i] === word;
+      }).length;
+      
+      if (matchingWords / checkWords > 0.8) {
+        // Find where existing content ends in continuation and strip
+        // Use the last 30 words as anchor
+        const anchorWords = existingWords.slice(-30).join(" ").toLowerCase();
+        const anchorIndex = continuationLower.indexOf(anchorWords);
+        
+        if (anchorIndex !== -1) {
+          const strippedContinuation = continuationNormalized.substring(anchorIndex + anchorWords.length).trim();
+          if (strippedContinuation.length > 100) {
+            $log.info(`[StorytellerOrchestrator] Stripped overlap using anchor method`);
+            return strippedContinuation;
+          }
+        }
+      }
+    }
+
+    // No significant overlap detected, return original
+    return continuation;
   }
 
   /**
@@ -1006,7 +1109,7 @@ export class StorytellerOrchestrator {
   }
 
   /**
-   * Validate polish output to prevent chunk loss
+   * Validate polish output to prevent chunk loss and lazy polish notes
    * Returns true if polish is acceptable, false if we should fall back to pre-polish draft
    */
   private validatePolishOutput(
@@ -1015,6 +1118,28 @@ export class StorytellerOrchestrator {
     prePolishWordCount: number,
     polishedWordCount: number
   ): boolean {
+    // CRITICAL: Detect "lazy polish" notes where LLM truncates output with meta-commentary
+    // These patterns indicate the model didn't actually polish the full text
+    const lazyPolishPatterns = [
+      /\(note:\s*(?:the\s+)?(?:full\s+)?(?:polished\s+)?(?:scene\s+)?continues/i,
+      /\(note:\s*(?:the\s+)?rest\s+(?:is\s+)?(?:the\s+)?same/i,
+      /continues\s+with\s+(?:the\s+)?(?:exact\s+)?same\s+content/i,
+      /rest\s+(?:of\s+the\s+scene\s+)?(?:is\s+)?(?:the\s+)?same/i,
+      /\[\.\.\.(?:rest|remainder|continues)/i,
+      /i\s+won'?t\s+repeat/i,
+      /maintaining\s+the\s+[\d,]+[\s-]*word\s+count/i,
+      /as\s+(?:the\s+)?original\s+draft/i,
+    ];
+    
+    // Check the last 500 characters for lazy polish patterns (they usually appear at the end)
+    const endingToCheck = polishedContent.slice(-500);
+    for (const pattern of lazyPolishPatterns) {
+      if (pattern.test(endingToCheck)) {
+        console.log(`[Orchestrator] Polish validation failed: detected lazy polish note (pattern: ${pattern.source})`);
+        return false;
+      }
+    }
+
     // Reject if polished version is more than 15% shorter (lost significant content)
     const minAcceptableWordCount = Math.floor(prePolishWordCount * 0.85);
     if (polishedWordCount < minAcceptableWordCount) {
@@ -1149,6 +1274,98 @@ export class StorytellerOrchestrator {
     return constraints
       .map((c) => `- ${c.key}: ${c.value} (Scene ${c.sceneNumber})`)
       .join("\n");
+  }
+
+  /**
+   * Retrieve relevant context from Qdrant for hallucination prevention
+   * 
+   * This method searches Qdrant for relevant characters, worldbuilding elements,
+   * and previous scenes that are semantically related to the current scene.
+   * The retrieved context helps the Writer maintain consistency with established facts.
+   * 
+   * @param projectId - Project ID for filtering
+   * @param sceneOutline - Current scene outline to use as search query
+   * @returns Formatted context string for inclusion in Writer prompt
+   */
+  private async getRelevantContext(
+    projectId: string,
+    sceneOutline: Record<string, unknown>
+  ): Promise<string> {
+    const contextParts: string[] = [];
+
+    // Build search query from scene outline
+    const sceneTitle = String(sceneOutline.title ?? "");
+    const sceneSetting = String(sceneOutline.setting ?? "");
+    const sceneCharacters = Array.isArray(sceneOutline.characters) 
+      ? sceneOutline.characters.join(", ") 
+      : String(sceneOutline.characters ?? "");
+    const searchQuery = `${sceneTitle} ${sceneSetting} ${sceneCharacters}`.trim();
+
+    if (!searchQuery) {
+      return "";
+    }
+
+    try {
+      // Search for relevant characters
+      const relevantCharacters = await this.qdrantMemory.searchCharacters(projectId, searchQuery, 3);
+      if (relevantCharacters.length > 0) {
+        const charContext = relevantCharacters
+          .filter(r => r.score > 0.5)  // Only include high-relevance matches
+          .map(r => {
+            const char = r.payload.character;
+            return `- ${r.payload.name}: ${char.role ?? ""} ${char.coreMotivation ?? ""}`.trim();
+          })
+          .join("\n");
+        
+        if (charContext) {
+          contextParts.push(`RELEVANT CHARACTERS:\n${charContext}`);
+        }
+      }
+
+      // Search for relevant worldbuilding elements
+      const relevantWorld = await this.qdrantMemory.searchWorldbuilding(projectId, searchQuery, 3);
+      if (relevantWorld.length > 0) {
+        const worldContext = relevantWorld
+          .filter(r => r.score > 0.5)
+          .map(r => {
+            const elem = r.payload.element;
+            return `- ${r.payload.elementType}: ${elem.name ?? ""} - ${elem.description ?? ""}`.trim();
+          })
+          .join("\n");
+        
+        if (worldContext) {
+          contextParts.push(`RELEVANT WORLDBUILDING:\n${worldContext}`);
+        }
+      }
+
+      // Search for relevant previous scenes (for continuity)
+      const relevantScenes = await this.qdrantMemory.searchScenes(projectId, searchQuery, 2);
+      if (relevantScenes.length > 0) {
+        const sceneContext = relevantScenes
+          .filter(r => r.score > 0.5)
+          .map(r => {
+            const scene = r.payload.scene as Record<string, unknown>;
+            const content = String(scene.content ?? "");
+            // Include only a summary (first 200 chars) to avoid context bloat
+            const summary = content.length > 200 ? content.substring(0, 200) + "..." : content;
+            return `- Scene ${r.payload.sceneNumber} "${scene.title ?? ""}": ${summary}`;
+          })
+          .join("\n");
+        
+        if (sceneContext) {
+          contextParts.push(`PREVIOUS SCENES (for continuity):\n${sceneContext}`);
+        }
+      }
+    } catch (error) {
+      // Log error but don't fail the generation
+      console.warn(`[Orchestrator] Failed to retrieve Qdrant context: ${error}`);
+    }
+
+    if (contextParts.length === 0) {
+      return "";
+    }
+
+    return `\n\nRELEVANT CONTEXT FROM MEMORY (use for consistency):\n${contextParts.join("\n\n")}`;
   }
 
   /**

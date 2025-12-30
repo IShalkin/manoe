@@ -28,6 +28,27 @@ jobs:
       - name: Run TypeScript check
         run: npx tsc --noEmit
 
+  test-api-gateway:
+    name: Test API Gateway (Jest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api-gateway
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test -- --passWithNoTests
+
   lint-frontend:
     name: Lint Frontend (TypeScript)
     runs-on: ubuntu-latest
@@ -55,7 +76,7 @@ jobs:
   build-api-gateway:
     name: Build API Gateway Docker
     runs-on: ubuntu-latest
-    needs: [lint-api-gateway]
+    needs: [lint-api-gateway, test-api-gateway]
 
     steps:
       - uses: actions/checkout@v4

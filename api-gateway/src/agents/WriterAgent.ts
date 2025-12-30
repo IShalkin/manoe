@@ -62,7 +62,8 @@ export class WriterAgent extends BaseAgent {
       await this.applyGuardrails(response, state.keyConstraints, runId);
       
       // Emit the actual generated content for the frontend to display
-      await this.emitMessage(runId, { content: response, sceneNumber: state.currentScene }, phase);
+      // Pass sceneNum as fourth parameter for frontend deduplication
+      await this.emitMessage(runId, { content: response, sceneNumber: state.currentScene }, phase, state.currentScene);
       
       // Emit completion thought
       if (phase === GenerationPhase.DRAFTING) {
@@ -169,25 +170,35 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
         const existingContent = String(sceneOutline.existingContent ?? "");
         const additionalWordsNeeded = Number(sceneOutline.additionalWordsNeeded ?? 500);
         
+        // Get the last ~100 characters, breaking at word boundary to avoid mid-word/mid-character cuts
+        // This prevents UTF-8 issues with multi-byte characters (emojis, special chars)
+        const lastWords = existingContent.trim().split(/\s+/).slice(-15).join(" ");
+        const lastChars = lastWords.length > 100 ? lastWords.slice(-100) : lastWords;
+        
         return `Continue Scene ${sceneNum}: "${sceneTitle}"
 
-The scene so far (DO NOT REWRITE - continue from where it ends):
----
-${existingContent}
----
+CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
 
-Continue the scene from where it left off. Write approximately ${additionalWordsNeeded} more words.
+The scene ends with:
+"...${lastChars}"
+
+Write approximately ${additionalWordsNeeded} more words to continue from that exact point.
 
 Requirements:
-- Continue seamlessly from the last paragraph
-- Maintain the same voice, tone, and style
+- Start your response with NEW content only - continue naturally from where the text left off
+- If the ending above is mid-sentence, complete that sentence first, then continue
+- DO NOT include any text that already exists in the scene
+- DO NOT repeat the ending shown above
+- Continue seamlessly maintaining the same voice, tone, and style
 - Progress the scene toward its conclusion
-- DO NOT repeat or summarize what was already written
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
 ${autonomousInstruction}`;
       }
+
+      // Include retrieved context from Qdrant for hallucination prevention
+      const retrievedContext = String(sceneOutline.retrievedContext ?? "");
 
       return `Write Scene ${sceneNum}: "${sceneTitle}"
 
@@ -203,6 +214,7 @@ Requirements:
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
+${retrievedContext}
 ${autonomousInstruction}`;
     }
 
@@ -251,7 +263,12 @@ Polish for:
 - Consistency in voice
 - Final proofreading
 
-IMPORTANT: Preserve all story beats and maintain word count. Do NOT shorten or summarize. The polished version must be at least ${currentWordCount} words.
+CRITICAL REQUIREMENTS:
+- You MUST output the FULL polished text of the entire scene
+- Do NOT truncate or leave notes like "rest is the same" or "continues with same content"
+- Do NOT shorten or summarize - the polished version must be at least ${currentWordCount} words
+- Output EVERY SINGLE WORD of the polished scene from beginning to end
+- Preserve all story beats and plot points
 ${autonomousInstruction}`;
     }
 
