@@ -1234,6 +1234,7 @@ export class StorytellerOrchestrator {
 
   /**
    * Extract raw facts from generated content and emit to frontend
+   * Uses canonical character names from state.characters as allowlist
    */
   private async extractRawFacts(
     runId: string,
@@ -1246,20 +1247,39 @@ export class StorytellerOrchestrator {
 
     console.log(`[extractRawFacts] Called for scene ${sceneNum}, content length: ${content.length}`);
 
-    // More flexible fact extraction patterns
+    // Build allowlist of canonical character names from state.characters
+    const canonicalNames = new Set<string>();
+    if (state.characters && Array.isArray(state.characters)) {
+      for (const char of state.characters) {
+        const charObj = char as Record<string, unknown>;
+        const name = charObj.name as string;
+        if (name) {
+          // Add full name and first name
+          canonicalNames.add(name.toLowerCase());
+          const firstName = name.split(' ')[0];
+          if (firstName) canonicalNames.add(firstName.toLowerCase());
+          // Add last name if present
+          const parts = name.split(' ');
+          if (parts.length > 1) {
+            canonicalNames.add(parts[parts.length - 1].toLowerCase());
+          }
+        }
+      }
+    }
+    console.log(`[extractRawFacts] Canonical names: ${Array.from(canonicalNames).join(', ')}`);
+
+    // Patterns that capture meaningful character actions
     const factPatterns = [
-      // Character state changes
-      /(\w+) (was|is|became|had|has|felt|seemed|appeared|looked) (\w+)/gi,
-      // Character actions with objects/locations
-      /(\w+) (walked|ran|moved|went|came|stepped|turned|looked|stared|gazed)/gi,
-      // Character speech/communication
-      /(\w+) (said|asked|replied|answered|whispered|shouted|muttered|spoke)/gi,
-      // Character emotions/reactions
-      /(\w+) (smiled|frowned|laughed|cried|sighed|nodded|shook)/gi,
+      // Character speech (most reliable - "Elena said", "Marcus whispered")
+      /([A-Z][a-z]+) (said|asked|replied|answered|whispered|shouted|muttered|spoke|exclaimed|demanded|insisted)/g,
+      // Character movement (location changes)
+      /([A-Z][a-z]+) (walked|ran|moved|entered|left|arrived|departed|stepped|approached|retreated)/g,
       // Character discoveries/realizations
-      /(\w+) (discovered|found|learned|realized|understood|noticed|saw|heard)/gi,
-      // Character interactions
-      /(\w+) (met|encountered|confronted|approached|greeted|hugged|kissed)/gi,
+      /([A-Z][a-z]+) (discovered|found|learned|realized|understood|noticed|recognized|remembered)/g,
+      // Character emotions/reactions
+      /([A-Z][a-z]+) (smiled|frowned|laughed|cried|sighed|nodded|shook|gasped|trembled|froze)/g,
+      // Character state changes (significant events)
+      /([A-Z][a-z]+) (died|killed|married|betrayed|escaped|collapsed|awakened|transformed|vanished)/g,
     ];
 
     const newFacts: Array<{ subject: string; change: string; category: 'char' | 'world' | 'plot' }> = [];
@@ -1268,33 +1288,35 @@ export class StorytellerOrchestrator {
     for (const pattern of factPatterns) {
       const matches = content.matchAll(pattern);
       for (const match of matches) {
-        const fact = match[0];
-        const subject = match[1] || "Unknown";
+        const subject = match[1] || "";
         const action = match[2] || "";
-        const detail = match[3] || "";
         
-        // Skip common words that aren't character names
-        const skipWords = ['the', 'a', 'an', 'it', 'this', 'that', 'he', 'she', 'they', 'we', 'i', 'you'];
-        if (skipWords.includes(subject.toLowerCase())) continue;
+        // Only accept subjects that are canonical character names
+        if (!canonicalNames.has(subject.toLowerCase())) {
+          continue;
+        }
         
-        // Deduplicate
+        // Deduplicate by subject+action
         const factKey = `${subject.toLowerCase()}-${action.toLowerCase()}`;
         if (seenFacts.has(factKey)) continue;
         seenFacts.add(factKey);
         
         // Determine category based on action type
         let category: 'char' | 'world' | 'plot' = 'plot';
-        const charActions = ['felt', 'seemed', 'appeared', 'smiled', 'frowned', 'laughed', 'cried', 'sighed'];
-        const worldActions = ['walked', 'ran', 'moved', 'went', 'came', 'stepped', 'entered', 'left'];
+        const charActions = ['smiled', 'frowned', 'laughed', 'cried', 'sighed', 'nodded', 'shook', 'gasped', 'trembled', 'froze'];
+        const worldActions = ['walked', 'ran', 'moved', 'entered', 'left', 'arrived', 'departed', 'stepped', 'approached', 'retreated'];
+        const plotActions = ['died', 'killed', 'married', 'betrayed', 'escaped', 'collapsed', 'awakened', 'transformed', 'vanished', 'discovered', 'found', 'learned', 'realized'];
         
         if (charActions.includes(action.toLowerCase())) {
           category = 'char';
         } else if (worldActions.includes(action.toLowerCase())) {
           category = 'world';
+        } else if (plotActions.includes(action.toLowerCase())) {
+          category = 'plot';
         }
 
         state.rawFactsLog.push({
-          fact,
+          fact: `${subject} ${action}`,
           source,
           sceneNumber: sceneNum,
           timestamp: new Date().toISOString(),
@@ -1302,7 +1324,7 @@ export class StorytellerOrchestrator {
 
         newFacts.push({
           subject,
-          change: `${action} ${detail}`.trim(),
+          change: action,
           category,
         });
       }
@@ -1310,12 +1332,14 @@ export class StorytellerOrchestrator {
 
     console.log(`[extractRawFacts] Extracted ${newFacts.length} facts from scene ${sceneNum}`);
 
-    // Always emit event so frontend knows extraction ran (even if 0 facts)
-    await this.publishEvent(runId, "new_developments_collected", {
-      sceneNum,
-      developments: newFacts,
-      totalFacts: state.rawFactsLog.length,
-    });
+    // Only emit if we have meaningful facts
+    if (newFacts.length > 0) {
+      await this.publishEvent(runId, "new_developments_collected", {
+        sceneNum,
+        developments: newFacts,
+        totalFacts: state.rawFactsLog.length,
+      });
+    }
   }
 
   /**
