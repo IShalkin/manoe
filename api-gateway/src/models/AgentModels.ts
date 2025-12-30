@@ -197,6 +197,82 @@ export class RawFact {
 }
 
 /**
+ * Character state in the world state
+ * Tracks canonical names, attributes, and current status
+ */
+export interface CharacterState {
+  name: string;
+  aliases?: string[];
+  role: string;
+  status: "alive" | "dead" | "unknown" | "transformed";
+  currentLocation?: string;
+  attributes: Record<string, string>;
+  relationships: Record<string, string>;
+  lastSeenScene: number;
+}
+
+/**
+ * Location state in the world state
+ */
+export interface LocationState {
+  name: string;
+  type: string;
+  description?: string;
+  currentOccupants?: string[];
+  status: "accessible" | "destroyed" | "hidden" | "locked";
+  lastMentionedScene: number;
+}
+
+/**
+ * Organization state in the world state
+ */
+export interface OrganizationState {
+  name: string;
+  type: string;
+  members?: string[];
+  status: "active" | "disbanded" | "secret";
+  lastMentionedScene: number;
+}
+
+/**
+ * Timeline fact in the world state
+ */
+export interface TimelineFact {
+  event: string;
+  sceneNumber: number;
+  characters?: string[];
+  location?: string;
+  significance: "major" | "minor" | "background";
+  timestamp: string;
+}
+
+/**
+ * World State - tracks the current state of the story world
+ * Updated by Archivist after each scene to maintain continuity
+ * Passed to Writer context to prevent hallucinations and inconsistencies
+ */
+export interface WorldState {
+  runId: string;
+  lastUpdatedScene: number;
+  lastUpdatedAt: string;
+  
+  // Canonical character states
+  characters: CharacterState[];
+  
+  // Location states
+  locations: LocationState[];
+  
+  // Organization states
+  organizations: OrganizationState[];
+  
+  // Timeline of significant events
+  timeline: TimelineFact[];
+  
+  // Key facts that must be maintained (subset of KeyConstraints)
+  keyFacts: string[];
+}
+
+/**
  * Generation state tracking
  */
 export class GenerationState {
@@ -256,6 +332,14 @@ export class GenerationState {
 
   @Property()
   lastArchivistScene: number = 0;
+
+  /**
+   * World state tracking for continuity
+   * Updated by Archivist after each scene
+   */
+  @Optional()
+  @Property()
+  worldState?: WorldState;
 
   /**
    * Current scene outline being processed
