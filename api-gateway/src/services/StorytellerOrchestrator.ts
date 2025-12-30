@@ -612,9 +612,15 @@ export class StorytellerOrchestrator {
       if (sceneApproved && !shouldSkipPolish) {
         await this.polishScene(runId, options, sceneNum + 1);
       } else if (sceneApproved && shouldSkipPolish) {
+        // CRITICAL: Emit scene_polish_complete even when skipping Polish
+        // This ensures frontend always has a canonical source of truth for each scene
+        // Without this, frontend falls back to collecting all Writer messages which causes duplication
         console.log(`[Orchestrator] Scene ${sceneNum + 1} has high score (${approvedCritiqueScore}), skipping polish`);
+        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "skipped_high_score");
       } else {
+        // Scene not approved after max revisions - still emit final event for frontend
         console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions, skipping polish`);
+        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "not_approved");
       }
 
       // CRITICAL: Clear currentSceneOutline at the end of each scene to prevent state contamination
@@ -952,6 +958,49 @@ export class StorytellerOrchestrator {
       polishStatus,
       finalContent,
       wordCount: finalWordCount 
+    });
+  }
+
+  /**
+   * Emit scene_polish_complete event when Polish is skipped
+   * This ensures frontend always has a canonical source of truth for each scene
+   * Without this, frontend falls back to collecting all Writer messages which causes duplication
+   */
+  private async emitSceneFinal(
+    runId: string,
+    projectId: string,
+    sceneNum: number,
+    polishStatus: string
+  ): Promise<void> {
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+
+    const draft = state.drafts.get(sceneNum) as Record<string, unknown> | undefined;
+    const finalContent = typeof draft?.content === "string" ? draft.content : "";
+    const finalWordCount = typeof draft?.wordCount === "number" ? draft.wordCount : 0;
+
+    // Update draft status
+    const updatedDraft = {
+      sceneNum,
+      title: draft?.title ?? `Scene ${sceneNum}`,
+      content: finalContent,
+      wordCount: finalWordCount,
+      status: polishStatus,
+      createdAt: new Date().toISOString(),
+    };
+
+    state.drafts.set(sceneNum, updatedDraft);
+    state.updatedAt = new Date().toISOString();
+
+    // Save artifact for consistency with polishScene
+    await this.saveArtifact(runId, projectId, `final_scene_${sceneNum}`, updatedDraft);
+    
+    // Emit the same event type as polishScene so frontend uses PRIORITY 1
+    await this.publishEvent(runId, "scene_polish_complete", {
+      sceneNum,
+      polishStatus,
+      finalContent,
+      wordCount: finalWordCount,
     });
   }
 
