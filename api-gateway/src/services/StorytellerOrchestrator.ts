@@ -300,10 +300,11 @@ export class StorytellerOrchestrator {
     });
 
     // Extract key story elements from narrative
+    // Use extractStringValue to handle both string and object formats
     if (narrative.genre) {
       state.keyConstraints.push({
         key: "genre",
-        value: String(narrative.genre),
+        value: this.extractStringValue(narrative.genre),
         sceneNumber: 0,
         timestamp,
         immutable: true,
@@ -313,7 +314,7 @@ export class StorytellerOrchestrator {
     if (narrative.premise) {
       state.keyConstraints.push({
         key: "premise",
-        value: String(narrative.premise),
+        value: this.extractStringValue(narrative.premise),
         sceneNumber: 0,
         timestamp,
         immutable: true,
@@ -323,7 +324,7 @@ export class StorytellerOrchestrator {
     if (narrative.tone) {
       state.keyConstraints.push({
         key: "tone",
-        value: String(narrative.tone),
+        value: this.extractStringValue(narrative.tone),
         sceneNumber: 0,
         timestamp,
         immutable: true,
@@ -333,7 +334,7 @@ export class StorytellerOrchestrator {
     if (narrative.arc) {
       state.keyConstraints.push({
         key: "narrative_arc",
-        value: String(narrative.arc),
+        value: this.extractStringValue(narrative.arc),
         sceneNumber: 0,
         timestamp,
         immutable: true,
@@ -341,6 +342,29 @@ export class StorytellerOrchestrator {
     }
 
     $log.info(`[StorytellerOrchestrator] Added ${state.keyConstraints.length} seed constraints`);
+  }
+
+  /**
+   * Extract string value from a field that might be string or object
+   * Handles cases where LLM returns {name: "...", description: "..."} instead of plain string
+   * Prevents [object Object] serialization issues in constraints
+   */
+  private extractStringValue(value: unknown): string {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (value && typeof value === "object") {
+      const obj = value as Record<string, unknown>;
+      // Try common field names that LLMs use
+      if (typeof obj.name === "string") return obj.name;
+      if (typeof obj.theme === "string") return obj.theme;
+      if (typeof obj.description === "string") return obj.description;
+      if (typeof obj.type === "string") return obj.type;
+      if (typeof obj.structure === "string") return obj.structure;
+      // Fallback to JSON stringification for complex objects
+      return JSON.stringify(value);
+    }
+    return String(value);
   }
 
   /**
@@ -550,6 +574,7 @@ export class StorytellerOrchestrator {
       // Critique and revision loop (max 2 iterations)
       let revisionCount = 0;
       let sceneApproved = false;
+      let approvedCritiqueScore: number | undefined;
       while (revisionCount < state.maxRevisions) {
         if (this.shouldStop(runId)) return;
 
@@ -560,6 +585,11 @@ export class StorytellerOrchestrator {
         // Check if revision needed
         if (this.isApproved(critique)) {
           sceneApproved = true;
+          // Extract score from the approving critique
+          const score = critique.score;
+          if (typeof score === "number" && !isNaN(score)) {
+            approvedCritiqueScore = score;
+          }
           break;
         }
 
@@ -575,10 +605,14 @@ export class StorytellerOrchestrator {
         state.lastArchivistScene = sceneNum + 1;
       }
 
-      // Polish the scene ONLY if it was approved
-      // This prevents Polish from shortening scenes that already failed quality checks
-      if (sceneApproved) {
+      // Polish the scene ONLY if it was approved AND score <= 8
+      // Skip Polish if Critic gave score > 8 (scene is already high quality)
+      // This saves time and money, and prevents Polish from degrading good content
+      const shouldSkipPolish = typeof approvedCritiqueScore === "number" && approvedCritiqueScore > 8;
+      if (sceneApproved && !shouldSkipPolish) {
         await this.polishScene(runId, options, sceneNum + 1);
+      } else if (sceneApproved && shouldSkipPolish) {
+        console.log(`[Orchestrator] Scene ${sceneNum + 1} has high score (${approvedCritiqueScore}), skipping polish`);
       } else {
         console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions, skipping polish`);
       }
