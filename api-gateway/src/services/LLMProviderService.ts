@@ -66,7 +66,11 @@ const MODEL_CONTEXT_LENGTHS: Record<string, number> = {
  * These models only accept temperature=1 (default) or no temperature at all
  * Includes OpenAI reasoning models (o1, o3 series) and some provider-specific models
  */
-const MODELS_WITHOUT_TEMPERATURE_SUPPORT: string[] = [
+/**
+ * Known models that do NOT support the temperature parameter
+ * This is a static list for common models - runtime discovery handles unknown models
+ */
+const KNOWN_MODELS_WITHOUT_TEMPERATURE: string[] = [
   // OpenAI reasoning models
   "o1",
   "o1-mini",
@@ -82,14 +86,60 @@ const MODELS_WITHOUT_TEMPERATURE_SUPPORT: string[] = [
 ];
 
 /**
+ * Runtime cache for models discovered to not support temperature
+ * This allows the system to learn about new models without code changes
+ */
+class TemperatureSupportCache {
+  private static instance: TemperatureSupportCache;
+  private modelsWithoutTemperature: Set<string> = new Set();
+
+  static getInstance(): TemperatureSupportCache {
+    if (!TemperatureSupportCache.instance) {
+      TemperatureSupportCache.instance = new TemperatureSupportCache();
+    }
+    return TemperatureSupportCache.instance;
+  }
+
+  /**
+   * Check if a model is known to not support temperature
+   */
+  doesNotSupportTemperature(model: string): boolean {
+    return this.modelsWithoutTemperature.has(model.toLowerCase());
+  }
+
+  /**
+   * Mark a model as not supporting temperature (discovered at runtime)
+   */
+  markAsNoTemperatureSupport(model: string): void {
+    const normalizedModel = model.toLowerCase();
+    this.modelsWithoutTemperature.add(normalizedModel);
+    console.log(`[TemperatureSupportCache] Learned that model "${model}" does not support temperature parameter`);
+  }
+
+  /**
+   * Get all models known to not support temperature
+   */
+  getModelsWithoutTemperature(): string[] {
+    return Array.from(this.modelsWithoutTemperature);
+  }
+}
+
+/**
  * Check if a model supports the temperature parameter
+ * Uses both static list and runtime-discovered cache
  * Returns false for reasoning models that only accept default temperature
  */
 function modelSupportsTemperature(model: string): boolean {
   const normalizedModel = model.toLowerCase();
+  const cache = TemperatureSupportCache.getInstance();
   
-  // Check exact matches first
-  if (MODELS_WITHOUT_TEMPERATURE_SUPPORT.some(m => normalizedModel === m.toLowerCase())) {
+  // Check runtime cache first (learned from previous errors)
+  if (cache.doesNotSupportTemperature(normalizedModel)) {
+    return false;
+  }
+  
+  // Check static list of known models
+  if (KNOWN_MODELS_WITHOUT_TEMPERATURE.some(m => normalizedModel === m.toLowerCase())) {
     return false;
   }
   
@@ -898,7 +948,7 @@ export class LLMProviderService {
 
   /**
    * Create completion with automatic retry for transient errors
-   * Also handles token limit errors with auto-discovery and caching
+   * Also handles token limit errors and temperature unsupported errors with auto-discovery and caching
    */
   async createCompletionWithRetry(
     options: CompletionOptions,
@@ -907,7 +957,9 @@ export class LLMProviderService {
   ): Promise<LLMResponse> {
     let lastError: Error | null = null;
     const tokenLimitCache = TokenLimitCache.getInstance();
+    const temperatureCache = TemperatureSupportCache.getInstance();
     let tokenLimitRetried = false;
+    let temperatureRetried = false;
 
     const cachedLimit = await tokenLimitCache.get(options.model);
     if (cachedLimit && options.maxTokens && options.maxTokens > cachedLimit) {
@@ -920,6 +972,17 @@ export class LLMProviderService {
         return await this.createCompletion(options);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+
+        // Handle temperature unsupported errors - learn and retry without temperature
+        if (isTemperatureUnsupportedError(error) && !temperatureRetried) {
+          temperatureCache.markAsNoTemperatureSupport(options.model);
+          console.log(`[LLMProviderService] Model ${options.model} doesn't support temperature, retrying without it`);
+          // Remove temperature from options - the provider methods will check modelSupportsTemperature()
+          // which now consults the cache, so the retry will work without temperature
+          options = { ...options, temperature: undefined };
+          temperatureRetried = true;
+          continue;
+        }
 
         if (this.isTokenLimitError(error) && !tokenLimitRetried) {
           const limitError = extractMaxOutputTokensFromError(options.provider, lastError);
