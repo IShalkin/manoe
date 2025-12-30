@@ -170,12 +170,14 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
         const existingContent = String(sceneOutline.existingContent ?? "");
         const additionalWordsNeeded = Number(sceneOutline.additionalWordsNeeded ?? 500);
         
-        // Get the last 100 characters as context marker for the LLM
-        const lastChars = existingContent.slice(-100);
+        // Get the last ~100 characters, breaking at word boundary to avoid mid-word/mid-character cuts
+        // This prevents UTF-8 issues with multi-byte characters (emojis, special chars)
+        const lastWords = existingContent.trim().split(/\s+/).slice(-15).join(" ");
+        const lastChars = lastWords.length > 100 ? lastWords.slice(-100) : lastWords;
         
         return `Continue Scene ${sceneNum}: "${sceneTitle}"
 
-CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text. Start exactly from where the scene left off.
+CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
 
 The scene ends with:
 "...${lastChars}"
@@ -183,7 +185,8 @@ The scene ends with:
 Write approximately ${additionalWordsNeeded} more words to continue from that exact point.
 
 Requirements:
-- Start your response with NEW content only - the very next word/sentence after the existing text
+- Start your response with NEW content only - continue naturally from where the text left off
+- If the ending above is mid-sentence, complete that sentence first, then continue
 - DO NOT include any text that already exists in the scene
 - DO NOT repeat the ending shown above
 - Continue seamlessly maintaining the same voice, tone, and style

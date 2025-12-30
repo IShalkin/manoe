@@ -846,7 +846,14 @@ export class StorytellerOrchestrator {
     // This prevents text duplication when LLM ignores the "return only continuation" instruction
     continuation = this.stripOverlap(existingContent, continuation);
     
-    const combinedContent = existingContent + "\n\n" + continuation;
+    // Handle case where stripOverlap returns empty string (all content was overlap)
+    // In this case, keep the existing content unchanged
+    if (!continuation || continuation.trim().length === 0) {
+      $log.warn(`[StorytellerOrchestrator] stripOverlap returned empty continuation, keeping existing content`);
+      continuation = "";
+    }
+    
+    const combinedContent = existingContent + (continuation ? "\n\n" + continuation : "");
 
     const expanded = {
       sceneNum,
@@ -906,8 +913,10 @@ export class StorytellerOrchestrator {
     const existingWords = existingNormalized.split(/\s+/);
     const continuationWords = continuationNormalized.split(/\s+/);
 
-    // If continuation is shorter than existing, no overlap possible
-    if (continuationWords.length <= existingWords.length * 0.3) {
+    // If continuation is too short to contain meaningful overlap, skip detection
+    // Use absolute minimum rather than percentage of existing content
+    const MIN_WORDS_FOR_OVERLAP_DETECTION = 100;
+    if (continuationWords.length < MIN_WORDS_FOR_OVERLAP_DETECTION) {
       return continuation;
     }
 
@@ -945,8 +954,9 @@ export class StorytellerOrchestrator {
       const continuationStart = continuationWords.slice(0, checkWords).join(" ").toLowerCase();
       
       // If more than 80% of words match, this is likely a full rewrite
+      // Split once before the filter to avoid repeated splitting inside the callback
+      const contWords = continuationStart.split(" ");
       const matchingWords = existingStart.split(" ").filter((word, i) => {
-        const contWords = continuationStart.split(" ");
         return i < contWords.length && contWords[i] === word;
       }).length;
       
