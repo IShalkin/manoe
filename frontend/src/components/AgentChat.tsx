@@ -1534,6 +1534,10 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     }
 
     // PRIORITY 3: Collect Polish agent messages, deduplicate by sceneNum
+    // NOTE: agent_message events from BaseAgent.emitMessage() don't include sceneNum in their payload,
+    // so m.data.sceneNum will be undefined and all messages map to scene 0. This is a known limitation.
+    // PRIORITY 1 (scene_polish_complete) is the canonical path and always includes sceneNum.
+    // This fallback rarely executes in practice.
     const polishMessages = messages.filter(
       m => m.type === 'agent_message' && m.data.agent === 'Polish' && m.data.content?.trim()
     );
