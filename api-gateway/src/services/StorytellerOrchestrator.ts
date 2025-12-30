@@ -486,6 +486,17 @@ export class StorytellerOrchestrator {
 
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: saving artifact, runId: ${runId}`);
     await this.saveArtifact(runId, options.projectId, "characters", state.characters);
+
+    // Phase 5: Save characters to normalized Supabase table
+    try {
+      if (Array.isArray(state.characters)) {
+        await this.supabase.upsertCharacters(options.projectId, runId, state.characters);
+        $log.info(`[StorytellerOrchestrator] runCharactersPhase: saved ${state.characters.length} characters to Supabase, runId: ${runId}`);
+      }
+    } catch (supabaseError) {
+      $log.error(`[StorytellerOrchestrator] runCharactersPhase: Supabase upsertCharacters failed, continuing anyway, runId: ${runId}`, supabaseError);
+    }
+
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: publishing phase complete, runId: ${runId}`);
     await this.publishPhaseComplete(runId, GenerationPhase.CHARACTERS, state.characters);
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: completed, runId: ${runId}`);
@@ -835,6 +846,23 @@ export class StorytellerOrchestrator {
     }
 
     await this.saveArtifact(runId, options.projectId, `draft_scene_${sceneNum}`, draft);
+
+    // Phase 5: Save draft to normalized Supabase table
+    try {
+      await this.supabase.upsertDraft({
+        projectId: options.projectId,
+        runId,
+        sceneNumber: sceneNum,
+        content: response,
+        wordCount: draft.wordCount,
+        status: "draft",
+        revisionCount: 0,
+      });
+      $log.info(`[StorytellerOrchestrator] draftScene: saved draft to Supabase, scene ${sceneNum}, runId: ${runId}`);
+    } catch (supabaseError) {
+      $log.error(`[StorytellerOrchestrator] draftScene: Supabase upsertDraft failed, continuing anyway, runId: ${runId}`, supabaseError);
+    }
+
     await this.publishEvent(runId, "scene_draft_complete", { sceneNum, wordCount: draft.wordCount });
   }
 
@@ -874,6 +902,22 @@ export class StorytellerOrchestrator {
     state.updatedAt = new Date().toISOString();
 
     await this.saveArtifact(runId, options.projectId, `critique_scene_${sceneNum}`, critique);
+
+    // Phase 5: Save critique to normalized Supabase table
+    try {
+      const revisionCount = state.revisionCount.get(sceneNum) || 0;
+      await this.supabase.saveCritique({
+        projectId: options.projectId,
+        runId,
+        sceneNumber: sceneNum,
+        critique,
+        revisionNumber: revisionCount,
+      });
+      $log.info(`[StorytellerOrchestrator] critiqueScene: saved critique to Supabase, scene ${sceneNum}, runId: ${runId}`);
+    } catch (supabaseError) {
+      $log.error(`[StorytellerOrchestrator] critiqueScene: Supabase saveCritique failed, continuing anyway, runId: ${runId}`, supabaseError);
+    }
+
     await this.publishEvent(runId, "scene_critique_complete", { sceneNum, critique });
 
     return critique;
