@@ -517,6 +517,7 @@ interface AgentMessage {
   id: string;
   type: string;
   timestamp: string;
+  eventId?: string;  // Unique event ID for deduplication
   data: {
     agent?: string;
     message_type?: string;
@@ -708,6 +709,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const currentRoundRef = useRef(1);
   const hasMessageInCurrentRoundRef = useRef(false);
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Track seen eventIds to prevent duplicate messages from SSE reconnects/replays
+  const seenEventIdsRef = useRef<Set<string>>(new Set());
   
   const [editState, setEditState] = useState<EditState | null>(null);
   const [lockedAgents, setLockedAgents] = useState<Record<string, boolean>>(() => projectResult?.locks || {});
@@ -792,6 +795,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       setIsPlaying(false);
       currentRoundRef.current = 1;
       hasMessageInCurrentRoundRef.current = false;
+      // Clear seen event IDs for new run to allow fresh events
+      seenEventIdsRef.current.clear();
       // Reset edit state
       setEditState(null);
       setShowConfirmModal(false);
@@ -1251,6 +1256,16 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
             }
           }));
           setActiveDiagnosticScene(null);
+        }
+        
+        // CRITICAL: Deduplicate events by eventId before storing
+        // This prevents duplicate messages from SSE reconnects/replays which cause snowball duplication
+        if (data.eventId) {
+          if (seenEventIdsRef.current.has(data.eventId)) {
+            console.log('[AgentChat] Skipping duplicate event:', data.eventId, data.type);
+            return;
+          }
+          seenEventIdsRef.current.add(data.eventId);
         }
         
         setMessages((prev) => [...prev, data]);
