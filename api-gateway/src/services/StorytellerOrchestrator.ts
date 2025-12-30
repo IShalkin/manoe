@@ -364,7 +364,7 @@ export class StorytellerOrchestrator {
       // Fallback to JSON stringification for complex objects
       return JSON.stringify(value);
     }
-    return String(value);
+    return "";
   }
 
   /**
@@ -605,10 +605,11 @@ export class StorytellerOrchestrator {
         state.lastArchivistScene = sceneNum + 1;
       }
 
-      // Polish the scene ONLY if it was approved AND score <= 8
-      // Skip Polish if Critic gave score > 8 (scene is already high quality)
+      // Polish the scene ONLY if it was approved AND score < 8
+      // Skip Polish if Critic gave score >= 8 (scene is already high quality)
       // This saves time and money, and prevents Polish from degrading good content
-      const shouldSkipPolish = typeof approvedCritiqueScore === "number" && approvedCritiqueScore > 8;
+      // Note: >= 8 aligns with isApproved() threshold for consistency
+      const shouldSkipPolish = typeof approvedCritiqueScore === "number" && approvedCritiqueScore >= 8;
       if (sceneApproved && !shouldSkipPolish) {
         await this.polishScene(runId, options, sceneNum + 1);
       } else if (sceneApproved && shouldSkipPolish) {
