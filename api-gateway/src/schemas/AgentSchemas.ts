@@ -216,12 +216,14 @@ export const ArchivistOutputSchema = z.object({
           return false;
         }
         const obj = item as Record<string, unknown>;
-        // Keep only constraints where key and value are non-empty strings
+        // Keep only constraints where key and value are non-empty strings and sceneNumber is a valid number
         return (
           typeof obj.key === "string" &&
           obj.key.length > 0 &&
           typeof obj.value === "string" &&
-          obj.value.length > 0
+          obj.value.length > 0 &&
+          typeof obj.sceneNumber === "number" &&
+          !isNaN(obj.sceneNumber)
         );
       });
     },
