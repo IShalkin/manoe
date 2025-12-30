@@ -260,7 +260,12 @@ Polish for:
 - Consistency in voice
 - Final proofreading
 
-IMPORTANT: Preserve all story beats and maintain word count. Do NOT shorten or summarize. The polished version must be at least ${currentWordCount} words.
+CRITICAL REQUIREMENTS:
+- You MUST output the FULL polished text of the entire scene
+- Do NOT truncate or leave notes like "rest is the same" or "continues with same content"
+- Do NOT shorten or summarize - the polished version must be at least ${currentWordCount} words
+- Output EVERY SINGLE WORD of the polished scene from beginning to end
+- Preserve all story beats and plot points
 ${autonomousInstruction}`;
     }
 

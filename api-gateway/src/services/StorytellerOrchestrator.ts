@@ -1099,7 +1099,7 @@ export class StorytellerOrchestrator {
   }
 
   /**
-   * Validate polish output to prevent chunk loss
+   * Validate polish output to prevent chunk loss and lazy polish notes
    * Returns true if polish is acceptable, false if we should fall back to pre-polish draft
    */
   private validatePolishOutput(
@@ -1108,6 +1108,28 @@ export class StorytellerOrchestrator {
     prePolishWordCount: number,
     polishedWordCount: number
   ): boolean {
+    // CRITICAL: Detect "lazy polish" notes where LLM truncates output with meta-commentary
+    // These patterns indicate the model didn't actually polish the full text
+    const lazyPolishPatterns = [
+      /\(note:\s*(?:the\s+)?(?:full\s+)?(?:polished\s+)?(?:scene\s+)?continues/i,
+      /\(note:\s*(?:the\s+)?rest\s+(?:is\s+)?(?:the\s+)?same/i,
+      /continues\s+with\s+(?:the\s+)?(?:exact\s+)?same\s+content/i,
+      /rest\s+(?:of\s+the\s+scene\s+)?(?:is\s+)?(?:the\s+)?same/i,
+      /\[\.\.\.(?:rest|remainder|continues)/i,
+      /i\s+won'?t\s+repeat/i,
+      /maintaining\s+the\s+[\d,]+[\s-]*word\s+count/i,
+      /as\s+(?:the\s+)?original\s+draft/i,
+    ];
+    
+    // Check the last 500 characters for lazy polish patterns (they usually appear at the end)
+    const endingToCheck = polishedContent.slice(-500);
+    for (const pattern of lazyPolishPatterns) {
+      if (pattern.test(endingToCheck)) {
+        console.log(`[Orchestrator] Polish validation failed: detected lazy polish note (pattern: ${pattern.source})`);
+        return false;
+      }
+    }
+
     // Reject if polished version is more than 15% shorter (lost significant content)
     const minAcceptableWordCount = Math.floor(prePolishWordCount * 0.85);
     if (polishedWordCount < minAcceptableWordCount) {
