@@ -534,6 +534,12 @@ interface AgentMessage {
     to?: string;       // For agent_dialogue events (recipient agent)
     sentiment?: string; // For agent_thought events
     dialogueType?: string; // For agent_dialogue events
+    // Fields for scene_expand_complete and scene_polish_complete events
+    sceneNum?: number;  // Scene number for assembled scene events
+    assembledContent?: string;  // Full assembled scene content from expandScene
+    finalContent?: string;  // Final polished content from polishScene
+    wordCount?: number;  // Word count of the scene
+    polishStatus?: string;  // Status of polish operation
   };
 }
 
