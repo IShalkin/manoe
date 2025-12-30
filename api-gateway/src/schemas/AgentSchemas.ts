@@ -185,15 +185,48 @@ export const ImpactReportSchema = z.object({
 });
 
 /**
+ * Archivist constraint item schema
+ */
+const ArchivistConstraintSchema = z.object({
+  key: z.string().min(1),
+  value: z.string().min(1),
+  sceneNumber: z.number(),
+  reasoning: z.string().optional(),
+});
+
+/**
  * Archivist Output schema (from ArchivistAgent)
+ * Uses preprocessing to filter out invalid constraints (null values, empty strings)
+ * before validation to handle LLM returning malformed data
  */
 export const ArchivistOutputSchema = z.object({
-  constraints: z.array(z.object({
-    key: z.string().min(1),
-    value: z.string().min(1),
-    sceneNumber: z.number(),
-    reasoning: z.string().optional(),
-  })).optional(),
+  constraints: z.preprocess(
+    (val) => {
+      // If constraints is null/undefined, return undefined (optional field)
+      if (val === null || val === undefined) {
+        return undefined;
+      }
+      // If not an array, return as-is and let validation fail
+      if (!Array.isArray(val)) {
+        return val;
+      }
+      // Filter out constraints with null/undefined/empty key or value
+      return val.filter((item): item is Record<string, unknown> => {
+        if (item === null || item === undefined || typeof item !== "object") {
+          return false;
+        }
+        const obj = item as Record<string, unknown>;
+        // Keep only constraints where key and value are non-empty strings
+        return (
+          typeof obj.key === "string" &&
+          obj.key.length > 0 &&
+          typeof obj.value === "string" &&
+          obj.value.length > 0
+        );
+      });
+    },
+    z.array(ArchivistConstraintSchema).optional()
+  ),
   conflicts_resolved: z.array(z.string()).optional(),
   discarded_facts: z.array(z.string()).optional(),
 });

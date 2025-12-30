@@ -85,7 +85,7 @@ export class ArchivistAgent extends BaseAgent {
           key: constraint.key,
           value: constraint.value,
           source: AgentType.ARCHIVIST,
-          sceneNumber: constraint.sceneNumber || sceneNumber,
+          sceneNumber: constraint.sceneNumber ?? sceneNumber,
           timestamp: new Date().toISOString(),
           reasoning: constraint.reasoning,
         });
