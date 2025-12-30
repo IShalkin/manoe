@@ -773,11 +773,25 @@ export class StorytellerOrchestrator {
     // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
     const response = this.stripFakeWordCount(output.content as string);
 
+    // Guard against empty or metadata-only Writer responses
+    // This prevents wasting revision attempts on empty content like "Analyzing..."
+    const minValidWordCount = 50; // Minimum words for a valid revision
+    const responseWordCount = response.split(/\s+/).length;
+    if (responseWordCount < minValidWordCount) {
+      console.log(`[Orchestrator] Scene ${sceneNum} revision too short (${responseWordCount} words), keeping previous draft`);
+      await this.publishEvent(runId, "scene_revision_skipped", { 
+        sceneNum, 
+        reason: "empty_response",
+        wordCount: responseWordCount 
+      });
+      return; // Don't overwrite the existing draft with empty content
+    }
+
     const revision = {
       sceneNum,
       title: (draft as Record<string, unknown>).title,
       content: response,
-      wordCount: response.split(/\s+/).length,
+      wordCount: responseWordCount,
       revisionNumber: (state.revisionCount.get(sceneNum) ?? 0) + 1,
       createdAt: new Date().toISOString(),
     };
