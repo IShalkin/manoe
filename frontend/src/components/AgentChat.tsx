@@ -1565,7 +1565,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     );
     if (polishMessages.length > 0) {
       // Helper to extract scene number from content if not in metadata
-      const extractSceneNumFromPolishContent = (content: string): number | null => {
+      const extractSceneNumFromPolishContent = (content: string): number | undefined => {
         const patterns = [
           /["']?sceneNumber["']?\s*[:=]\s*(\d+)/i,
           /scene\s+(\d+)/i,
@@ -1577,18 +1577,18 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
             return parseInt(match[1], 10);
           }
         }
-        return null;
+        return undefined;
       };
 
       // Deduplicate by sceneNum - keep only the latest Polish message per scene
       const sceneMap = new Map<number, string>();
       polishMessages.forEach((m, index) => {
-        let sceneNum = m.data.sceneNum;
-        if (sceneNum === undefined || sceneNum === null) {
+        let sceneNum: number | undefined = m.data.sceneNum;
+        if (sceneNum === undefined) {
           const contentStr = m.data.content || '';
           sceneNum = extractSceneNumFromPolishContent(contentStr);
         }
-        if (sceneNum === undefined || sceneNum === null) {
+        if (sceneNum === undefined) {
           sceneNum = -(index + 1000);
         }
         
@@ -1617,7 +1617,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     );
     if (writerMessages.length > 0) {
       // Helper to extract scene number from content if not in metadata
-      const extractSceneNumFromContent = (content: string): number | null => {
+      const extractSceneNumFromContent = (content: string): number | undefined => {
         // Try to find "Scene X" or "sceneNumber: X" in the content
         const patterns = [
           /["']?sceneNumber["']?\s*[:=]\s*(\d+)/i,
@@ -1630,7 +1630,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
             return parseInt(match[1], 10);
           }
         }
-        return null;
+        return undefined;
       };
 
       // Deduplicate by sceneNum - keep only the latest Writer message per scene
@@ -1639,15 +1639,15 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       const sceneMap = new Map<number, string>();
       writerMessages.forEach((m, index) => {
         // Try multiple sources for sceneNum
-        let sceneNum = m.data.sceneNum;
-        if (sceneNum === undefined || sceneNum === null) {
+        let sceneNum: number | undefined = m.data.sceneNum;
+        if (sceneNum === undefined) {
           // Try to extract from content
           const contentStr = m.data.content || '';
           sceneNum = extractSceneNumFromContent(contentStr);
         }
         // If still no sceneNum, use negative index to prevent collision with real scenes
         // This ensures messages without sceneNum don't overwrite each other
-        if (sceneNum === undefined || sceneNum === null) {
+        if (sceneNum === undefined) {
           sceneNum = -(index + 1000); // Use large negative to avoid collision
         }
         
