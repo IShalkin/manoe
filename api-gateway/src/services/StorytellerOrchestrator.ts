@@ -1244,17 +1244,26 @@ export class StorytellerOrchestrator {
     const state = this.activeRuns.get(runId);
     if (!state) return;
 
-    // Simple fact extraction - in production, use LLM for better extraction
+    console.log(`[extractRawFacts] Called for scene ${sceneNum}, content length: ${content.length}`);
+
+    // More flexible fact extraction patterns
     const factPatterns = [
-      /(\w+) (was|is|became|had|has) (wounded|injured|killed|married|born|died)/gi,
-      /(\w+)'s (health|status|location|relationship) (changed|is|was)/gi,
-      // Additional patterns for character actions and state changes
-      /(\w+) (discovered|found|learned|realized|understood)/gi,
-      /(\w+) (entered|left|arrived|departed|traveled)/gi,
-      /(\w+) (met|encountered|confronted|spoke with)/gi,
+      // Character state changes
+      /(\w+) (was|is|became|had|has|felt|seemed|appeared|looked) (\w+)/gi,
+      // Character actions with objects/locations
+      /(\w+) (walked|ran|moved|went|came|stepped|turned|looked|stared|gazed)/gi,
+      // Character speech/communication
+      /(\w+) (said|asked|replied|answered|whispered|shouted|muttered|spoke)/gi,
+      // Character emotions/reactions
+      /(\w+) (smiled|frowned|laughed|cried|sighed|nodded|shook)/gi,
+      // Character discoveries/realizations
+      /(\w+) (discovered|found|learned|realized|understood|noticed|saw|heard)/gi,
+      // Character interactions
+      /(\w+) (met|encountered|confronted|approached|greeted|hugged|kissed)/gi,
     ];
 
     const newFacts: Array<{ subject: string; change: string; category: 'char' | 'world' | 'plot' }> = [];
+    const seenFacts = new Set<string>(); // Deduplicate facts
 
     for (const pattern of factPatterns) {
       const matches = content.matchAll(pattern);
@@ -1264,11 +1273,23 @@ export class StorytellerOrchestrator {
         const action = match[2] || "";
         const detail = match[3] || "";
         
+        // Skip common words that aren't character names
+        const skipWords = ['the', 'a', 'an', 'it', 'this', 'that', 'he', 'she', 'they', 'we', 'i', 'you'];
+        if (skipWords.includes(subject.toLowerCase())) continue;
+        
+        // Deduplicate
+        const factKey = `${subject.toLowerCase()}-${action.toLowerCase()}`;
+        if (seenFacts.has(factKey)) continue;
+        seenFacts.add(factKey);
+        
         // Determine category based on action type
         let category: 'char' | 'world' | 'plot' = 'plot';
-        if (['wounded', 'injured', 'killed', 'died', 'born', 'married'].includes(detail.toLowerCase())) {
+        const charActions = ['felt', 'seemed', 'appeared', 'smiled', 'frowned', 'laughed', 'cried', 'sighed'];
+        const worldActions = ['walked', 'ran', 'moved', 'went', 'came', 'stepped', 'entered', 'left'];
+        
+        if (charActions.includes(action.toLowerCase())) {
           category = 'char';
-        } else if (['entered', 'left', 'arrived', 'departed', 'traveled'].includes(action.toLowerCase())) {
+        } else if (worldActions.includes(action.toLowerCase())) {
           category = 'world';
         }
 
@@ -1287,14 +1308,14 @@ export class StorytellerOrchestrator {
       }
     }
 
-    // Emit new_developments_collected event for frontend World State panel
-    if (newFacts.length > 0) {
-      await this.publishEvent(runId, "new_developments_collected", {
-        sceneNum,
-        developments: newFacts,
-        totalFacts: state.rawFactsLog.length,
-      });
-    }
+    console.log(`[extractRawFacts] Extracted ${newFacts.length} facts from scene ${sceneNum}`);
+
+    // Always emit event so frontend knows extraction ran (even if 0 facts)
+    await this.publishEvent(runId, "new_developments_collected", {
+      sceneNum,
+      developments: newFacts,
+      totalFacts: state.rawFactsLog.length,
+    });
   }
 
   /**
