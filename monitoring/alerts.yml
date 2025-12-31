@@ -46,27 +46,9 @@ groups:
           summary: "Agent {{ $labels.agent }} p95 latency above 60 seconds"
           description: "Agent {{ $labels.agent }} p95 latency is {{ $value | humanizeDuration }}. Critical latency threshold exceeded."
 
-  - name: manoe_infrastructure_alerts
-    rules:
-      # Redis Streams Lag Alert
-      # Threshold: > 1000 messages
-      - alert: RedisStreamsLagHigh
-        expr: manoe_redis_consumer_lag > 1000
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Redis Streams lag exceeds 1000 messages"
-          description: "Redis stream {{ $labels.stream }} has {{ $value }} messages lag. This may cause delayed SSE updates for users."
-
-      - alert: RedisStreamsLagCritical
-        expr: manoe_redis_consumer_lag > 5000
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Redis Streams lag exceeds 5000 messages"
-          description: "Redis stream {{ $labels.stream }} has {{ $value }} messages lag. Critical backlog - users may experience significant delays."
+  # NOTE: Redis consumer lag alerts removed - the current architecture uses direct
+  # XREAD BLOCK polling for SSE, not consumer groups, so the manoe_redis_consumer_lag
+  # metric has no data. These alerts can be re-added if consumer groups are implemented.
 
   - name: manoe_llm_alerts
     rules:
