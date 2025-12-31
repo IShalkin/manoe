@@ -39,18 +39,20 @@ describe("SupabaseSchemas - Character Schema", () => {
     }
   });
 
-  it("should reject extra fields (strict mode)", () => {
+  it("should strip extra fields (passthrough mode for LLM compatibility)", () => {
     const input = {
       project_id: "550e8400-e29b-41d4-a716-446655440000",
       name: "John Doe",
-      extra_field_not_in_schema: "This should be rejected",
+      extra_field_not_in_schema: "This should be stripped",
     };
 
     const result = SupabaseCharacterSchema.safeParse(input);
 
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.errors.length).toBeGreaterThan(0);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).not.toHaveProperty("extra_field_not_in_schema");
+      expect(result.data.project_id).toBe("550e8400-e29b-41d4-a716-446655440000");
+      expect(result.data.name).toBe("John Doe");
     }
   });
 
@@ -212,23 +214,23 @@ describe("SupabaseSchemas - Draft Schema", () => {
 
 describe("SupabaseValidationError", () => {
   it("should create error with proper structure", () => {
-    const mockZodError = {
-      issues: [
-        {
-          code: z.ZodIssueCode.custom,
-          path: ["name"],
-          message: "Name is required",
-        },
-      ],
-    } as z.ZodError;
+    const invalidInput = {
+      project_id: "not-a-uuid",
+      name: "John Doe",
+    };
+    
+    const parseResult = SupabaseCharacterSchema.safeParse(invalidInput);
+    
+    expect(parseResult.success).toBe(false);
+    if (!parseResult.success) {
+      const error = new SupabaseValidationError(parseResult.error, "saveCharacter", "character");
 
-    const error = new SupabaseValidationError(mockZodError, "saveCharacter", "character");
-
-    expect(error.name).toBe("SupabaseValidationError");
-    expect(error.operation).toBe("saveCharacter");
-    expect(error.recordType).toBe("character");
-    expect(error.zodError).toBe(mockZodError);
-    expect(error.message).toContain("saveCharacter");
-    expect(error.message).toContain("character");
+      expect(error.name).toBe("SupabaseValidationError");
+      expect(error.operation).toBe("saveCharacter");
+      expect(error.recordType).toBe("character");
+      expect(error.zodError).toBe(parseResult.error);
+      expect(error.message).toContain("saveCharacter");
+      expect(error.message).toContain("character");
+    }
   });
 });
