@@ -13,7 +13,7 @@ interface Project {
   updated_at: string;
 }
 
-interface Character {
+export interface Character {
   id: string;
   project_id: string;
   name: string;
@@ -34,7 +34,7 @@ interface Outline {
   created_at: string;
 }
 
-interface Draft {
+export interface Draft {
   id: string;
   project_id: string;
   scene_number: number;
@@ -248,23 +248,43 @@ export class SupabaseService {
     return characters || [];
   }
 
-  async saveCharacter(projectId: string, character: Partial<Character>): Promise<Character> {
+  async saveCharacter(projectId: string, character: Partial<Character>, qdrantId?: string): Promise<Character> {
     const client = this.getClient();
-    const { data, error } = await client
+    const { normalizeCharacterForStorage } = await import("../utils/schemaNormalizers");
+    const { camelToSnakeCase } = await import("../utils/stringUtils");
+
+    // Normalize LLM field names to DB field names and stringify objects
+    const normalizedChar = normalizeCharacterForStorage(character as Record<string, unknown>);
+    const snakeCaseChar = camelToSnakeCase(normalizedChar);
+
+    const insertData = {
+      project_id: projectId,
+      ...snakeCaseChar,
+      qdrant_id: qdrantId,
+      created_at: new Date().toISOString(),
+    };
+
+    console.log('[SupabaseService] Attempting to save character:', JSON.stringify(insertData, null, 2));
+
+    const { data, error, status, statusText } = await client
       .from("characters")
-      .insert({
-        project_id: projectId,
-        ...character,
-        created_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
+      .insert(insertData)
+      .select();
+
+    console.log('[SupabaseService] Insert response - status:', status, 'statusText:', statusText, 'dataLength:', data?.length, 'error:', JSON.stringify(error));
 
     if (error) {
-      throw new Error(`Failed to save character: ${error.message}`);
+      console.error('[SupabaseService] Failed to save character - code:', error.code, 'message:', error.message, 'details:', error.details, 'hint:', error.hint);
+      throw new Error(`Failed to save character: ${error.message || error.code || 'Unknown error'}`);
     }
 
-    return data;
+    if (!data || data.length === 0) {
+      console.error('[SupabaseService] No data returned from insert despite no error');
+      throw new Error('Failed to save character: No data returned');
+    }
+
+    console.log('[SupabaseService] Character saved successfully with qdrant_id:', qdrantId || 'N/A');
+    return data[0];
   }
 
   // ========================================================================
@@ -293,6 +313,43 @@ export class SupabaseService {
 
     return data || [];
   }
+
+  async saveWorldbuilding(
+    projectId: string,
+    elementType: string,
+    element: Record<string, unknown>,
+    qdrantId?: string
+  ): Promise<unknown> {
+    const client = this.getClient();
+    
+    const insertData = {
+      project_id: projectId,
+      element_type: elementType,
+      name: element.name || elementType,
+      description: typeof element.description === 'object' ? JSON.stringify(element.description) : (element.description || ''),
+      attributes: element,
+      qdrant_id: qdrantId,
+      created_at: new Date().toISOString(),
+    };
+
+    console.log('[SupabaseService] Attempting to save worldbuilding:', elementType);
+
+    const { data, error, status } = await client
+      .from("worldbuilding")
+      .insert(insertData)
+      .select();
+
+    console.log('[SupabaseService] Worldbuilding insert response - status:', status, 'error:', JSON.stringify(error));
+
+    if (error) {
+      console.error('[SupabaseService] Failed to save worldbuilding (' + elementType + '):', error.message);
+      throw new Error(`Failed to save worldbuilding: ${error.message || 'Unknown error'}`);
+    }
+
+    console.log('[SupabaseService] Worldbuilding saved successfully:', elementType);
+    return data?.[0];
+  }
+
 
   // ========================================================================
   // Outline Operations
@@ -348,7 +405,7 @@ export class SupabaseService {
     return drafts || [];
   }
 
-  async saveDraft(projectId: string, draft: Partial<Draft>): Promise<Draft> {
+  async saveDraft(projectId: string, draft: Partial<Draft>, qdrantId?: string): Promise<Draft> {
     const client = this.getClient();
     const { data, error } = await client
       .from("drafts")
@@ -602,5 +659,35 @@ export class SupabaseService {
     if (error) {
       console.error(`Failed to delete run state snapshot: ${error.message}`);
     }
+  }
+
+  async reindexProject(projectId: string): Promise<{ characters: number; worldbuilding: number; drafts: number; errors: string[] }> {
+    const errors: string[] = [];
+    let characters = 0;
+    let worldbuilding = 0;
+    let drafts = 0;
+
+    try {
+      const charData = await this.getCharacters(projectId);
+      characters = charData.length;
+    } catch (e) {
+      errors.push(`Failed to get characters: ${e}`);
+    }
+
+    try {
+      const wbData = await this.getWorldbuilding(projectId);
+      worldbuilding = wbData.length;
+    } catch (e) {
+      errors.push(`Failed to get worldbuilding: ${e}`);
+    }
+
+    try {
+      const draftData = await this.getDrafts(projectId);
+      drafts = draftData.length;
+    } catch (e) {
+      errors.push(`Failed to get drafts: ${e}`);
+    }
+
+    return { characters, worldbuilding, drafts, errors };
   }
 }
