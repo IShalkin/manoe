@@ -51,7 +51,7 @@ groups:
       # Redis Streams Lag Alert
       # Threshold: > 1000 messages
       - alert: RedisStreamsLagHigh
-        expr: manoe_redis_stream_lag > 1000
+        expr: manoe_redis_consumer_lag > 1000
         for: 2m
         labels:
           severity: warning
@@ -60,7 +60,7 @@ groups:
           description: "Redis stream {{ $labels.stream }} has {{ $value }} messages lag. This may cause delayed SSE updates for users."
 
       - alert: RedisStreamsLagCritical
-        expr: manoe_redis_stream_lag > 5000
+        expr: manoe_redis_consumer_lag > 5000
         for: 2m
         labels:
           severity: critical
