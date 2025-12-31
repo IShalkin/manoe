@@ -557,6 +557,7 @@ interface AgentChatProps {
   orchestratorUrl: string;
   onComplete?: (result: GenerationResult) => void;
   onClose?: () => void;
+  projectId?: string;
   projectResult?: ProjectResult | null;
   onUpdateResult?: (result: ProjectResult) => void;
   onRegenerate?: (constraints: RegenerationConstraints) => void;
@@ -691,7 +692,7 @@ interface AgentState {
   lastUpdate: string;
 }
 
-export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectResult, onUpdateResult, onRegenerate, onNarrativePossibilitySelected, onResume }: AgentChatProps) {
+export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectId, projectResult, onUpdateResult, onRegenerate, onNarrativePossibilitySelected, onResume }: AgentChatProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2331,7 +2332,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                       <span className="text-xs text-slate-500">Rate this output</span>
                       <FeedbackButtons
                         runId={runId}
-                        projectId={projectResult?.id || ''}
+                        projectId={projectId || ''}
                         agentName={agent}
                         size="sm"
                       />
