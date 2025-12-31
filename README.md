@@ -578,6 +578,43 @@ The `config.model` field in Langfuse prompts is metadata/documentation only - it
 
 Tracing is automatically enabled when `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are configured in the orchestrator environment.
 
+### Prometheus Metrics & Grafana Dashboards
+
+MANOE includes comprehensive Prometheus metrics for production monitoring:
+
+**Metrics Endpoint**: `GET /api/metrics` - Prometheus-compatible metrics endpoint
+
+**Available Metrics:**
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `manoe_agent_executions_total` | Counter | Total agent executions by agent_name, status, error_type |
+| `manoe_agent_execution_duration_seconds` | Histogram | Agent execution duration with p50/p95/p99 buckets |
+| `manoe_llm_calls_total` | Counter | LLM API calls by provider, model, agent_name, status |
+| `manoe_llm_call_duration_seconds` | Histogram | LLM call latency |
+| `manoe_llm_tokens_total` | Counter | Token usage by provider, model, token_type (prompt/completion) |
+| `manoe_llm_cost_total` | Counter | LLM cost in USD by provider, model, agent_name, run_id |
+| `manoe_db_queries_total` | Counter | Database queries by operation (select/insert), table, status |
+| `manoe_qdrant_operations_total` | Counter | Qdrant operations by operation (upsert/search), collection, status |
+| `manoe_redis_stream_length` | Gauge | Current length of Redis streams |
+| `manoe_redis_consumer_lag` | Gauge | Redis consumer group lag (messages behind) |
+| `manoe_user_feedback_total` | Counter | User feedback by feedback_type (thumbs_up/thumbs_down), agent_name |
+| `manoe_regeneration_requests_total` | Counter | Regeneration requests (implicit negative feedback) |
+
+**Grafana Dashboard**: The `monitoring/grafana/dashboards/manoe-agents.json` provides a pre-built dashboard with 8 panels covering agent success rates, latency, LLM costs, token usage, Redis lag, and user feedback.
+
+**Alert Rules**: The `monitoring/alerts.yml` defines Prometheus alerting rules:
+- `AgentSuccessRateLow` - Agent success rate below 90%
+- `AgentLatencyHigh` - p95 latency above 45 seconds
+- `AgentLatencyCritical` - p95 latency above 60 seconds
+- `RedisStreamsLagHigh` - Consumer lag above 1000 messages
+- `LLMRateLimitErrors` - Rate limit errors detected
+- `HighTokenCost` - Hourly cost exceeds threshold
+- `HighRegenerationRate` - High regeneration rate (implicit negative feedback)
+- `LowUserSatisfaction` - Low thumbs up ratio
+
+**User Feedback Integration**: The frontend includes `FeedbackButtons` component for explicit user feedback (thumbs up/down) on agent outputs. Feedback is recorded in both Langfuse (for quality scoring) and Prometheus metrics.
+
 ### State Recovery & Retry Mechanism
 
 MANOE includes robust error handling for long-running generations:
