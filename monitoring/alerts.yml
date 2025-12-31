@@ -1,0 +1,121 @@
+# Prometheus Alerting Rules for MANOE
+# Multi-Agent Narrative Orchestration Engine
+
+groups:
+  - name: manoe_agent_alerts
+    rules:
+      # Agent Success Rate Alert
+      # Threshold: < 90% (MAS failures cascade)
+      - alert: AgentSuccessRateLow
+        expr: |
+          (
+            sum(rate(manoe_agent_executions_total{status="success"}[5m])) by (agent)
+            /
+            sum(rate(manoe_agent_executions_total[5m])) by (agent)
+          ) < 0.90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent {{ $labels.agent }} success rate below 90%"
+          description: "Agent {{ $labels.agent }} has a success rate of {{ $value | humanizePercentage }} over the last 5 minutes. In MAS, agent failures cascade and affect the entire pipeline."
+
+      # Agent Latency Alert (p95)
+      # Threshold: > 45-60 seconds for scene generation
+      - alert: AgentLatencyHigh
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(manoe_agent_execution_duration_seconds_bucket[5m])) by (agent, le)
+          ) > 45
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent {{ $labels.agent }} p95 latency above 45 seconds"
+          description: "Agent {{ $labels.agent }} p95 latency is {{ $value | humanizeDuration }}. High latency affects user experience."
+
+      - alert: AgentLatencyCritical
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(manoe_agent_execution_duration_seconds_bucket[5m])) by (agent, le)
+          ) > 60
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent {{ $labels.agent }} p95 latency above 60 seconds"
+          description: "Agent {{ $labels.agent }} p95 latency is {{ $value | humanizeDuration }}. Critical latency threshold exceeded."
+
+  - name: manoe_infrastructure_alerts
+    rules:
+      # Redis Streams Lag Alert
+      # Threshold: > 1000 messages
+      - alert: RedisStreamsLagHigh
+        expr: manoe_redis_stream_lag > 1000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis Streams lag exceeds 1000 messages"
+          description: "Redis stream {{ $labels.stream }} has {{ $value }} messages lag. This may cause delayed SSE updates for users."
+
+      - alert: RedisStreamsLagCritical
+        expr: manoe_redis_stream_lag > 5000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis Streams lag exceeds 5000 messages"
+          description: "Redis stream {{ $labels.stream }} has {{ $value }} messages lag. Critical backlog - users may experience significant delays."
+
+  - name: manoe_llm_alerts
+    rules:
+      # Rate Limit Errors Alert
+      - alert: LLMRateLimitErrors
+        expr: |
+          sum(rate(manoe_llm_rate_limit_errors_total[5m])) by (provider) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM provider {{ $labels.provider }} rate limiting detected"
+          description: "Provider {{ $labels.provider }} is returning rate limit errors. Consider adjusting backoff settings or upgrading API tier."
+
+      # High Token Cost Alert
+      - alert: HighTokenCost
+        expr: |
+          sum(rate(manoe_llm_cost_dollars_total[1h])) > 10
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High LLM token cost detected"
+          description: "LLM costs are exceeding $10/hour. Current rate: ${{ $value | printf \"%.2f\" }}/hour."
+
+  - name: manoe_user_feedback_alerts
+    rules:
+      # High Regeneration Rate (implicit negative feedback)
+      - alert: HighRegenerationRate
+        expr: |
+          sum(rate(manoe_regeneration_requests_total[1h])) 
+          / 
+          sum(rate(manoe_agent_executions_total{status="success"}[1h])) > 0.3
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "High regeneration rate detected"
+          description: "More than 30% of successful generations are being regenerated. This indicates user dissatisfaction with output quality."
+
+      # Low User Satisfaction (explicit feedback)
+      - alert: LowUserSatisfaction
+        expr: |
+          sum(rate(manoe_user_feedback_total{type="thumbs_down"}[24h])) 
+          / 
+          sum(rate(manoe_user_feedback_total[24h])) > 0.4
+        for: 6h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low user satisfaction detected"
+          description: "More than 40% of user feedback is negative (thumbs down). Review agent outputs and prompts."

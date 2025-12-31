@@ -39,6 +39,28 @@ export interface StreamInfo {
   exists: boolean;
 }
 
+/**
+ * Consumer group information for lag monitoring
+ */
+export interface ConsumerGroupInfo {
+  name: string;
+  consumers: number;
+  pending: number;
+  lastDeliveredId: string;
+  lag?: number;
+}
+
+/**
+ * Stream lag metrics for monitoring
+ */
+export interface StreamLagMetrics {
+  streamKey: string;
+  length: number;
+  groups: ConsumerGroupInfo[];
+  totalLag: number;
+  oldestPendingMs?: number;
+}
+
 @Service()
 export class RedisStreamsService {
   // Dedicated writer client - never blocked by XREAD
@@ -416,6 +438,194 @@ export class RedisStreamsService {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // ==================== LAG MONITORING ====================
+
+  /**
+   * Get consumer group information for a stream
+   * Used for monitoring consumer lag
+   * 
+   * @param runId - Unique identifier for the generation run
+   * @returns Array of consumer group information
+   */
+  async getConsumerGroups(runId: string): Promise<ConsumerGroupInfo[]> {
+    const client = this.getClient();
+    const streamKey = this.getStreamKey(runId);
+
+    try {
+      const groups = await client.xinfo("GROUPS", streamKey) as unknown[][];
+      
+      return groups.map((group) => {
+        const groupObj = this.parseXInfoResponse(group as unknown[]);
+        return {
+          name: String(groupObj.name || ""),
+          consumers: typeof groupObj.consumers === "number" ? groupObj.consumers : 0,
+          pending: typeof groupObj.pending === "number" ? groupObj.pending : 0,
+          lastDeliveredId: String(groupObj["last-delivered-id"] || "0-0"),
+          lag: typeof groupObj.lag === "number" ? groupObj.lag : undefined,
+        };
+      });
+    } catch (error) {
+      // Stream doesn't exist or has no groups
+      return [];
+    }
+  }
+
+  /**
+   * Get comprehensive lag metrics for a stream
+   * Used for Prometheus metrics and alerting
+   * 
+   * @param runId - Unique identifier for the generation run
+   * @returns Stream lag metrics including total lag across all groups
+   */
+  async getStreamLagMetrics(runId: string): Promise<StreamLagMetrics> {
+    const streamKey = this.getStreamKey(runId);
+    const streamInfo = await this.getStreamInfo(runId);
+    const groups = await this.getConsumerGroups(runId);
+
+    // Calculate total lag across all consumer groups
+    let totalLag = 0;
+    for (const group of groups) {
+      if (group.lag !== undefined) {
+        totalLag += group.lag;
+      } else {
+        // Estimate lag from pending count if lag not available
+        totalLag += group.pending;
+      }
+    }
+
+    return {
+      streamKey,
+      length: streamInfo.length,
+      groups,
+      totalLag,
+    };
+  }
+
+  /**
+   * Get lag metrics for the global events stream
+   * Used for overall system health monitoring
+   * 
+   * @returns Stream lag metrics for the global stream
+   */
+  async getGlobalStreamLagMetrics(): Promise<StreamLagMetrics> {
+    const client = this.getClient();
+    const streamKey = this.STREAM_GLOBAL;
+
+    try {
+      const info = await client.xinfo("STREAM", streamKey) as unknown[];
+      const infoObj = this.parseXInfoResponse(info);
+      
+      let groups: ConsumerGroupInfo[] = [];
+      try {
+        const groupsRaw = await client.xinfo("GROUPS", streamKey) as unknown[][];
+        groups = groupsRaw.map((group) => {
+          const groupObj = this.parseXInfoResponse(group as unknown[]);
+          return {
+            name: String(groupObj.name || ""),
+            consumers: typeof groupObj.consumers === "number" ? groupObj.consumers : 0,
+            pending: typeof groupObj.pending === "number" ? groupObj.pending : 0,
+            lastDeliveredId: String(groupObj["last-delivered-id"] || "0-0"),
+            lag: typeof groupObj.lag === "number" ? groupObj.lag : undefined,
+          };
+        });
+      } catch {
+        // No groups exist
+      }
+
+      let totalLag = 0;
+      for (const group of groups) {
+        totalLag += group.lag ?? group.pending;
+      }
+
+      return {
+        streamKey,
+        length: typeof infoObj.length === "number" ? infoObj.length : 0,
+        groups,
+        totalLag,
+      };
+    } catch (error) {
+      return {
+        streamKey,
+        length: 0,
+        groups: [],
+        totalLag: 0,
+      };
+    }
+  }
+
+  /**
+   * Get all active stream keys for monitoring
+   * Scans for all manoe:events:* streams
+   * 
+   * @returns Array of stream keys
+   */
+  async getActiveStreamKeys(): Promise<string[]> {
+    const client = this.getClient();
+    const pattern = "manoe:events:*";
+    const keys: string[] = [];
+    
+    let cursor = "0";
+    do {
+      const [nextCursor, foundKeys] = await client.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        "100"
+      );
+      cursor = nextCursor;
+      keys.push(...foundKeys);
+    } while (cursor !== "0");
+
+    return keys;
+  }
+
+  /**
+   * Get lag metrics for all active streams
+   * Used for comprehensive monitoring dashboard
+   * 
+   * @returns Map of stream key to lag metrics
+   */
+  async getAllStreamLagMetrics(): Promise<Map<string, StreamLagMetrics>> {
+    const metrics = new Map<string, StreamLagMetrics>();
+    const keys = await this.getActiveStreamKeys();
+
+    for (const key of keys) {
+      // Extract runId from key (manoe:events:{runId})
+      const runId = key.replace("manoe:events:", "");
+      if (runId && runId !== "global") {
+        const lagMetrics = await this.getStreamLagMetrics(runId);
+        metrics.set(key, lagMetrics);
+      }
+    }
+
+    // Add global stream metrics
+    const globalMetrics = await this.getGlobalStreamLagMetrics();
+    metrics.set(this.STREAM_GLOBAL, globalMetrics);
+
+    return metrics;
+  }
+
+  /**
+   * Check if any stream has lag above threshold
+   * Used for alerting
+   * 
+   * @param threshold - Maximum acceptable lag (default: 1000)
+   * @returns Array of streams exceeding the threshold
+   */
+  async checkLagThreshold(threshold: number = 1000): Promise<Array<{ streamKey: string; lag: number }>> {
+    const allMetrics = await this.getAllStreamLagMetrics();
+    const exceeding: Array<{ streamKey: string; lag: number }> = [];
+
+    for (const [streamKey, metrics] of allMetrics) {
+      if (metrics.totalLag > threshold) {
+        exceeding.push({ streamKey, lag: metrics.totalLag });
+      }
+    }
+
+    return exceeding;
   }
 
   /**

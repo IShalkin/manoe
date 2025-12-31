@@ -5,6 +5,7 @@ import type { ProjectResult } from '../hooks/useProjects';
 import { orchestratorFetch, getAuthenticatedSSEUrl } from '../lib/api';
 import type { NarrativePossibility, NarrativePossibilitiesRecommendation } from '../types';
 import { NarrativePossibilitiesSelector } from './NarrativePossibilitiesSelector';
+import { FeedbackButtons } from './FeedbackButtons';
 
 // Maximum input length for JSON parsing to prevent ReDoS attacks
 const MAX_JSON_INPUT_LENGTH = 1_000_000; // 1MB limit
@@ -2323,6 +2324,19 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                       />
                     )}
                   </div>
+                  
+                  {/* Feedback Buttons - show when agent has content and generation is complete */}
+                  {hasContent && (isComplete || state.status === 'complete') && runId && (
+                    <div className="px-4 py-2 border-t border-slate-700/50 flex items-center justify-between">
+                      <span className="text-xs text-slate-500">Rate this output</span>
+                      <FeedbackButtons
+                        runId={runId}
+                        projectId={projectResult?.id || ''}
+                        agentName={agent}
+                        size="sm"
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}

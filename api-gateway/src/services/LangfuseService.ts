@@ -341,6 +341,235 @@ export class LangfuseService {
     });
   }
 
+  // ==================== QUALITY METRICS (LLM-as-a-Judge) ====================
+
+  /**
+   * Score faithfulness - how well the output matches the plan/intent
+   * Used to evaluate if Writer output matches Architect plan
+   * 
+   * @param runId - The run/trace ID
+   * @param value - Score value (0-1), where 1 = perfectly faithful
+   * @param agentName - Name of the agent being evaluated
+   * @param comment - Optional explanation
+   */
+  scoreFaithfulness(
+    runId: string,
+    value: number,
+    agentName: string,
+    comment?: string
+  ): void {
+    this.scoreTrace(runId, `faithfulness_${agentName}`, value, comment);
+    this.addEvent(runId, "quality_score_faithfulness", {
+      agentName,
+      score: value,
+      comment,
+    });
+  }
+
+  /**
+   * Score answer relevance - how well the output matches user's original idea
+   * Used to evaluate if character descriptions match user's initial concept
+   * 
+   * @param runId - The run/trace ID
+   * @param value - Score value (0-1), where 1 = perfectly relevant
+   * @param agentName - Name of the agent being evaluated
+   * @param comment - Optional explanation
+   */
+  scoreRelevance(
+    runId: string,
+    value: number,
+    agentName: string,
+    comment?: string
+  ): void {
+    this.scoreTrace(runId, `relevance_${agentName}`, value, comment);
+    this.addEvent(runId, "quality_score_relevance", {
+      agentName,
+      score: value,
+      comment,
+    });
+  }
+
+  /**
+   * Record user feedback (thumbs up/down)
+   * 
+   * @param runId - The run/trace ID
+   * @param feedbackType - "thumbs_up" or "thumbs_down"
+   * @param agentName - Name of the agent being rated
+   * @param sceneNumber - Optional scene number for Writer feedback
+   * @param comment - Optional user comment
+   */
+  recordUserFeedback(
+    runId: string,
+    feedbackType: "thumbs_up" | "thumbs_down",
+    agentName: string,
+    sceneNumber?: number,
+    comment?: string
+  ): void {
+    const value = feedbackType === "thumbs_up" ? 1 : 0;
+    
+    this.scoreTrace(runId, `user_feedback_${agentName}`, value, comment);
+    this.addEvent(runId, "user_feedback", {
+      feedbackType,
+      agentName,
+      sceneNumber,
+      value,
+      comment,
+    });
+  }
+
+  /**
+   * Record implicit feedback (regeneration request)
+   * Regeneration is a signal of user dissatisfaction
+   * 
+   * @param runId - The run/trace ID
+   * @param agentName - Name of the agent being regenerated
+   * @param sceneNumber - Optional scene number
+   * @param reason - Optional reason for regeneration
+   */
+  recordRegenerationRequest(
+    runId: string,
+    agentName: string,
+    sceneNumber?: number,
+    reason?: string
+  ): void {
+    this.scoreTrace(runId, `regeneration_${agentName}`, 0, reason);
+    this.addEvent(runId, "regeneration_request", {
+      agentName,
+      sceneNumber,
+      reason,
+      implicitFeedback: "negative",
+    });
+  }
+
+  // ==================== ERROR OBSERVABILITY ====================
+
+  /**
+   * Log Zod validation error to Langfuse
+   * Tracks which fields fail validation most often
+   * 
+   * @param runId - The run/trace ID
+   * @param agentName - Name of the agent that produced invalid output
+   * @param errors - Array of Zod validation errors
+   * @param rawOutput - The raw output that failed validation
+   */
+  logValidationError(
+    runId: string,
+    agentName: string,
+    errors: Array<{ path: string; message: string; expected?: string; received?: string }>,
+    rawOutput?: string
+  ): void {
+    this.addEvent(runId, "validation_error", {
+      agentName,
+      errorCount: errors.length,
+      errors: errors.map(e => ({
+        field: e.path,
+        message: e.message,
+        expected: e.expected,
+        received: e.received,
+      })),
+      rawOutputPreview: rawOutput?.substring(0, 500),
+    });
+
+    // Track each field that failed for analytics
+    for (const error of errors) {
+      this.addEvent(runId, "validation_field_error", {
+        agentName,
+        field: error.path,
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * Log rate limit error from LLM provider
+   * 
+   * @param runId - The run/trace ID
+   * @param provider - LLM provider name
+   * @param model - Model name
+   * @param retryAfterMs - Suggested retry delay in milliseconds
+   */
+  logRateLimitError(
+    runId: string,
+    provider: string,
+    model: string,
+    retryAfterMs?: number
+  ): void {
+    this.addEvent(runId, "rate_limit_error", {
+      provider,
+      model,
+      retryAfterMs,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Log agent execution result for success rate tracking
+   * 
+   * @param runId - The run/trace ID
+   * @param agentName - Name of the agent
+   * @param success - Whether the execution was successful
+   * @param durationMs - Execution duration in milliseconds
+   * @param errorType - Type of error if failed
+   * @param errorMessage - Error message if failed
+   */
+  logAgentExecution(
+    runId: string,
+    agentName: string,
+    success: boolean,
+    durationMs: number,
+    errorType?: string,
+    errorMessage?: string
+  ): void {
+    const eventName = success ? "agent_execution_success" : "agent_execution_failure";
+    
+    this.addEvent(runId, eventName, {
+      agentName,
+      success,
+      durationMs,
+      errorType,
+      errorMessage,
+    });
+
+    // Score the execution (1 for success, 0 for failure)
+    this.scoreTrace(
+      runId,
+      `execution_${agentName}`,
+      success ? 1 : 0,
+      errorMessage
+    );
+  }
+
+  /**
+   * Log token usage and cost for a generation
+   * 
+   * @param runId - The run/trace ID
+   * @param agentName - Name of the agent
+   * @param provider - LLM provider
+   * @param model - Model name
+   * @param promptTokens - Number of prompt tokens
+   * @param completionTokens - Number of completion tokens
+   * @param costUsd - Cost in USD
+   */
+  logTokenUsage(
+    runId: string,
+    agentName: string,
+    provider: string,
+    model: string,
+    promptTokens: number,
+    completionTokens: number,
+    costUsd: number
+  ): void {
+    this.addEvent(runId, "token_usage", {
+      agentName,
+      provider,
+      model,
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      costUsd,
+    });
+  }
+
   // ==================== PROMPT MANAGEMENT ====================
 
   /**
