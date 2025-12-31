@@ -24,6 +24,8 @@ import { StateController } from "./controllers/StateController";
 import { TracesController } from "./controllers/TracesController";
 import { ResearchController } from "./controllers/ResearchController";
 import { DynamicModelsController } from "./controllers/DynamicModelsController";
+import { MetricsController } from "./controllers/MetricsController";
+import { FeedbackController } from "./controllers/FeedbackController";
 
 // Import services for state recovery
 import { StorytellerOrchestrator } from "./services/StorytellerOrchestrator";
@@ -36,13 +38,15 @@ const rootDir = __dirname;
   httpPort: process.env.PORT || 3000,
   httpsPort: false,
   mount: {
-    "/api": [
-      ProjectController,
-      GenerationController,
-      MemoryController,
-      ModelsController,
-      HealthController,
-    ],
+        "/api": [
+          ProjectController,
+          GenerationController,
+          MemoryController,
+          ModelsController,
+          HealthController,
+          MetricsController,
+          FeedbackController,
+        ],
                 "/orchestrate": [
                   OrchestrationController,
                   StateController,
