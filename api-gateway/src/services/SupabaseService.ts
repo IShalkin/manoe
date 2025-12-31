@@ -1,5 +1,11 @@
-import { Service } from "@tsed/di";
+import { Service, Inject } from "@tsed/di";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { LangfuseService } from "./LangfuseService";
+import {
+  SupabaseCharacterSchema,
+  SupabaseWorldbuildingSchema,
+  SupabaseDraftSchema,
+} from "../schemas/SupabaseSchemas";
 
 interface Project {
   id: string;
@@ -13,7 +19,7 @@ interface Project {
   updated_at: string;
 }
 
-interface Character {
+export interface Character {
   id: string;
   project_id: string;
   name: string;
@@ -34,7 +40,7 @@ interface Outline {
   created_at: string;
 }
 
-interface Draft {
+export interface Draft {
   id: string;
   project_id: string;
   scene_number: number;
@@ -76,6 +82,9 @@ export interface ResearchHistoryItem {
 @Service()
 export class SupabaseService {
   private client: SupabaseClient | null = null;
+
+  @Inject()
+  private langfuse!: LangfuseService;
 
   constructor() {
     this.connect();
@@ -248,23 +257,104 @@ export class SupabaseService {
     return characters || [];
   }
 
-  async saveCharacter(projectId: string, character: Partial<Character>): Promise<Character> {
+  async saveCharacter(
+    projectId: string,
+    character: Partial<Character>,
+    qdrantId?: string,
+    runId?: string
+  ): Promise<Character> {
     const client = this.getClient();
-    const { data, error } = await client
-      .from("characters")
-      .insert({
-        project_id: projectId,
-        ...character,
-        created_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
+    const { normalizeCharacterForStorage } = await import("../utils/schemaNormalizers");
+    const { camelToSnakeCase } = await import("../utils/stringUtils");
 
-    if (error) {
-      throw new Error(`Failed to save character: ${error.message}`);
+    // Normalize LLM field names to DB field names and stringify objects
+    const normalizedChar = normalizeCharacterForStorage(character as Record<string, unknown>);
+    const snakeCaseChar = camelToSnakeCase(normalizedChar);
+
+    const insertData = {
+      project_id: projectId,
+      ...snakeCaseChar,
+      qdrant_id: qdrantId,
+      created_at: new Date().toISOString(),
+    };
+
+    // Validate data against Zod schema before insert (strips unknown fields)
+    const validationResult = SupabaseCharacterSchema.safeParse(insertData);
+    if (!validationResult.success) {
+      const characterName = (snakeCaseChar as Record<string, unknown>).name as string || character.name || 'Unknown';
+      const errorSummary = validationResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
+      console.error('[SupabaseService] Character validation failed:', errorSummary);
+      
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_character_validation_error', {
+          projectId,
+          characterName,
+          validationErrors: validationResult.error.errors,
+        });
+      }
+      
+      throw new Error(`Character validation failed: ${errorSummary}`);
     }
 
-    return data;
+    // Use validated data (with unknown fields stripped)
+    const validatedData = validationResult.data;
+
+    console.log('[SupabaseService] Attempting to save character:', JSON.stringify(validatedData, null, 2));
+
+    const { data, error, status, statusText } = await client
+      .from("characters")
+      .insert(validatedData)
+      .select();
+
+    console.log('[SupabaseService] Insert response - status:', status, 'statusText:', statusText, 'dataLength:', data?.length, 'error:', JSON.stringify(error));
+
+    // Get character name for logging (from normalized data or original)
+    const characterName = (snakeCaseChar as Record<string, unknown>).name as string || character.name || 'Unknown';
+
+    if (error) {
+      console.error('[SupabaseService] Failed to save character - code:', error.code, 'message:', error.message, 'details:', error.details, 'hint:', error.hint);
+      
+      // Log validation/storage error to Langfuse for observability
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_character_save_error', {
+          projectId,
+          characterName,
+          errorCode: error.code,
+          errorMessage: error.message,
+          errorDetails: error.details,
+          errorHint: error.hint,
+        });
+      }
+      
+      throw new Error(`Failed to save character: ${error.message || error.code || 'Unknown error'}`);
+    }
+
+    if (!data || data.length === 0) {
+      console.error('[SupabaseService] No data returned from insert despite no error');
+      
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_character_save_error', {
+          projectId,
+          characterName,
+          errorMessage: 'No data returned from insert',
+        });
+      }
+      
+      throw new Error('Failed to save character: No data returned');
+    }
+
+    // Log successful save to Langfuse
+    if (runId) {
+      this.langfuse.addEvent(runId, 'supabase_character_saved', {
+        projectId,
+        characterId: data[0].id,
+        characterName: data[0].name,
+        qdrantId: qdrantId || null,
+      });
+    }
+
+    console.log('[SupabaseService] Character saved successfully with qdrant_id:', qdrantId || 'N/A');
+    return data[0];
   }
 
   // ========================================================================
@@ -293,6 +383,87 @@ export class SupabaseService {
 
     return data || [];
   }
+
+  async saveWorldbuilding(
+    projectId: string,
+    elementType: string,
+    element: Record<string, unknown>,
+    qdrantId?: string,
+    runId?: string
+  ): Promise<unknown> {
+    const client = this.getClient();
+    
+    const insertData = {
+      project_id: projectId,
+      element_type: elementType,
+      name: element.name || elementType,
+      description: typeof element.description === 'object' ? JSON.stringify(element.description) : (element.description || ''),
+      attributes: element,
+      qdrant_id: qdrantId,
+      created_at: new Date().toISOString(),
+    };
+
+    // Validate data against Zod schema before insert (strips unknown fields)
+    const validationResult = SupabaseWorldbuildingSchema.safeParse(insertData);
+    if (!validationResult.success) {
+      const errorSummary = validationResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
+      console.error('[SupabaseService] Worldbuilding validation failed:', errorSummary);
+      
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_worldbuilding_validation_error', {
+          projectId,
+          elementType,
+          elementName: insertData.name,
+          validationErrors: validationResult.error.errors,
+        });
+      }
+      
+      throw new Error(`Worldbuilding validation failed: ${errorSummary}`);
+    }
+
+    // Use validated data (with unknown fields stripped)
+    const validatedData = validationResult.data;
+
+    console.log('[SupabaseService] Attempting to save worldbuilding:', elementType);
+
+    const { data, error, status } = await client
+      .from("worldbuilding")
+      .insert(validatedData)
+      .select();
+
+    console.log('[SupabaseService] Worldbuilding insert response - status:', status, 'error:', JSON.stringify(error));
+
+    if (error) {
+      console.error('[SupabaseService] Failed to save worldbuilding (' + elementType + '):', error.message);
+      
+      // Log error to Langfuse for observability
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_worldbuilding_save_error', {
+          projectId,
+          elementType,
+          elementName: insertData.name,
+          errorCode: error.code,
+          errorMessage: error.message,
+        });
+      }
+      
+      throw new Error(`Failed to save worldbuilding: ${error.message || 'Unknown error'}`);
+    }
+
+    // Log successful save to Langfuse
+    if (runId) {
+      this.langfuse.addEvent(runId, 'supabase_worldbuilding_saved', {
+        projectId,
+        elementType,
+        elementName: insertData.name,
+        qdrantId: qdrantId || null,
+      });
+    }
+
+    console.log('[SupabaseService] Worldbuilding saved successfully:', elementType);
+    return data?.[0];
+  }
+
 
   // ========================================================================
   // Outline Operations
@@ -348,20 +519,71 @@ export class SupabaseService {
     return drafts || [];
   }
 
-  async saveDraft(projectId: string, draft: Partial<Draft>): Promise<Draft> {
+  async saveDraft(
+    projectId: string,
+    draft: Partial<Draft>,
+    qdrantId?: string,
+    runId?: string
+  ): Promise<Draft> {
     const client = this.getClient();
+    
+    const insertData = {
+      project_id: projectId,
+      ...draft,
+      qdrant_id: qdrantId,
+      created_at: new Date().toISOString(),
+    };
+
+    // Validate data against Zod schema before insert (strips unknown fields)
+    const validationResult = SupabaseDraftSchema.safeParse(insertData);
+    if (!validationResult.success) {
+      const errorSummary = validationResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
+      console.error('[SupabaseService] Draft validation failed:', errorSummary);
+      
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_draft_validation_error', {
+          projectId,
+          sceneNumber: draft.scene_number,
+          validationErrors: validationResult.error.errors,
+        });
+      }
+      
+      throw new Error(`Draft validation failed: ${errorSummary}`);
+    }
+
+    // Use validated data (with unknown fields stripped)
+    const validatedData = validationResult.data;
+
     const { data, error } = await client
       .from("drafts")
-      .upsert({
-        project_id: projectId,
-        ...draft,
-        created_at: new Date().toISOString(),
-      })
+      .upsert(validatedData)
       .select()
       .single();
 
     if (error) {
+      console.error('[SupabaseService] Failed to save draft:', error.message);
+      
+      // Log error to Langfuse for observability
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_draft_save_error', {
+          projectId,
+          sceneNumber: draft.scene_number,
+          errorCode: error.code,
+          errorMessage: error.message,
+        });
+      }
+      
       throw new Error(`Failed to save draft: ${error.message}`);
+    }
+
+    // Log successful save to Langfuse
+    if (runId) {
+      this.langfuse.addEvent(runId, 'supabase_draft_saved', {
+        projectId,
+        draftId: data.id,
+        sceneNumber: data.scene_number,
+        qdrantId: qdrantId || null,
+      });
     }
 
     return data;
@@ -602,5 +824,35 @@ export class SupabaseService {
     if (error) {
       console.error(`Failed to delete run state snapshot: ${error.message}`);
     }
+  }
+
+  async reindexProject(projectId: string): Promise<{ characters: number; worldbuilding: number; drafts: number; errors: string[] }> {
+    const errors: string[] = [];
+    let characters = 0;
+    let worldbuilding = 0;
+    let drafts = 0;
+
+    try {
+      const charData = await this.getCharacters(projectId);
+      characters = charData.length;
+    } catch (e) {
+      errors.push(`Failed to get characters: ${e}`);
+    }
+
+    try {
+      const wbData = await this.getWorldbuilding(projectId);
+      worldbuilding = wbData.length;
+    } catch (e) {
+      errors.push(`Failed to get worldbuilding: ${e}`);
+    }
+
+    try {
+      const draftData = await this.getDrafts(projectId);
+      drafts = draftData.length;
+    } catch (e) {
+      errors.push(`Failed to get drafts: ${e}`);
+    }
+
+    return { characters, worldbuilding, drafts, errors };
   }
 }
