@@ -39,6 +39,7 @@ import { RedisStreamsService } from "./RedisStreamsService";
 import { QdrantMemoryService } from "./QdrantMemoryService";
 import { LangfuseService, AGENT_PROMPTS, PHASE_PROMPTS } from "./LangfuseService";
 import { SupabaseService, Character, Draft } from "./SupabaseService";
+import { MetricsService } from "./MetricsService";
 import { AgentFactory } from "../agents/AgentFactory";
 import { AgentContext } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
@@ -100,6 +101,9 @@ export class StorytellerOrchestrator {
 
   @Inject()
   private supabase: SupabaseService;
+
+  @Inject()
+  private metricsService: MetricsService;
 
   @Inject()
   private agentFactory: AgentFactory;
@@ -265,11 +269,38 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    const startTime = Date.now();
     $log.info(`[StorytellerOrchestrator] runGenesisPhase: calling agent.execute, runId: ${runId}, phase: ${state.phase}`);
-    const output = await agent.execute(context, options);
-    $log.info(`[StorytellerOrchestrator] runGenesisPhase: agent.execute completed, runId: ${runId}`);
-    state.narrative = output.content as Record<string, unknown>;
-    state.updatedAt = new Date().toISOString();
+    try {
+      const output = await agent.execute(context, options);
+      const durationMs = Date.now() - startTime;
+      $log.info(`[StorytellerOrchestrator] runGenesisPhase: agent.execute completed, runId: ${runId}`);
+      
+      // Record successful agent execution metrics
+      this.metricsService.recordAgentExecution({
+        agentName: AgentType.ARCHITECT,
+        runId,
+        projectId: options.projectId,
+        success: true,
+        durationMs,
+      });
+      
+      state.narrative = output.content as Record<string, unknown>;
+      state.updatedAt = new Date().toISOString();
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      // Record failed agent execution metrics
+      this.metricsService.recordAgentExecution({
+        agentName: AgentType.ARCHITECT,
+        runId,
+        projectId: options.projectId,
+        success: false,
+        durationMs,
+        errorType: error instanceof Error ? error.name : "unknown",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
 
     // CRITICAL: Add seed constraints immediately after Genesis
     // These are immutable and prevent context drift (e.g., Mara Venn → Elena Rodriguez)
@@ -394,11 +425,38 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
+    const startTime = Date.now();
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: calling agent.execute, runId: ${runId}`);
-    const output = await agent.execute(context, options);
-    $log.info(`[StorytellerOrchestrator] runCharactersPhase: agent.execute completed, output.content type: ${typeof output.content}, isArray: ${Array.isArray(output.content)}, runId: ${runId}`);
-    state.characters = output.content as Record<string, unknown>[];
-    state.updatedAt = new Date().toISOString();
+    try {
+      const output = await agent.execute(context, options);
+      const durationMs = Date.now() - startTime;
+      $log.info(`[StorytellerOrchestrator] runCharactersPhase: agent.execute completed, output.content type: ${typeof output.content}, isArray: ${Array.isArray(output.content)}, runId: ${runId}`);
+      
+      // Record successful agent execution metrics
+      this.metricsService.recordAgentExecution({
+        agentName: AgentType.PROFILER,
+        runId,
+        projectId: options.projectId,
+        success: true,
+        durationMs,
+      });
+      
+      state.characters = output.content as Record<string, unknown>[];
+      state.updatedAt = new Date().toISOString();
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      // Record failed agent execution metrics
+      this.metricsService.recordAgentExecution({
+        agentName: AgentType.PROFILER,
+        runId,
+        projectId: options.projectId,
+        success: false,
+        durationMs,
+        errorType: error instanceof Error ? error.name : "unknown",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
 
     // Store characters in Qdrant and Supabase
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: storing ${state.characters?.length || 0} characters, runId: ${runId}`);
@@ -454,9 +512,36 @@ export class StorytellerOrchestrator {
       projectId: options.projectId,
     };
 
-    const output = await agent.execute(context, options);
-    state.worldbuilding = output.content as Record<string, unknown>;
-    state.updatedAt = new Date().toISOString();
+    const startTime = Date.now();
+    try {
+      const output = await agent.execute(context, options);
+      const durationMs = Date.now() - startTime;
+      
+      // Record successful agent execution metrics
+      this.metricsService.recordAgentExecution({
+        agentName: AgentType.WORLDBUILDER,
+        runId,
+        projectId: options.projectId,
+        success: true,
+        durationMs,
+      });
+      
+      state.worldbuilding = output.content as Record<string, unknown>;
+      state.updatedAt = new Date().toISOString();
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      // Record failed agent execution metrics
+      this.metricsService.recordAgentExecution({
+        agentName: AgentType.WORLDBUILDER,
+        runId,
+        projectId: options.projectId,
+        success: false,
+        durationMs,
+        errorType: error instanceof Error ? error.name : "unknown",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
 
     // Store worldbuilding elements in Qdrant and Supabase
     const worldData = state.worldbuilding as Record<string, unknown>;
