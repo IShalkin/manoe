@@ -9,12 +9,13 @@
  * - Multiple embedding provider support (OpenAI, Gemini, local)
  */
 
-import { Service } from "@tsed/di";
+import { Service, Inject } from "@tsed/di";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { v4 as uuidv4 } from "uuid";
 import { stringifyForPrompt } from "../utils/schemaNormalizers";
+import { MetricsService } from "./MetricsService";
 
 /**
  * Embedding provider types
@@ -84,6 +85,9 @@ export class QdrantMemoryService {
   private embeddingProvider: EmbeddingProvider = EmbeddingProvider.LOCAL;
   private embeddingDimension: number = 384;
   private embeddingModel: string = "all-MiniLM-L6-v2";
+
+  @Inject()
+  private metricsService!: MetricsService;
 
   // Collection names
   private readonly COLLECTION_CHARACTERS = "manoe_characters";
@@ -237,6 +241,7 @@ export class QdrantMemoryService {
   ): Promise<string> {
     if (!this.client) throw new Error("Qdrant client not connected");
 
+    const startTime = Date.now();
     const characterName = String(character.name ?? "Unknown");
     const characterText = this.characterToText(character);
     const embedding = await this.generateEmbedding(characterText);
@@ -249,17 +254,35 @@ export class QdrantMemoryService {
       createdAt: new Date().toISOString(),
     };
 
-    await this.client.upsert(this.COLLECTION_CHARACTERS, {
-      points: [
-        {
-          id: pointId,
-          vector: embedding,
-          payload: payload as Record<string, unknown>,
-        },
-      ],
-    });
+    try {
+      await this.client.upsert(this.COLLECTION_CHARACTERS, {
+        points: [
+          {
+            id: pointId,
+            vector: embedding,
+            payload: payload as Record<string, unknown>,
+          },
+        ],
+      });
 
-    return pointId;
+      this.metricsService.recordQdrantOperation({
+        operation: "upsert",
+        collection: this.COLLECTION_CHARACTERS,
+        durationMs: Date.now() - startTime,
+        success: true,
+        resultCount: 1,
+      });
+
+      return pointId;
+    } catch (error) {
+      this.metricsService.recordQdrantOperation({
+        operation: "upsert",
+        collection: this.COLLECTION_CHARACTERS,
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
+      throw error;
+    }
   }
 
   /**
@@ -272,21 +295,40 @@ export class QdrantMemoryService {
   ): Promise<SearchResult<CharacterPayload>[]> {
     if (!this.client) return [];
 
+    const startTime = Date.now();
     const queryEmbedding = await this.generateEmbedding(query);
 
-    const results = await this.client.search(this.COLLECTION_CHARACTERS, {
-      vector: queryEmbedding,
-      limit,
-      filter: {
-        must: [{ key: "projectId", match: { value: projectId } }],
-      },
-    });
+    try {
+      const results = await this.client.search(this.COLLECTION_CHARACTERS, {
+        vector: queryEmbedding,
+        limit,
+        filter: {
+          must: [{ key: "projectId", match: { value: projectId } }],
+        },
+      });
 
-    return results.map((result) => ({
-      id: String(result.id),
-      score: result.score,
-      payload: result.payload as CharacterPayload,
-    }));
+      this.metricsService.recordQdrantOperation({
+        operation: "search",
+        collection: this.COLLECTION_CHARACTERS,
+        durationMs: Date.now() - startTime,
+        success: true,
+        resultCount: results.length,
+      });
+
+      return results.map((result) => ({
+        id: String(result.id),
+        score: result.score,
+        payload: result.payload as CharacterPayload,
+      }));
+    } catch (error) {
+      this.metricsService.recordQdrantOperation({
+        operation: "search",
+        collection: this.COLLECTION_CHARACTERS,
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
+      throw error;
+    }
   }
 
   /**
@@ -315,6 +357,7 @@ export class QdrantMemoryService {
   ): Promise<string> {
     if (!this.client) throw new Error("Qdrant client not connected");
 
+    const startTime = Date.now();
     const elementText = this.worldbuildingToText(elementType, element);
     const embedding = await this.generateEmbedding(elementText);
 
@@ -326,17 +369,35 @@ export class QdrantMemoryService {
       createdAt: new Date().toISOString(),
     };
 
-    await this.client.upsert(this.COLLECTION_WORLDBUILDING, {
-      points: [
-        {
-          id: pointId,
-          vector: embedding,
-          payload: payload as Record<string, unknown>,
-        },
-      ],
-    });
+    try {
+      await this.client.upsert(this.COLLECTION_WORLDBUILDING, {
+        points: [
+          {
+            id: pointId,
+            vector: embedding,
+            payload: payload as Record<string, unknown>,
+          },
+        ],
+      });
 
-    return pointId;
+      this.metricsService.recordQdrantOperation({
+        operation: "upsert",
+        collection: this.COLLECTION_WORLDBUILDING,
+        durationMs: Date.now() - startTime,
+        success: true,
+        resultCount: 1,
+      });
+
+      return pointId;
+    } catch (error) {
+      this.metricsService.recordQdrantOperation({
+        operation: "upsert",
+        collection: this.COLLECTION_WORLDBUILDING,
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
+      throw error;
+    }
   }
 
   /**
@@ -349,21 +410,40 @@ export class QdrantMemoryService {
   ): Promise<SearchResult<WorldbuildingPayload>[]> {
     if (!this.client) return [];
 
+    const startTime = Date.now();
     const queryEmbedding = await this.generateEmbedding(query);
 
-    const results = await this.client.search(this.COLLECTION_WORLDBUILDING, {
-      vector: queryEmbedding,
-      limit,
-      filter: {
-        must: [{ key: "projectId", match: { value: projectId } }],
-      },
-    });
+    try {
+      const results = await this.client.search(this.COLLECTION_WORLDBUILDING, {
+        vector: queryEmbedding,
+        limit,
+        filter: {
+          must: [{ key: "projectId", match: { value: projectId } }],
+        },
+      });
 
-    return results.map((result) => ({
-      id: String(result.id),
-      score: result.score,
-      payload: result.payload as WorldbuildingPayload,
-    }));
+      this.metricsService.recordQdrantOperation({
+        operation: "search",
+        collection: this.COLLECTION_WORLDBUILDING,
+        durationMs: Date.now() - startTime,
+        success: true,
+        resultCount: results.length,
+      });
+
+      return results.map((result) => ({
+        id: String(result.id),
+        score: result.score,
+        payload: result.payload as WorldbuildingPayload,
+      }));
+    } catch (error) {
+      this.metricsService.recordQdrantOperation({
+        operation: "search",
+        collection: this.COLLECTION_WORLDBUILDING,
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
+      throw error;
+    }
   }
 
   /**
@@ -376,6 +456,7 @@ export class QdrantMemoryService {
   ): Promise<string> {
     if (!this.client) throw new Error("Qdrant client not connected");
 
+    const startTime = Date.now();
     const sceneText = this.sceneToText(scene);
     const embedding = await this.generateEmbedding(sceneText);
 
@@ -387,17 +468,35 @@ export class QdrantMemoryService {
       createdAt: new Date().toISOString(),
     };
 
-    await this.client.upsert(this.COLLECTION_SCENES, {
-      points: [
-        {
-          id: pointId,
-          vector: embedding,
-          payload: payload as Record<string, unknown>,
-        },
-      ],
-    });
+    try {
+      await this.client.upsert(this.COLLECTION_SCENES, {
+        points: [
+          {
+            id: pointId,
+            vector: embedding,
+            payload: payload as Record<string, unknown>,
+          },
+        ],
+      });
 
-    return pointId;
+      this.metricsService.recordQdrantOperation({
+        operation: "upsert",
+        collection: this.COLLECTION_SCENES,
+        durationMs: Date.now() - startTime,
+        success: true,
+        resultCount: 1,
+      });
+
+      return pointId;
+    } catch (error) {
+      this.metricsService.recordQdrantOperation({
+        operation: "upsert",
+        collection: this.COLLECTION_SCENES,
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
+      throw error;
+    }
   }
 
   /**
@@ -410,21 +509,40 @@ export class QdrantMemoryService {
   ): Promise<SearchResult<ScenePayload>[]> {
     if (!this.client) return [];
 
+    const startTime = Date.now();
     const queryEmbedding = await this.generateEmbedding(query);
 
-    const results = await this.client.search(this.COLLECTION_SCENES, {
-      vector: queryEmbedding,
-      limit,
-      filter: {
-        must: [{ key: "projectId", match: { value: projectId } }],
-      },
-    });
+    try {
+      const results = await this.client.search(this.COLLECTION_SCENES, {
+        vector: queryEmbedding,
+        limit,
+        filter: {
+          must: [{ key: "projectId", match: { value: projectId } }],
+        },
+      });
 
-    return results.map((result) => ({
-      id: String(result.id),
-      score: result.score,
-      payload: result.payload as ScenePayload,
-    }));
+      this.metricsService.recordQdrantOperation({
+        operation: "search",
+        collection: this.COLLECTION_SCENES,
+        durationMs: Date.now() - startTime,
+        success: true,
+        resultCount: results.length,
+      });
+
+      return results.map((result) => ({
+        id: String(result.id),
+        score: result.score,
+        payload: result.payload as ScenePayload,
+      }));
+    } catch (error) {
+      this.metricsService.recordQdrantOperation({
+        operation: "search",
+        collection: this.COLLECTION_SCENES,
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
+      throw error;
+    }
   }
 
   /**

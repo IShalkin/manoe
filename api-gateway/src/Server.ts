@@ -24,9 +24,12 @@ import { StateController } from "./controllers/StateController";
 import { TracesController } from "./controllers/TracesController";
 import { ResearchController } from "./controllers/ResearchController";
 import { DynamicModelsController } from "./controllers/DynamicModelsController";
+import { MetricsController } from "./controllers/MetricsController";
+import { FeedbackController } from "./controllers/FeedbackController";
 
 // Import services for state recovery
 import { StorytellerOrchestrator } from "./services/StorytellerOrchestrator";
+import { RedisStreamsService } from "./services/RedisStreamsService";
 
 const rootDir = __dirname;
 
@@ -36,13 +39,15 @@ const rootDir = __dirname;
   httpPort: process.env.PORT || 3000,
   httpsPort: false,
   mount: {
-    "/api": [
-      ProjectController,
-      GenerationController,
-      MemoryController,
-      ModelsController,
-      HealthController,
-    ],
+        "/api": [
+          ProjectController,
+          GenerationController,
+          MemoryController,
+          ModelsController,
+          HealthController,
+          MetricsController,
+          FeedbackController,
+        ],
                 "/orchestrate": [
                   OrchestrationController,
                   StateController,
@@ -150,6 +155,9 @@ export class Server {
   @Inject()
   protected orchestrator: StorytellerOrchestrator;
 
+  @Inject()
+  protected redisStreams: RedisStreamsService;
+
   @Configuration()
   protected settings: Configuration;
 
@@ -174,6 +182,10 @@ export class Server {
       console.error("Server: Failed to restore interrupted runs:", error);
       // Don't fail startup if recovery fails - just log the error
     }
+
+    // Start periodic Redis lag metrics collection (every 30 seconds)
+    console.log("Server: Starting Redis lag metrics collection...");
+    this.redisStreams.startLagMetricsCollection(30000);
 
     // Register graceful shutdown handler
     this.registerShutdownHandler();
