@@ -409,9 +409,9 @@ export class StorytellerOrchestrator {
           $log.info(`[StorytellerOrchestrator] runCharactersPhase: storing character in Qdrant, runId: ${runId}`);
           const qdrantId = await this.qdrantMemory.storeCharacter(options.projectId, character);
 
-          // Store in Supabase with qdrant_id reference
+          // Store in Supabase with qdrant_id reference and runId for Langfuse tracing
           try {
-            await this.supabase.saveCharacter(options.projectId, character as Partial<Character>, qdrantId);
+            await this.supabase.saveCharacter(options.projectId, character as Partial<Character>, qdrantId, runId);
           } catch (supabaseError) {
             $log.error(
               `[StorytellerOrchestrator] runCharactersPhase: Supabase storage failed (continuing anyway), runId: ${runId}`,
@@ -470,13 +470,14 @@ export class StorytellerOrchestrator {
             element as Record<string, unknown>
           );
 
-          // Store in Supabase with qdrant_id reference
+          // Store in Supabase with qdrant_id reference and runId for Langfuse tracing
           try {
             await this.supabase.saveWorldbuilding(
               options.projectId,
               elementType,
               element as Record<string, unknown>,
-              qdrantId
+              qdrantId,
+              runId
             );
           } catch (supabaseError) {
             $log.error(
@@ -732,8 +733,9 @@ export class StorytellerOrchestrator {
     try {
       const qdrantId = await this.qdrantMemory.storeScene(options.projectId, sceneNum, draft);
 
+      // Store in Supabase with qdrant_id reference and runId for Langfuse tracing
       try {
-        await this.supabase.saveDraft(options.projectId, draft as Partial<Draft>, qdrantId);
+        await this.supabase.saveDraft(options.projectId, draft as Partial<Draft>, qdrantId, runId);
       } catch (supabaseError) {
         $log.error(
           `[StorytellerOrchestrator] draftScene: Supabase storage failed for scene ${sceneNum} (continuing anyway), runId: ${runId}`,
