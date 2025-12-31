@@ -38,7 +38,7 @@ import { LLMProviderService } from "./LLMProviderService";
 import { RedisStreamsService } from "./RedisStreamsService";
 import { QdrantMemoryService } from "./QdrantMemoryService";
 import { LangfuseService, AGENT_PROMPTS, PHASE_PROMPTS } from "./LangfuseService";
-import { SupabaseService } from "./SupabaseService";
+import { SupabaseService, Character, Draft } from "./SupabaseService";
 import { AgentFactory } from "../agents/AgentFactory";
 import { AgentContext } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
@@ -400,19 +400,30 @@ export class StorytellerOrchestrator {
     state.characters = output.content as Record<string, unknown>[];
     state.updatedAt = new Date().toISOString();
 
-    // Store characters in Qdrant for semantic search
-    $log.info(`[StorytellerOrchestrator] runCharactersPhase: storing ${state.characters?.length || 0} characters in Qdrant, runId: ${runId}`);
+    // Store characters in Qdrant and Supabase
+    $log.info(`[StorytellerOrchestrator] runCharactersPhase: storing ${state.characters?.length || 0} characters, runId: ${runId}`);
     try {
       if (Array.isArray(state.characters)) {
         for (const character of state.characters) {
+          // Store in Qdrant first (returns pointId)
           $log.info(`[StorytellerOrchestrator] runCharactersPhase: storing character in Qdrant, runId: ${runId}`);
-          await this.qdrantMemory.storeCharacter(options.projectId, character);
+          const qdrantId = await this.qdrantMemory.storeCharacter(options.projectId, character);
+
+          // Store in Supabase with qdrant_id reference and runId for Langfuse tracing
+          try {
+            await this.supabase.saveCharacter(options.projectId, character as Partial<Character>, qdrantId, runId);
+          } catch (supabaseError) {
+            $log.error(
+              `[StorytellerOrchestrator] runCharactersPhase: Supabase storage failed (continuing anyway), runId: ${runId}`,
+              supabaseError
+            );
+          }
         }
       } else {
-        $log.warn(`[StorytellerOrchestrator] runCharactersPhase: state.characters is not an array, skipping Qdrant storage, runId: ${runId}`);
+        $log.warn(`[StorytellerOrchestrator] runCharactersPhase: state.characters is not an array, skipping storage, runId: ${runId}`);
       }
     } catch (qdrantError) {
-      $log.error(`[StorytellerOrchestrator] runCharactersPhase: Qdrant storage failed, continuing anyway, runId: ${runId}`, qdrantError);
+      $log.error(`[StorytellerOrchestrator] runCharactersPhase: Storage failed, continuing anyway, runId: ${runId}`, qdrantError);
     }
 
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: saving artifact, runId: ${runId}`);
@@ -447,15 +458,39 @@ export class StorytellerOrchestrator {
     state.worldbuilding = output.content as Record<string, unknown>;
     state.updatedAt = new Date().toISOString();
 
-    // Store worldbuilding elements in Qdrant
+    // Store worldbuilding elements in Qdrant and Supabase
     const worldData = state.worldbuilding as Record<string, unknown>;
     for (const [elementType, element] of Object.entries(worldData)) {
       if (typeof element === "object" && element !== null) {
-        await this.qdrantMemory.storeWorldbuilding(
-          options.projectId,
-          elementType,
-          element as Record<string, unknown>
-        );
+        try {
+          // Store in Qdrant first (returns pointId)
+          const qdrantId = await this.qdrantMemory.storeWorldbuilding(
+            options.projectId,
+            elementType,
+            element as Record<string, unknown>
+          );
+
+          // Store in Supabase with qdrant_id reference and runId for Langfuse tracing
+          try {
+            await this.supabase.saveWorldbuilding(
+              options.projectId,
+              elementType,
+              element as Record<string, unknown>,
+              qdrantId,
+              runId
+            );
+          } catch (supabaseError) {
+            $log.error(
+              `[StorytellerOrchestrator] runWorldbuildingPhase: Supabase storage failed for ${elementType} (continuing anyway), runId: ${runId}`,
+              supabaseError
+            );
+          }
+        } catch (qdrantError) {
+          $log.error(
+            `[StorytellerOrchestrator] runWorldbuildingPhase: Qdrant storage failed for ${elementType} (continuing anyway), runId: ${runId}`,
+            qdrantError
+          );
+        }
       }
     }
 
@@ -694,8 +729,25 @@ export class StorytellerOrchestrator {
     // Extract and log raw facts
     await this.extractRawFacts(runId, sceneNum, response, AgentType.WRITER);
 
-    // Store scene in Qdrant
-    await this.qdrantMemory.storeScene(options.projectId, sceneNum, draft);
+    // Store scene in Qdrant and Supabase
+    try {
+      const qdrantId = await this.qdrantMemory.storeScene(options.projectId, sceneNum, draft);
+
+      // Store in Supabase with qdrant_id reference and runId for Langfuse tracing
+      try {
+        await this.supabase.saveDraft(options.projectId, draft as Partial<Draft>, qdrantId, runId);
+      } catch (supabaseError) {
+        $log.error(
+          `[StorytellerOrchestrator] draftScene: Supabase storage failed for scene ${sceneNum} (continuing anyway), runId: ${runId}`,
+          supabaseError
+        );
+      }
+    } catch (qdrantError) {
+      $log.error(
+        `[StorytellerOrchestrator] draftScene: Qdrant storage failed for scene ${sceneNum} (continuing anyway), runId: ${runId}`,
+        qdrantError
+      );
+    }
 
     await this.saveArtifact(runId, options.projectId, `draft_scene_${sceneNum}`, draft);
     await this.publishEvent(runId, "scene_draft_complete", { sceneNum, wordCount: draft.wordCount });

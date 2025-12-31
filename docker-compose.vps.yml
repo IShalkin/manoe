@@ -62,6 +62,38 @@ services:
       start_period: 40s
 
   # ==========================================================================
+  # Qdrant - Vector Database for Semantic Memory
+  # IMPORTANT: ulimits prevent "Too many open files" errors under load
+  # ==========================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: qdrant
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      # SECURITY: Always set API key in production
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
+      # nginx-proxy configuration (optional - remove if not exposing publicly)
+      - VIRTUAL_HOST=${QDRANT_DOMAIN:-qdrant.example.com}
+      - VIRTUAL_PORT=6333
+      - LETSENCRYPT_HOST=${QDRANT_DOMAIN:-qdrant.example.com}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-admin@example.com}
+    networks:
+      - complete-deploy_proxy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
   # Redis - Message Broker & Job Queue (MANOE-specific)
   # ==========================================================================
   manoe-redis:
@@ -283,6 +315,9 @@ networks:
 # Volumes
 # ==========================================================================
 volumes:
+  # Qdrant vector database storage
+  qdrant-data:
+    driver: local
   manoe-redis-data:
     driver: local
   # Langfuse volumes
