@@ -114,23 +114,8 @@ setInterval(() => {
 1. **Deploy Latest Code to VPS**
    - The Greptile fixes and README updates are merged but not deployed
    - Need to rebuild api-gateway on VPS with latest code
-   ```bash
-   ssh root@207.180.224.91
-   cd /opt/manoe && git pull origin main
-   cd api-gateway && docker build -t manoe-api-gateway .
-   docker stop manoe-api-gateway && docker rm manoe-api-gateway
-   docker run -d --name manoe-api-gateway --network complete-deploy_proxy \
-     -e VIRTUAL_HOST=manoe-gateway.iliashalkin.com \
-     -e LETSENCRYPT_HOST=manoe-gateway.iliashalkin.com \
-     -e CORS_ORIGIN='https://manoe.iliashalkin.com,https://manoe-orchestrator.iliashalkin.com' \
-     -e SUPABASE_URL=http://supabase-kong:8000 \
-     -e SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTY0MTc2OTIwMCwiZXhwIjoxNzk5NTM1NjAwfQ.YzwmTNYsrZTXR0wYpwXIAJTtMP_k5maWlobeR9UxsNo' \
-     -e QDRANT_URL=http://qdrant:6333 \
-     -e QDRANT_API_KEY='15e4ce20d99081cf1b3d4fda7b09cbe0750e8d87e77f8d2d0bc84d2973b438a0' \
-     -e LANGFUSE_HOST=http://langfuse-web:3000 \
-     -e REDIS_URL=redis://manoe-redis:6379 \
-     manoe-api-gateway
-   ```
+   - See `api-gateway/docker-compose.vps.yml` for deployment configuration
+   - Environment variables should be set via `.env` file on VPS (not hardcoded in docs)
 
 2. **Clean Up Redis Consumer Lag**
    - Either remove the metric/alerts or document why it's empty
@@ -206,7 +191,7 @@ setInterval(() => {
 
 ### Grafana Access
 - URL: https://grafana.iliashalkin.com
-- Admin: admin / C5s0XQoyCTdvkRSCk4neUA==
+- Admin credentials: Set via environment variables on VPS
 - Dashboard: /d/manoe-agents/manoe-agent-metrics
 
 ### Alert Rules Location
@@ -215,9 +200,9 @@ setInterval(() => {
 ### API Gateway Environment Variables (Critical)
 ```
 QDRANT_URL=http://qdrant:6333
-QDRANT_API_KEY=15e4ce20d99081cf1b3d4fda7b09cbe0750e8d87e77f8d2d0bc84d2973b438a0
+QDRANT_API_KEY=<set via .env on VPS>
 SUPABASE_URL=http://supabase-kong:8000
-SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTY0MTc2OTIwMCwiZXhwIjoxNzk5NTM1NjAwfQ.YzwmTNYsrZTXR0wYpwXIAJTtMP_k5maWlobeR9UxsNo
+SUPABASE_KEY=<set via .env on VPS>
 LANGFUSE_HOST=http://langfuse-web:3000
 REDIS_URL=redis://manoe-redis:6379
 ```
