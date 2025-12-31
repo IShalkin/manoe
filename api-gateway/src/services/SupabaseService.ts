@@ -282,6 +282,9 @@ export class SupabaseService {
 
     console.log('[SupabaseService] Insert response - status:', status, 'statusText:', statusText, 'dataLength:', data?.length, 'error:', JSON.stringify(error));
 
+    // Get character name for logging (from normalized data or original)
+    const characterName = (snakeCaseChar as Record<string, unknown>).name as string || character.name || 'Unknown';
+
     if (error) {
       console.error('[SupabaseService] Failed to save character - code:', error.code, 'message:', error.message, 'details:', error.details, 'hint:', error.hint);
       
@@ -289,7 +292,7 @@ export class SupabaseService {
       if (runId) {
         this.langfuse.addEvent(runId, 'supabase_character_save_error', {
           projectId,
-          characterName: insertData.name,
+          characterName,
           errorCode: error.code,
           errorMessage: error.message,
           errorDetails: error.details,
@@ -306,7 +309,7 @@ export class SupabaseService {
       if (runId) {
         this.langfuse.addEvent(runId, 'supabase_character_save_error', {
           projectId,
-          characterName: insertData.name,
+          characterName,
           errorMessage: 'No data returned from insert',
         });
       }
