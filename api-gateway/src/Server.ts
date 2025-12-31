@@ -29,6 +29,7 @@ import { FeedbackController } from "./controllers/FeedbackController";
 
 // Import services for state recovery
 import { StorytellerOrchestrator } from "./services/StorytellerOrchestrator";
+import { RedisStreamsService } from "./services/RedisStreamsService";
 
 const rootDir = __dirname;
 
@@ -154,6 +155,9 @@ export class Server {
   @Inject()
   protected orchestrator: StorytellerOrchestrator;
 
+  @Inject()
+  protected redisStreams: RedisStreamsService;
+
   @Configuration()
   protected settings: Configuration;
 
@@ -178,6 +182,10 @@ export class Server {
       console.error("Server: Failed to restore interrupted runs:", error);
       // Don't fail startup if recovery fails - just log the error
     }
+
+    // Start periodic Redis lag metrics collection (every 30 seconds)
+    console.log("Server: Starting Redis lag metrics collection...");
+    this.redisStreams.startLagMetricsCollection(30000);
 
     // Register graceful shutdown handler
     this.registerShutdownHandler();

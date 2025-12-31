@@ -645,6 +645,61 @@ export class RedisStreamsService {
   }
 
   /**
+   * Collect and record consumer lag metrics for all active streams
+   * This method should be called periodically (e.g., every 30 seconds) to update Prometheus metrics
+   * 
+   * @returns Number of streams processed
+   */
+  async collectAndRecordLagMetrics(): Promise<number> {
+    try {
+      const allMetrics = await this.getAllStreamLagMetrics();
+      let processed = 0;
+
+      for (const [streamKey, metrics] of allMetrics) {
+        // Record stream length
+        this.metricsService.recordRedisStreamMetrics({
+          streamKey,
+          length: metrics.length,
+        });
+
+        // Record consumer lag for each consumer group
+        for (const group of metrics.groups) {
+          const lag = group.lag ?? group.pending;
+          this.metricsService.recordRedisStreamMetrics({
+            streamKey,
+            length: metrics.length,
+            consumerLag: lag,
+          });
+        }
+
+        processed++;
+      }
+
+      return processed;
+    } catch (error) {
+      console.error("[RedisStreamsService] Failed to collect lag metrics:", error);
+      return 0;
+    }
+  }
+
+  /**
+   * Start periodic lag metrics collection
+   * Collects and records lag metrics every intervalMs milliseconds
+   * 
+   * @param intervalMs - Collection interval in milliseconds (default: 30000 = 30 seconds)
+   * @returns Interval ID for stopping the collection
+   */
+  startLagMetricsCollection(intervalMs: number = 30000): NodeJS.Timeout {
+    // Collect immediately on start
+    this.collectAndRecordLagMetrics().catch(console.error);
+
+    // Then collect periodically
+    return setInterval(() => {
+      this.collectAndRecordLagMetrics().catch(console.error);
+    }, intervalMs);
+  }
+
+  /**
    * Disconnect from Redis (writer client)
    * Note: Reader connections are cleaned up automatically when their generators end
    */

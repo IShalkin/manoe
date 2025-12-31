@@ -247,6 +247,7 @@ export class SupabaseService {
   // ========================================================================
 
   async getCharacters(projectId: string): Promise<Character[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data: characters, error } = await client
       .from("characters")
@@ -255,8 +256,21 @@ export class SupabaseService {
       .order("created_at", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "characters",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get characters: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "characters",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return characters || [];
   }
@@ -386,6 +400,7 @@ export class SupabaseService {
     projectId: string,
     elementType?: string
   ): Promise<unknown[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     let query = client
       .from("worldbuilding")
@@ -399,8 +414,21 @@ export class SupabaseService {
     const { data, error } = await query.order("created_at", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "worldbuilding",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get worldbuilding: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "worldbuilding",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return data || [];
   }
@@ -526,6 +554,7 @@ export class SupabaseService {
   // ========================================================================
 
   async getDrafts(projectId: string): Promise<Draft[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data: drafts, error } = await client
       .from("drafts")
@@ -534,8 +563,21 @@ export class SupabaseService {
       .order("scene_number", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "drafts",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get drafts: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "drafts",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return drafts || [];
   }
