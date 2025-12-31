@@ -281,7 +281,7 @@ erDiagram
         uuid project_id FK
         string name
         string archetype
-        string qdrant_point_id
+        uuid qdrant_id FK
     }
     
     DRAFTS {
@@ -304,8 +304,8 @@ erDiagram
 **Key Tables:**
 - `projects` - User projects with seed idea and generation settings
 - `run_artifacts` - All phase outputs (JSONB content for flexibility)
-- `characters` / `worldbuilding` - Linked to Qdrant via `qdrant_point_id`
-- `drafts` / `critiques` - Scene content with revision tracking
+- `characters` / `worldbuilding` / `drafts` - Linked to Qdrant via `qdrant_id` for vector memory sync
+- `critiques` - Quality scores and revision feedback
 - `research_results` - "Eternal Memory" for cross-project reuse
 
 ### Qdrant Vector Collections
@@ -811,6 +811,8 @@ docker compose -f docker-compose.vps.yml up -d
 ```
 
 The VPS configuration includes nginx-proxy integration for automatic SSL certificates via Let's Encrypt.
+
+**For detailed deployment instructions**, including Qdrant ulimits configuration, Langfuse internal networking, Supabase RLS setup, and troubleshooting common issues, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Success Metrics
 
