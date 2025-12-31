@@ -1,6 +1,7 @@
 import { Service, Inject } from "@tsed/di";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { LangfuseService } from "./LangfuseService";
+import { MetricsService } from "./MetricsService";
 import {
   SupabaseCharacterSchema,
   SupabaseWorldbuildingSchema,
@@ -85,6 +86,9 @@ export class SupabaseService {
 
   @Inject()
   private langfuse!: LangfuseService;
+
+  @Inject()
+  private metricsService!: MetricsService;
 
   constructor() {
     this.connect();
@@ -243,6 +247,7 @@ export class SupabaseService {
   // ========================================================================
 
   async getCharacters(projectId: string): Promise<Character[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data: characters, error } = await client
       .from("characters")
@@ -251,8 +256,21 @@ export class SupabaseService {
       .order("created_at", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "characters",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get characters: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "characters",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return characters || [];
   }
@@ -263,6 +281,7 @@ export class SupabaseService {
     qdrantId?: string,
     runId?: string
   ): Promise<Character> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { normalizeCharacterForStorage } = await import("../utils/schemaNormalizers");
     const { camelToSnakeCase } = await import("../utils/stringUtils");
@@ -314,6 +333,14 @@ export class SupabaseService {
     if (error) {
       console.error('[SupabaseService] Failed to save character - code:', error.code, 'message:', error.message, 'details:', error.details, 'hint:', error.hint);
       
+      // Record failed database query metrics
+      this.metricsService.recordDatabaseQuery({
+        operation: "insert",
+        table: "characters",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
+      
       // Log validation/storage error to Langfuse for observability
       if (runId) {
         this.langfuse.addEvent(runId, 'supabase_character_save_error', {
@@ -343,6 +370,14 @@ export class SupabaseService {
       throw new Error('Failed to save character: No data returned');
     }
 
+    // Record successful database query metrics
+    this.metricsService.recordDatabaseQuery({
+      operation: "insert",
+      table: "characters",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
+
     // Log successful save to Langfuse
     if (runId) {
       this.langfuse.addEvent(runId, 'supabase_character_saved', {
@@ -365,6 +400,7 @@ export class SupabaseService {
     projectId: string,
     elementType?: string
   ): Promise<unknown[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     let query = client
       .from("worldbuilding")
@@ -378,8 +414,21 @@ export class SupabaseService {
     const { data, error } = await query.order("created_at", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "worldbuilding",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get worldbuilding: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "worldbuilding",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return data || [];
   }
@@ -505,6 +554,7 @@ export class SupabaseService {
   // ========================================================================
 
   async getDrafts(projectId: string): Promise<Draft[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data: drafts, error } = await client
       .from("drafts")
@@ -513,8 +563,21 @@ export class SupabaseService {
       .order("scene_number", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "drafts",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get drafts: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "drafts",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return drafts || [];
   }

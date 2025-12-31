@@ -11,7 +11,7 @@
  * - Venice AI (Dolphin Mistral, Llama 4 Maverick)
  */
 
-import { Service } from "@tsed/di";
+import { Service, Inject, Opts, OnInit } from "@tsed/di";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -23,6 +23,7 @@ import {
   MessageRole,
   TokenUsage,
 } from "../models/LLMModels";
+import { MetricsService } from "./MetricsService";
 
 /**
  * Provider base URLs
@@ -438,6 +439,9 @@ export class TokenLimitCache {
 
 @Service()
 export class LLMProviderService {
+  @Inject()
+  private metricsService: MetricsService;
+
   /**
    * Create a chat completion using the specified provider
    * 
@@ -476,10 +480,37 @@ export class LLMProviderService {
 
       response.latencyMs = Date.now() - startTime;
       console.log(`[LLMProviderService] ${options.provider} completion finished in ${response.latencyMs}ms, tokens: ${response.usage?.totalTokens ?? 0}`);
+      
+      // Record successful LLM call metrics
+      this.metricsService.recordLLMCall({
+        provider: options.provider,
+        model: options.model,
+        runId: options.runId || "unknown",
+        agentName: options.agentName || "unknown",
+        promptTokens: response.usage?.promptTokens ?? 0,
+        completionTokens: response.usage?.completionTokens ?? 0,
+        durationMs: response.latencyMs,
+        success: true,
+      });
+      
       return response;
     } catch (error) {
       const elapsed = Date.now() - startTime;
       console.error(`[LLMProviderService] ${options.provider} completion failed after ${elapsed}ms:`, error instanceof Error ? error.message : error);
+      
+      // Record failed LLM call metrics
+      this.metricsService.recordLLMCall({
+        provider: options.provider,
+        model: options.model,
+        runId: options.runId || "unknown",
+        agentName: options.agentName || "unknown",
+        promptTokens: 0,
+        completionTokens: 0,
+        durationMs: elapsed,
+        success: false,
+        errorType: error instanceof Error ? error.name : "unknown",
+      });
+      
       throw error;
     }
   }

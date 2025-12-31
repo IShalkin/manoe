@@ -483,6 +483,7 @@ export function GenerationPage() {
                 <AgentChat
                   runId={runId}
                   orchestratorUrl={ORCHESTRATOR_URL}
+                  projectId={project?.id}
                   projectResult={project?.result}
                   onUpdateResult={handleUpdateResult}
                   onRegenerate={handleRegenerate}
@@ -520,6 +521,7 @@ export function GenerationPage() {
             <AgentChat
               runId={runId}
               orchestratorUrl={ORCHESTRATOR_URL}
+              projectId={project?.id}
               projectResult={project?.result}
               onUpdateResult={handleUpdateResult}
               onRegenerate={handleRegenerate}

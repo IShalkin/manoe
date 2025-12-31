@@ -66,6 +66,8 @@ export abstract class BaseAgent {
         temperature: llmConfig.temperature ?? 0.7,
         maxTokens: getMaxTokensForPhase(phase),
         responseFormat: expectsObject ? { type: "json_object" } : undefined,
+        runId,
+        agentName: this.agentType,
       });
 
       // Track in Langfuse

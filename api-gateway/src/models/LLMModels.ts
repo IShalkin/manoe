@@ -112,6 +112,14 @@ export class CompletionOptions {
   @Optional()
   @Property()
   responseFormat?: { type: "json_object" | "text" };
+
+  @Optional()
+  @Property()
+  runId?: string;
+
+  @Optional()
+  @Property()
+  agentName?: string;
 }
 
 /**
