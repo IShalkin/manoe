@@ -53,6 +53,12 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   // DeepSeek models
   "deepseek-v3": { input: 0.00014, output: 0.00028 },
   "deepseek-r1": { input: 0.00055, output: 0.00219 },
+  // Moonshot/Kimi models (OpenRouter)
+  "kimi-k2": { input: 0.0006, output: 0.0024 },
+  "moonshot-v1": { input: 0.0006, output: 0.0024 },
+  // Qwen models
+  "qwen-2.5": { input: 0.0003, output: 0.0006 },
+  "qwen-max": { input: 0.002, output: 0.006 },
   // Default for unknown models
   "default": { input: 0.001, output: 0.002 },
 };

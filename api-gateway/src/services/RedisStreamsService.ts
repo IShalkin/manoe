@@ -13,8 +13,9 @@
  * block all other commands (including XADD publishes) until the block times out.
  */
 
-import { Service } from "@tsed/di";
+import { Service, Inject } from "@tsed/di";
 import Redis from "ioredis";
+import { MetricsService } from "./MetricsService";
 
 /**
  * Event structure for Redis Streams
@@ -68,6 +69,9 @@ export class RedisStreamsService {
   
   // Redis URL for creating reader connections
   private redisUrl: string = "";
+
+  @Inject()
+  private metricsService!: MetricsService;
   
   // Legacy alias for backward compatibility
   private get client(): Redis | null {
@@ -181,6 +185,18 @@ export class RedisStreamsService {
       "*",
       ...Object.entries(event).flat()
     );
+
+    // Record Redis stream metrics after publishing
+    try {
+      const streamInfo = await this.getStreamInfo(runId);
+      this.metricsService.recordRedisStreamMetrics({
+        streamKey,
+        length: streamInfo.length,
+      });
+    } catch (metricsError) {
+      // Don't fail the publish if metrics recording fails
+      console.warn("[RedisStreamsService] Failed to record stream metrics:", metricsError);
+    }
 
     return entryId ?? "";
   }
