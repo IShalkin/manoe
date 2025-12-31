@@ -1,15 +1,17 @@
 /**
  * Zod Schemas for Supabase Storage
  *
- * Strict validation schemas for data entering Supabase (System of Record)
- * These schemas enforce exact column structure and prevent garbage data
+ * Validation schemas for data entering Supabase (System of Record)
+ * These schemas validate known fields and strip unknown keys for LLM compatibility.
+ * LLMs often return extra fields (role, motivation, backstory, etc.) that don't
+ * match DB columns - these are stripped rather than rejected.
  */
 
 import { z } from "zod";
 
 /**
  * Character schema for Supabase storage
- * Strict validation matching Supabase 'characters' table structure
+ * Validates known fields, strips unknown keys (LLM compatibility)
  * All fields are optional because agents may not provide all data
  */
 export const SupabaseCharacterSchema = z.object({
@@ -36,11 +38,11 @@ export const SupabaseCharacterSchema = z.object({
   potential_arc: z.string().max(500).optional(),
   qdrant_id: z.string().uuid().optional(),
   created_at: z.string().datetime().optional(),
-}); // Reject extra fields not in schema
+});
 
 /**
  * Worldbuilding schema for Supabase storage
- * Strict validation matching Supabase 'worldbuilding' table structure
+ * Validates known fields, strips unknown keys (LLM compatibility)
  */
 export const SupabaseWorldbuildingSchema = z.object({
   id: z.string().uuid().optional(),
@@ -55,7 +57,7 @@ export const SupabaseWorldbuildingSchema = z.object({
 
 /**
  * Draft schema for Supabase storage
- * Strict validation matching Supabase 'drafts' table structure
+ * Validates known fields, strips unknown keys (LLM compatibility)
  */
 export const SupabaseDraftSchema = z.object({
   id: z.string().uuid().optional(),

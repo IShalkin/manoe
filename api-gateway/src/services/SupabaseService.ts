@@ -1,6 +1,11 @@
 import { Service, Inject } from "@tsed/di";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { LangfuseService } from "./LangfuseService";
+import {
+  SupabaseCharacterSchema,
+  SupabaseWorldbuildingSchema,
+  SupabaseDraftSchema,
+} from "../schemas/SupabaseSchemas";
 
 interface Project {
   id: string;
@@ -273,11 +278,32 @@ export class SupabaseService {
       created_at: new Date().toISOString(),
     };
 
-    console.log('[SupabaseService] Attempting to save character:', JSON.stringify(insertData, null, 2));
+    // Validate data against Zod schema before insert (strips unknown fields)
+    const validationResult = SupabaseCharacterSchema.safeParse(insertData);
+    if (!validationResult.success) {
+      const characterName = (snakeCaseChar as Record<string, unknown>).name as string || character.name || 'Unknown';
+      const errorSummary = validationResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
+      console.error('[SupabaseService] Character validation failed:', errorSummary);
+      
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_character_validation_error', {
+          projectId,
+          characterName,
+          validationErrors: validationResult.error.errors,
+        });
+      }
+      
+      throw new Error(`Character validation failed: ${errorSummary}`);
+    }
+
+    // Use validated data (with unknown fields stripped)
+    const validatedData = validationResult.data;
+
+    console.log('[SupabaseService] Attempting to save character:', JSON.stringify(validatedData, null, 2));
 
     const { data, error, status, statusText } = await client
       .from("characters")
-      .insert(insertData)
+      .insert(validatedData)
       .select();
 
     console.log('[SupabaseService] Insert response - status:', status, 'statusText:', statusText, 'dataLength:', data?.length, 'error:', JSON.stringify(error));
@@ -377,11 +403,32 @@ export class SupabaseService {
       created_at: new Date().toISOString(),
     };
 
+    // Validate data against Zod schema before insert (strips unknown fields)
+    const validationResult = SupabaseWorldbuildingSchema.safeParse(insertData);
+    if (!validationResult.success) {
+      const errorSummary = validationResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
+      console.error('[SupabaseService] Worldbuilding validation failed:', errorSummary);
+      
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_worldbuilding_validation_error', {
+          projectId,
+          elementType,
+          elementName: insertData.name,
+          validationErrors: validationResult.error.errors,
+        });
+      }
+      
+      throw new Error(`Worldbuilding validation failed: ${errorSummary}`);
+    }
+
+    // Use validated data (with unknown fields stripped)
+    const validatedData = validationResult.data;
+
     console.log('[SupabaseService] Attempting to save worldbuilding:', elementType);
 
     const { data, error, status } = await client
       .from("worldbuilding")
-      .insert(insertData)
+      .insert(validatedData)
       .select();
 
     console.log('[SupabaseService] Worldbuilding insert response - status:', status, 'error:', JSON.stringify(error));
@@ -479,14 +526,37 @@ export class SupabaseService {
     runId?: string
   ): Promise<Draft> {
     const client = this.getClient();
+    
+    const insertData = {
+      project_id: projectId,
+      ...draft,
+      qdrant_id: qdrantId,
+      created_at: new Date().toISOString(),
+    };
+
+    // Validate data against Zod schema before insert (strips unknown fields)
+    const validationResult = SupabaseDraftSchema.safeParse(insertData);
+    if (!validationResult.success) {
+      const errorSummary = validationResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
+      console.error('[SupabaseService] Draft validation failed:', errorSummary);
+      
+      if (runId) {
+        this.langfuse.addEvent(runId, 'supabase_draft_validation_error', {
+          projectId,
+          sceneNumber: draft.scene_number,
+          validationErrors: validationResult.error.errors,
+        });
+      }
+      
+      throw new Error(`Draft validation failed: ${errorSummary}`);
+    }
+
+    // Use validated data (with unknown fields stripped)
+    const validatedData = validationResult.data;
+
     const { data, error } = await client
       .from("drafts")
-      .upsert({
-        project_id: projectId,
-        ...draft,
-        qdrant_id: qdrantId,
-        created_at: new Date().toISOString(),
-      })
+      .upsert(validatedData)
       .select()
       .single();
 
