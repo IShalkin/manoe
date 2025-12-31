@@ -2326,8 +2326,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                     )}
                   </div>
                   
-                  {/* Feedback Buttons - show when agent has content and generation is complete */}
-                  {hasContent && (isComplete || state.status === 'complete') && runId && (
+                  {/* Feedback Buttons - show when agent has content and is not actively thinking */}
+                  {hasContent && (isComplete || state.status === 'complete' || (state.status !== 'thinking' && activeAgent !== agent)) && runId && (
                     <div className="px-4 py-2 border-t border-slate-700/50 flex items-center justify-between">
                       <span className="text-xs text-slate-500">Rate this output</span>
                       <FeedbackButtons
