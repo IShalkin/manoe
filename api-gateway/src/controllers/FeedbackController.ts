@@ -92,8 +92,7 @@ export class FeedbackController {
       );
 
       // Record feedback in Prometheus metrics
-      const rating = feedbackType === "thumbs_up" ? 1 : 0;
-      this.metricsService.recordUserFeedback(feedbackType, agentName, rating);
+      this.metricsService.recordUserFeedback(feedbackType, agentName);
 
       const feedbackId = `${runId}-${agentName}-${Date.now()}`;
 

@@ -278,7 +278,7 @@ export class MetricsService {
     this.userFeedbackTotal = new Counter({
       name: "manoe_user_feedback_total",
       help: "Total user feedback submissions",
-      labelNames: ["feedback_type", "agent_name", "rating"],
+      labelNames: ["feedback_type", "agent_name"],
       registers: [this.registry],
     });
 
@@ -401,8 +401,14 @@ export class MetricsService {
     // Remove date suffixes (e.g., "gpt-4o-2024-05-13" -> "gpt-4o")
     const withoutDate = baseName.replace(/-\d{4}-\d{2}-\d{2}$/, "");
     
-    // Check if we have pricing for this model
-    for (const knownModel of Object.keys(MODEL_PRICING)) {
+    // Check for exact match first
+    if (MODEL_PRICING[withoutDate]) {
+      return withoutDate;
+    }
+    
+    // Check prefix matches, longest first to avoid matching "gpt-4o" before "gpt-4o-mini"
+    const sortedModels = Object.keys(MODEL_PRICING).sort((a, b) => b.length - a.length);
+    for (const knownModel of sortedModels) {
       if (withoutDate.startsWith(knownModel)) {
         return knownModel;
       }
@@ -466,13 +472,11 @@ export class MetricsService {
    */
   recordUserFeedback(
     feedbackType: "thumbs_up" | "thumbs_down",
-    agentName: string,
-    rating: number
+    agentName: string
   ): void {
     this.userFeedbackTotal.inc({
       feedback_type: feedbackType,
       agent_name: agentName,
-      rating: rating.toString(),
     });
   }
 
