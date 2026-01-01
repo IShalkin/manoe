@@ -442,11 +442,31 @@ export class SupabaseService {
   ): Promise<unknown> {
     const client = this.getClient();
     
+    // Extract description from element - handle various LLM output formats
+    // LLMs may return description as string, object, or omit it entirely
+    let description = '';
+    if (typeof element.description === 'string' && element.description.trim()) {
+      description = element.description;
+    } else if (typeof element.description === 'object' && element.description !== null) {
+      description = JSON.stringify(element.description);
+    } else if (typeof element.summary === 'string' && element.summary.trim()) {
+      // Fallback to summary field if description is missing
+      description = element.summary;
+    } else if (typeof element.details === 'string' && element.details.trim()) {
+      // Fallback to details field if description is missing
+      description = element.details;
+    } else {
+      // Last resort: stringify the entire element as description
+      // This ensures we always have a non-empty description for validation
+      const { name, ...rest } = element;
+      description = Object.keys(rest).length > 0 ? JSON.stringify(rest) : `${elementType} element`;
+    }
+
     const insertData = {
       project_id: projectId,
       element_type: elementType,
       name: element.name || elementType,
-      description: typeof element.description === 'object' ? JSON.stringify(element.description) : (element.description || ''),
+      description,
       attributes: element,
       qdrant_id: qdrantId,
       created_at: new Date().toISOString(),
@@ -584,15 +604,31 @@ export class SupabaseService {
 
   async saveDraft(
     projectId: string,
-    draft: Partial<Draft>,
+    draft: Partial<Draft> & Record<string, unknown>,
     qdrantId?: string,
     runId?: string
   ): Promise<Draft> {
     const client = this.getClient();
     
+    // Normalize field names from orchestrator format to DB schema format
+    // The orchestrator uses camelCase (sceneNum, content, wordCount)
+    // but the DB schema uses snake_case (scene_number, narrative_content, word_count)
+    const sceneNumber = draft.scene_number ?? (draft as Record<string, unknown>).sceneNum as number | undefined;
+    const narrativeContent = draft.content ?? (draft as Record<string, unknown>).content as string | undefined;
+    const wordCount = draft.word_count ?? (draft as Record<string, unknown>).wordCount as number | undefined;
+    const title = draft.title ?? (draft as Record<string, unknown>).title as string | undefined;
+    
     const insertData = {
       project_id: projectId,
-      ...draft,
+      scene_number: sceneNumber,
+      narrative_content: narrativeContent,
+      word_count: wordCount,
+      title: title,
+      status: draft.status || 'draft',
+      revision_count: draft.revision_count || 0,
+      sensory_details: draft.sensory_details,
+      subtext_layer: draft.subtext_layer,
+      emotional_shift: draft.emotional_shift,
       qdrant_id: qdrantId,
       created_at: new Date().toISOString(),
     };
