@@ -1074,7 +1074,7 @@ export class StorytellerOrchestrator {
           // Handle case where stripOverlap returns empty (LLM repeated all content)
           if (!strippedContent || strippedContent.trim().length === 0) {
             console.warn(`[Orchestrator] Scene ${sceneNum} Part ${partIndex}: stripOverlap returned empty, using raw content`);
-            // Keep raw content instead of empty string
+            partContent = rawPartContent; // Keep raw content instead of empty string
           } else {
             partContent = strippedContent;
           }
