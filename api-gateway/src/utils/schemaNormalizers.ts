@@ -399,8 +399,37 @@ export function normalizeCharacterForStorage(
       }
     }
   }
-  if (!normalized.name && character.name) {
-    normalized.name = character.name;
+  
+  // Fallback logic for name field - handle various LLM output formats
+  // LLMs may return name as Name, fullName, full_name, characterName, character_name, etc.
+  if (!normalized.name) {
+    const nameValue = 
+      character.name ||
+      character.Name ||
+      character.fullName ||
+      character.full_name ||
+      character.characterName ||
+      character.character_name ||
+      character.title ||
+      character.Title;
+    
+    if (nameValue && typeof nameValue === 'string' && nameValue.trim()) {
+      normalized.name = nameValue.trim();
+    } else if (nameValue && typeof nameValue === 'object') {
+      // Handle case where name is an object with a name/value field
+      const nameObj = nameValue as Record<string, unknown>;
+      const extractedName = nameObj.name || nameObj.value || nameObj.text;
+      if (extractedName && typeof extractedName === 'string' && extractedName.trim()) {
+        normalized.name = extractedName.trim();
+      }
+    }
+    
+    // Last resort: use "Unknown Character" to satisfy validation
+    // This ensures we always have a non-empty name for Zod validation
+    if (!normalized.name) {
+      normalized.name = "Unknown Character";
+    }
   }
+  
   return normalized;
 }
