@@ -170,3 +170,75 @@ describe("stringUtils - bidirectional conversion", () => {
     expect(backToSnake).toEqual(original);
   });
 });
+
+describe("stringUtils - edge cases", () => {
+  describe("camelToSnakeCase edge cases", () => {
+    it("should handle consecutive capitals (acronyms)", () => {
+      const input = { getUserID: "123", XMLParser: "parser" };
+      const expected = { get_user_id: "123", xml_parser: "parser" };
+      expect(camelToSnakeCase(input)).toEqual(expected);
+    });
+
+    it("should preserve leading underscores", () => {
+      const input = { _privateField: "secret", _id: "123" };
+      const expected = { _private_field: "secret", _id: "123" };
+      expect(camelToSnakeCase(input)).toEqual(expected);
+    });
+
+    it("should handle numbers adjacent to capitals", () => {
+      const input = { base64Encode: "data", md5Hash: "hash" };
+      const expected = { base64_encode: "data", md5_hash: "hash" };
+      expect(camelToSnakeCase(input)).toEqual(expected);
+    });
+
+    it("should handle HTTPSConnection style acronyms", () => {
+      const input = { HTTPSConnection: "secure" };
+      const expected = { https_connection: "secure" };
+      expect(camelToSnakeCase(input)).toEqual(expected);
+    });
+  });
+
+  describe("snakeToCamelCase edge cases", () => {
+    it("should preserve leading underscores", () => {
+      const input = { _private_field: "secret", _id: "123" };
+      const expected = { _privateField: "secret", _id: "123" };
+      expect(snakeToCamelCase(input)).toEqual(expected);
+    });
+
+    it("should handle multiple leading underscores", () => {
+      const input = { __dunder_method: "special" };
+      const expected = { __dunderMethod: "special" };
+      expect(snakeToCamelCase(input)).toEqual(expected);
+    });
+
+    it("should handle multiple consecutive underscores in middle", () => {
+      const input = { snake__case: "value" };
+      const expected = { snake_Case: "value" };
+      expect(snakeToCamelCase(input)).toEqual(expected);
+    });
+
+    it("should handle trailing underscores", () => {
+      const input = { field_: "value", name__: "test" };
+      const expected = { field_: "value", name__: "test" };
+      expect(snakeToCamelCase(input)).toEqual(expected);
+    });
+  });
+
+  describe("round-trip with edge cases", () => {
+    it("should round-trip leading underscores", () => {
+      const original = { _privateField: "secret" };
+      const snakeCase = camelToSnakeCase(original);
+      expect(snakeCase).toEqual({ _private_field: "secret" });
+      const backToCamel = snakeToCamelCase(snakeCase as Record<string, unknown>);
+      expect(backToCamel).toEqual(original);
+    });
+
+    it("should round-trip acronyms from snake_case", () => {
+      const original = { xml_parser: "parser", https_connection: "secure" };
+      const camelCase = snakeToCamelCase(original);
+      expect(camelCase).toEqual({ xmlParser: "parser", httpsConnection: "secure" });
+      const backToSnake = camelToSnakeCase(camelCase as Record<string, unknown>);
+      expect(backToSnake).toEqual(original);
+    });
+  });
+});

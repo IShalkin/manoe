@@ -38,40 +38,46 @@ jobs:
             DEPLOY_TARGET="${{ github.event.inputs.deploy_target || 'all' }}"
             echo "Deployment target: $DEPLOY_TARGET"
             
-            # Function to deploy api-gateway
+            # Function to deploy api-gateway with retry loop
             deploy_api_gateway() {
               echo "=== Deploying API Gateway ==="
               docker compose -f docker-compose.vps.yml build api-gateway
               docker compose -f docker-compose.vps.yml up -d api-gateway
               
               echo "Waiting for API Gateway to start..."
-              sleep 30
+              for i in {1..12}; do
+                if docker exec manoe-api-gateway curl -f http://localhost:3000/api/health 2>/dev/null; then
+                  echo "API Gateway health check passed!"
+                  return 0
+                fi
+                echo "Attempt $i/12 failed, retrying in 5s..."
+                sleep 5
+              done
               
-              # Verify api-gateway is running
-              if docker exec manoe-api-gateway curl -f http://localhost:3000/api/health; then
-                echo "API Gateway health check passed!"
-              else
-                echo "ERROR: API Gateway health check failed!"
-                exit 1
-              fi
+              echo "ERROR: API Gateway health check failed after 60s!"
+              docker logs manoe-api-gateway --tail 50
+              exit 1
             }
             
-            # Function to deploy orchestrator
+            # Function to deploy orchestrator with retry loop
             deploy_orchestrator() {
               echo "=== Deploying Orchestrator ==="
               docker compose -f docker-compose.vps.yml build orchestrator
               docker compose -f docker-compose.vps.yml up -d orchestrator
               
               echo "Waiting for Orchestrator to start..."
-              sleep 30
+              for i in {1..12}; do
+                if docker exec manoe-orchestrator curl -f http://localhost:8001/health 2>/dev/null; then
+                  echo "Orchestrator health check passed!"
+                  return 0
+                fi
+                echo "Attempt $i/12 failed, retrying in 5s..."
+                sleep 5
+              done
               
-              # Verify orchestrator is running
-              if docker exec manoe-orchestrator curl -f http://localhost:8001/health; then
-                echo "Orchestrator health check passed!"
-              else
-                echo "ERROR: Orchestrator health check failed!"
-                exit 1
-              fi
+              echo "ERROR: Orchestrator health check failed after 60s!"
+              docker logs manoe-orchestrator --tail 50
+              exit 1
             }
             
             # Deploy based on target
