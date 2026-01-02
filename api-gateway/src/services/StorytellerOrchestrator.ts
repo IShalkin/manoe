@@ -47,6 +47,44 @@ import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
 
 /**
+ * Simple rate limiter for concurrent async operations
+ * Limits the number of concurrent promises to avoid hitting API rate limits
+ */
+function createRateLimiter(concurrency: number) {
+  let activeCount = 0;
+  const queue: Array<() => void> = [];
+
+  const next = () => {
+    if (queue.length > 0 && activeCount < concurrency) {
+      activeCount++;
+      const resolve = queue.shift()!;
+      resolve();
+    }
+  };
+
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const run = () => {
+        fn()
+          .then(resolve)
+          .catch(reject)
+          .finally(() => {
+            activeCount--;
+            next();
+          });
+      };
+
+      if (activeCount < concurrency) {
+        activeCount++;
+        run();
+      } else {
+        queue.push(run);
+      }
+    });
+  };
+}
+
+/**
  * LLM Configuration for generation
  */
 export interface LLMConfiguration {
@@ -88,6 +126,10 @@ export class StorytellerOrchestrator {
   private activeRuns: Map<string, GenerationState> = new Map();
   private pauseCallbacks: Map<string, () => boolean> = new Map();
   private isShuttingDown: boolean = false;
+  
+  // Shared rate limiter for all evaluation calls (max 3 concurrent)
+  // This ensures consistent rate limiting across relevance and faithfulness evaluations
+  private evaluationRateLimiter = createRateLimiter(3);
 
   @Inject()
   private llmProvider: LLMProviderService;
@@ -515,6 +557,7 @@ export class StorytellerOrchestrator {
 
     // LLM-as-a-Judge: Evaluate relevance of character profiles to seed idea
     // Runs asynchronously to not block generation
+    // Uses rate limiting (max 3 concurrent) to avoid hitting LLM provider rate limits
     if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
       try {
         if (Array.isArray(state.characters)) {
@@ -522,17 +565,20 @@ export class StorytellerOrchestrator {
             const characterName = String(character.name || "Unknown");
             const profilerOutput = JSON.stringify(character, null, 2);
             
-            // Fire and forget - don't await to avoid blocking generation
-            this.evaluationService.evaluateRelevance({
-              runId,
-              profilerOutput,
-              seedIdea: options.seedIdea,
-              characterName,
-            }).catch((err) => {
+            // Fire and forget with rate limiting - don't await to avoid blocking generation
+            // Uses shared class-level rate limiter (max 3 concurrent) for all evaluation calls
+            this.evaluationRateLimiter(() => 
+              this.evaluationService.evaluateRelevance({
+                runId,
+                profilerOutput,
+                seedIdea: options.seedIdea,
+                characterName,
+              })
+            ).catch((err) => {
               $log.warn(`[StorytellerOrchestrator] Relevance evaluation failed for ${characterName}: ${err.message}`);
             });
           }
-          $log.info(`[StorytellerOrchestrator] runCharactersPhase: triggered relevance evaluations for ${state.characters.length} characters, runId: ${runId}`);
+          $log.info(`[StorytellerOrchestrator] runCharactersPhase: triggered relevance evaluations for ${state.characters.length} characters (rate limited to 3 concurrent), runId: ${runId}`);
         }
       } catch (evalError) {
         $log.warn(`[StorytellerOrchestrator] runCharactersPhase: evaluation setup failed, continuing anyway, runId: ${runId}`, evalError);
@@ -909,21 +955,25 @@ export class StorytellerOrchestrator {
 
     // LLM-as-a-Judge: Evaluate faithfulness of Writer output to Architect plan
     // Runs asynchronously to not block generation
+    // Uses shared rate limiter (max 3 concurrent) to avoid hitting LLM provider rate limits
     if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
       try {
         const architectPlan = JSON.stringify(sceneOutline, null, 2);
         
-        // Fire and forget - don't await to avoid blocking generation
-        this.evaluationService.evaluateFaithfulness({
-          runId,
-          writerOutput: response,
-          architectPlan,
-          sceneNumber: sceneNum,
-        }).catch((err) => {
+        // Fire and forget with rate limiting - don't await to avoid blocking generation
+        // Uses shared class-level rate limiter (max 3 concurrent) for all evaluation calls
+        this.evaluationRateLimiter(() =>
+          this.evaluationService.evaluateFaithfulness({
+            runId,
+            writerOutput: response,
+            architectPlan,
+            sceneNumber: sceneNum,
+          })
+        ).catch((err) => {
           $log.warn(`[StorytellerOrchestrator] Faithfulness evaluation failed for scene ${sceneNum}: ${err.message}`);
         });
         
-        $log.info(`[StorytellerOrchestrator] draftScene: triggered faithfulness evaluation for scene ${sceneNum}, runId: ${runId}`);
+        $log.info(`[StorytellerOrchestrator] draftScene: triggered faithfulness evaluation for scene ${sceneNum} (rate limited), runId: ${runId}`);
       } catch (evalError) {
         $log.warn(`[StorytellerOrchestrator] draftScene: evaluation setup failed, continuing anyway, runId: ${runId}`, evalError);
       }
