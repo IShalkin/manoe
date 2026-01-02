@@ -231,14 +231,20 @@ const normalizeSignificance = (val: unknown): "major" | "minor" | "background" |
   const lower = val.toLowerCase().trim();
   
   // Map to "major" - check for keywords indicating high importance
-  if (lower === "major" || 
-      lower.includes("critical") || 
-      lower.includes("turning point") ||
-      lower.includes("pivotal") ||
-      lower.includes("key") ||
-      lower.includes("crucial") ||
-      lower.includes("significant")) {
+  if (lower === "major") {
     return "major";
+  }
+  // Only use includes() if the string doesn't contain conflicting keywords
+  // This prevents "slightly critical" from being classified as "major"
+  if (!lower.includes("small") && !lower.includes("slight") && !lower.includes("minor")) {
+    if (lower.includes("critical") || 
+        lower.includes("turning point") ||
+        lower.includes("pivotal") ||
+        lower.includes("key") ||
+        lower.includes("crucial") ||
+        lower.includes("significant")) {
+      return "major";
+    }
   }
   // Map to "minor"
   if (lower === "minor" || lower.includes("small") || lower.includes("slight")) {
@@ -257,8 +263,10 @@ const normalizeSignificance = (val: unknown): "major" | "minor" | "background" |
  */
 const nullToUndefined = (val: unknown): string | undefined => {
   if (val === null || val === undefined) return undefined;
-  if (typeof val !== "string") return undefined;
-  return val;
+  if (typeof val === "string") return val.trim() || undefined;
+  // Coerce numbers and booleans to strings for robustness (LLMs may return varied types)
+  if (typeof val === "number" || typeof val === "boolean") return String(val);
+  return undefined;
 };
 
 /**
