@@ -45,7 +45,44 @@ import { AgentContext } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
-import pLimit from "p-limit";
+
+/**
+ * Simple rate limiter for concurrent async operations
+ * Limits the number of concurrent promises to avoid hitting API rate limits
+ */
+function createRateLimiter(concurrency: number) {
+  let activeCount = 0;
+  const queue: Array<() => void> = [];
+
+  const next = () => {
+    if (queue.length > 0 && activeCount < concurrency) {
+      activeCount++;
+      const resolve = queue.shift()!;
+      resolve();
+    }
+  };
+
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const run = () => {
+        fn()
+          .then(resolve)
+          .catch(reject)
+          .finally(() => {
+            activeCount--;
+            next();
+          });
+      };
+
+      if (activeCount < concurrency) {
+        activeCount++;
+        run();
+      } else {
+        queue.push(run);
+      }
+    });
+  };
+}
 
 /**
  * LLM Configuration for generation
@@ -521,7 +558,7 @@ export class StorytellerOrchestrator {
       try {
         if (Array.isArray(state.characters)) {
           // Rate limit concurrent evaluation calls to avoid hitting LLM provider limits
-          const evaluationLimit = pLimit(3);
+          const evaluationLimit = createRateLimiter(3);
           
           for (const character of state.characters) {
             const characterName = String(character.name || "Unknown");
