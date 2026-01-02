@@ -26,15 +26,20 @@ jest.mock("@qdrant/js-client-rest", () => ({
   })),
 }));
 
-jest.mock("openai", () => ({
-  default: jest.fn().mockImplementation(() => ({
-    embeddings: {
-      create: jest.fn().mockResolvedValue({
-        data: [{ embedding: Array(1536).fill(0.1) }],
-      }),
-    },
-  })),
-}));
+const mockEmbeddingsCreate = jest.fn().mockResolvedValue({
+  data: [{ embedding: Array(1536).fill(0.1) }],
+});
+
+jest.mock("openai", () => {
+  return {
+    __esModule: true,
+    default: jest.fn().mockImplementation(() => ({
+      embeddings: {
+        create: mockEmbeddingsCreate,
+      },
+    })),
+  };
+});
 
 jest.mock("uuid", () => ({
   v4: jest.fn().mockReturnValue("test-uuid-1234"),
