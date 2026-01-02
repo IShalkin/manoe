@@ -170,6 +170,12 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
         const partIndex = Number(sceneOutline.partIndex ?? 1);
         const partsTotal = Number(sceneOutline.partsTotal ?? 3);
         const partTargetWords = Number(sceneOutline.partTargetWords ?? 500);
+        
+        // FAIL-FAST: Validate beats mode parameters to catch NaN issues early
+        if (isNaN(partIndex) || isNaN(partsTotal) || isNaN(partTargetWords)) {
+          throw new Error(`Invalid beats mode parameters: partIndex=${partIndex}, partsTotal=${partsTotal}, partTargetWords=${partTargetWords}`);
+        }
+        
         const existingContent = String(sceneOutline.existingContent ?? "");
         const isFirstPart = sceneOutline.isFirstPart === true;
         const isFinalPart = sceneOutline.isFinalPart === true;
@@ -199,8 +205,9 @@ ${retrievedContext}
 ${autonomousInstruction}`;
         } else {
           // Continuation parts (2, 3, 4...)
-          const lastWords = existingContent.trim().split(/\s+/).slice(-20).join(" ");
-          const lastChars = lastWords.length > 150 ? lastWords.slice(-150) : lastWords;
+          // Use 50 words of context (not 20) to maintain narrative voice and tone consistency
+          const lastWords = existingContent.trim().split(/\s+/).slice(-50).join(" ");
+          const lastChars = lastWords.length > 300 ? lastWords.slice(-300) : lastWords;
 
           const partInstruction = isFinalPart
             ? `This is the FINAL part. You MUST conclude the scene and end with the specified hook.`

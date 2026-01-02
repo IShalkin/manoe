@@ -1083,6 +1083,23 @@ export class StorytellerOrchestrator {
         console.log(`[Orchestrator] Scene ${sceneNum} Part ${partIndex} too short (${partWordCount}/${minPartWords}), retry ${retryCount}/${maxRetriesPerPart}`);
       }
 
+      // FAIL-FAST: Check if we exhausted retries without meeting minimum word count
+      const finalPartWordCount = partContent.split(/\s+/).length;
+      if (retryCount >= maxRetriesPerPart && finalPartWordCount < minPartWords) {
+        await this.publishEvent(runId, "scene_beat_error", {
+          sceneNum,
+          partIndex,
+          partsTotal,
+          reason: `Failed to generate sufficient content after ${maxRetriesPerPart} attempts`,
+          wordsGenerated: finalPartWordCount,
+          wordsRequired: minPartWords
+        });
+        
+        console.error(`[Orchestrator] Scene ${sceneNum} Part ${partIndex} failed after ${maxRetriesPerPart} retries (${finalPartWordCount}/${minPartWords} words)`);
+        
+        throw new Error(`Scene ${sceneNum} beat ${partIndex} generation failed: insufficient content after ${maxRetriesPerPart} retries (got ${finalPartWordCount} words, needed ${minPartWords})`);
+      }
+
       // Append part to combined content
       if (partIndex === 1) {
         combinedContent = partContent;
