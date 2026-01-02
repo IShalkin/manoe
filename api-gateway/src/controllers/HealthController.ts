@@ -3,6 +3,7 @@ import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { JobQueueService } from "../services/JobQueueService";
 import { SupabaseService } from "../services/SupabaseService";
+import { getEnvHealthStatus } from "../utils/envValidation";
 
 interface HealthStatus {
   status: "healthy" | "degraded" | "unhealthy";
@@ -13,6 +14,11 @@ interface HealthStatus {
     redis: ServiceStatus;
     supabase: ServiceStatus;
     qdrant: ServiceStatus;
+  };
+  environment?: {
+    status: "healthy" | "degraded" | "unhealthy";
+    missingRequired: string[];
+    warnings: string[];
   };
 }
 
@@ -45,7 +51,7 @@ export class HealthController {
 
   @Get("/detailed")
   @Summary("Detailed health check")
-  @Description("Returns detailed health status including all services")
+  @Description("Returns detailed health status including all services and environment validation")
   @Returns(200)
   async detailedHealthCheck(): Promise<HealthStatus> {
     const services = {
@@ -55,14 +61,32 @@ export class HealthController {
       qdrant: await this.checkQdrant(),
     };
 
-    const allUp = Object.values(services).every((s) => s.status === "up");
-    const anyDown = Object.values(services).some((s) => s.status === "down");
+    // Get environment validation status
+    const envHealth = getEnvHealthStatus();
+
+    const allServicesUp = Object.values(services).every((s) => s.status === "up");
+    const anyServiceDown = Object.values(services).some((s) => s.status === "down");
+
+    // Overall status considers both services and environment
+    let overallStatus: "healthy" | "degraded" | "unhealthy";
+    if (anyServiceDown || envHealth.status === "unhealthy") {
+      overallStatus = "unhealthy";
+    } else if (!allServicesUp || envHealth.status === "degraded") {
+      overallStatus = "degraded";
+    } else {
+      overallStatus = "healthy";
+    }
 
     return {
-      status: allUp ? "healthy" : anyDown ? "unhealthy" : "degraded",
+      status: overallStatus,
       timestamp: new Date().toISOString(),
       version: process.env.npm_package_version || "0.1.0",
       services,
+      environment: {
+        status: envHealth.status,
+        missingRequired: envHealth.details.missingRequired,
+        warnings: envHealth.details.warnings,
+      },
     };
   }
 

@@ -13,6 +13,16 @@ import * as dotenv from "dotenv";
 // Load environment variables
 dotenv.config();
 
+// Import utilities for secure logging and env validation
+import { validateAndLogEnvironment } from "./utils/envValidation";
+import { enableSecureLogging } from "./utils/secureLogging";
+
+// Enable secure logging to redact JWT tokens and sensitive data
+enableSecureLogging();
+
+// Validate environment variables at startup
+validateAndLogEnvironment();
+
 // Import controllers
 import { ProjectController } from "./controllers/ProjectController";
 import { GenerationController } from "./controllers/GenerationController";
