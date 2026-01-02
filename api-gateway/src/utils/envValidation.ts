@@ -93,15 +93,9 @@ export function validateEnvironment(): EnvValidationResult {
     }
   }
 
-  // Check optional variables and warn if missing
-  for (const envVar of OPTIONAL_ENV_VARS) {
-    const value = process.env[envVar];
-    if (!value || value.trim() === '') {
-      // Only warn about Qdrant if QDRANT_URL is set but QDRANT_API_KEY is not
-      if (envVar === 'QDRANT_API_KEY' && process.env.QDRANT_URL) {
-        warnings.push(`${envVar} is not set - Qdrant may require authentication`);
-      }
-    }
+  // Check if Qdrant URL is set but API key is missing
+  if (process.env.QDRANT_URL && (!process.env.QDRANT_API_KEY || process.env.QDRANT_API_KEY.trim() === '')) {
+    warnings.push('QDRANT_API_KEY is not set - Qdrant may require authentication');
   }
 
   return {

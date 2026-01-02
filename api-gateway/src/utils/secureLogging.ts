@@ -16,8 +16,8 @@ export function redactSensitiveString(value: string, visibleChars: number = 10):
     return '[EMPTY]';
   }
 
-  // If the string is too short to meaningfully redact, just show asterisks
-  if (value.length <= visibleChars * 2 + 3) {
+  // For very short strings, show asterisks
+  if (value.length < visibleChars * 2) {
     return '*'.repeat(Math.min(value.length, 10));
   }
 
@@ -172,41 +172,49 @@ export function createSafeRequestLog(req: {
 }
 
 /**
- * Wraps console methods to automatically redact sensitive data
- * Call this once at application startup to enable secure logging
+ * Helper function to redact arguments for logging
  */
-export function enableSecureLogging(): void {
-  const originalConsoleError = console.error;
-  const originalConsoleWarn = console.warn;
-  const originalConsoleLog = console.log;
-
-  const redactArgs = (args: unknown[]): unknown[] => {
-    return args.map(arg => {
-      if (typeof arg === 'string') {
-        return redactErrorMessage(arg);
-      }
-      if (arg instanceof Error) {
-        const redactedError = new Error(redactErrorMessage(arg.message));
-        redactedError.stack = arg.stack ? redactErrorMessage(arg.stack) : undefined;
-        redactedError.name = arg.name;
-        return redactedError;
-      }
-      return arg;
-    });
-  };
-
-  console.error = (...args: unknown[]) => {
-    originalConsoleError.apply(console, redactArgs(args));
-  };
-
-  console.warn = (...args: unknown[]) => {
-    originalConsoleWarn.apply(console, redactArgs(args));
-  };
-
-  // Only redact console.log in production to avoid slowing down development
-  if (process.env.NODE_ENV === 'production') {
-    console.log = (...args: unknown[]) => {
-      originalConsoleLog.apply(console, redactArgs(args));
-    };
-  }
+function redactArgs(args: unknown[]): unknown[] {
+  return args.map(arg => {
+    if (typeof arg === 'string') {
+      return redactErrorMessage(arg);
+    }
+    if (arg instanceof Error) {
+      // Only redact the message, preserve the stack for debugging
+      const redactedError = new Error(redactErrorMessage(arg.message));
+      redactedError.stack = arg.stack;
+      redactedError.name = arg.name;
+      return redactedError;
+    }
+    return arg;
+  });
 }
+
+/**
+ * Secure logger adapter that automatically redacts sensitive data.
+ * Use this instead of console.* to ensure JWT tokens and API keys are not logged.
+ * 
+ * This approach avoids monkey-patching global console methods which can
+ * interfere with third-party libraries and cause unexpected behavior.
+ * 
+ * @example
+ * import { secureLogger } from './utils/secureLogging';
+ * secureLogger.error('Auth failed for token:', token); // Token will be redacted
+ */
+export const secureLogger = {
+  error: (...args: unknown[]): void => {
+    console.error(...redactArgs(args));
+  },
+  warn: (...args: unknown[]): void => {
+    console.warn(...redactArgs(args));
+  },
+  log: (...args: unknown[]): void => {
+    console.log(...redactArgs(args));
+  },
+  info: (...args: unknown[]): void => {
+    console.info(...redactArgs(args));
+  },
+  debug: (...args: unknown[]): void => {
+    console.debug(...redactArgs(args));
+  },
+};
