@@ -245,7 +245,7 @@ export function SettingsPage() {
               </div>
               <div>
                 <h3 className="font-medium">Google Gemini Embeddings</h3>
-                <p className="text-xs text-slate-500">text-embedding-004 (768 dimensions)</p>
+                <p className="text-xs text-slate-500">embedding-001 (768 dimensions)</p>
               </div>
             </div>
             {embeddingApiKey && (
