@@ -45,6 +45,7 @@ import { AgentContext } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
+import pLimit from "p-limit";
 
 /**
  * LLM Configuration for generation
@@ -515,24 +516,30 @@ export class StorytellerOrchestrator {
 
     // LLM-as-a-Judge: Evaluate relevance of character profiles to seed idea
     // Runs asynchronously to not block generation
+    // Uses rate limiting (max 3 concurrent) to avoid hitting LLM provider rate limits
     if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
       try {
         if (Array.isArray(state.characters)) {
+          // Rate limit concurrent evaluation calls to avoid hitting LLM provider limits
+          const evaluationLimit = pLimit(3);
+          
           for (const character of state.characters) {
             const characterName = String(character.name || "Unknown");
             const profilerOutput = JSON.stringify(character, null, 2);
             
-            // Fire and forget - don't await to avoid blocking generation
-            this.evaluationService.evaluateRelevance({
-              runId,
-              profilerOutput,
-              seedIdea: options.seedIdea,
-              characterName,
-            }).catch((err) => {
+            // Fire and forget with rate limiting - don't await to avoid blocking generation
+            evaluationLimit(() => 
+              this.evaluationService.evaluateRelevance({
+                runId,
+                profilerOutput,
+                seedIdea: options.seedIdea,
+                characterName,
+              })
+            ).catch((err) => {
               $log.warn(`[StorytellerOrchestrator] Relevance evaluation failed for ${characterName}: ${err.message}`);
             });
           }
-          $log.info(`[StorytellerOrchestrator] runCharactersPhase: triggered relevance evaluations for ${state.characters.length} characters, runId: ${runId}`);
+          $log.info(`[StorytellerOrchestrator] runCharactersPhase: triggered relevance evaluations for ${state.characters.length} characters (rate limited to 3 concurrent), runId: ${runId}`);
         }
       } catch (evalError) {
         $log.warn(`[StorytellerOrchestrator] runCharactersPhase: evaluation setup failed, continuing anyway, runId: ${runId}`, evalError);
