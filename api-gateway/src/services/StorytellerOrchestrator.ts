@@ -1069,7 +1069,15 @@ export class StorytellerOrchestrator {
 
         // For parts 2+, strip overlap with existing content
         if (partIndex > 1 && combinedContent) {
-          partContent = this.stripOverlap(combinedContent, partContent);
+          const rawPartContent = partContent;
+          const strippedContent = this.stripOverlap(combinedContent, partContent);
+          // Handle case where stripOverlap returns empty (LLM repeated all content)
+          if (!strippedContent || strippedContent.trim().length === 0) {
+            console.warn(`[Orchestrator] Scene ${sceneNum} Part ${partIndex}: stripOverlap returned empty, using raw content`);
+            // Keep raw content instead of empty string
+          } else {
+            partContent = strippedContent;
+          }
         }
 
         const partWordCount = partContent.split(/\s+/).length;

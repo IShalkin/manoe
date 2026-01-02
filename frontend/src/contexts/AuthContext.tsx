@@ -44,18 +44,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     /**
      * Get session with timeout and retry logic
      * Handles mobile network issues where session fetch may hang
+     * Uses Promise.race pattern to avoid async callback anti-pattern
      */
     const getSessionWithRetry = async (attempt: number = 1): Promise<Session | null> => {
-      return new Promise(async (resolve) => {
-        // Set up timeout for this attempt
-        const timeoutId = setTimeout(() => {
+      // Set up timeout promise
+      const timeoutPromise = new Promise<null>((resolve) => {
+        setTimeout(() => {
           console.warn(`[AuthContext] Session check timeout (attempt ${attempt}/${AUTH_CONFIG.maxRetries})`);
           resolve(null);
         }, AUTH_CONFIG.sessionCheckTimeoutMs);
+      });
 
+      // Session fetch promise with retry logic
+      const sessionPromise = (async (): Promise<Session | null> => {
         try {
           const { data: { session }, error } = await supabase.auth.getSession();
-          clearTimeout(timeoutId);
           
           if (error) {
             console.error(`[AuthContext] Error getting session (attempt ${attempt}):`, error);
@@ -64,25 +67,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (attempt < AUTH_CONFIG.maxRetries) {
               console.log(`[AuthContext] Retrying in ${AUTH_CONFIG.retryDelayMs}ms...`);
               await new Promise(r => setTimeout(r, AUTH_CONFIG.retryDelayMs));
-              resolve(await getSessionWithRetry(attempt + 1));
+              return await getSessionWithRetry(attempt + 1);
             } else {
-              resolve(null);
+              return null;
             }
           } else {
-            resolve(session);
+            return session;
           }
         } catch (err) {
-          clearTimeout(timeoutId);
           console.error(`[AuthContext] Exception getting session (attempt ${attempt}):`, err);
           
           if (attempt < AUTH_CONFIG.maxRetries) {
             await new Promise(r => setTimeout(r, AUTH_CONFIG.retryDelayMs));
-            resolve(await getSessionWithRetry(attempt + 1));
+            return await getSessionWithRetry(attempt + 1);
           } else {
-            resolve(null);
+            return null;
           }
         }
-      });
+      })();
+
+      // Race between timeout and session fetch
+      return Promise.race([timeoutPromise, sessionPromise]);
     };
 
     const initializeAuth = async () => {
