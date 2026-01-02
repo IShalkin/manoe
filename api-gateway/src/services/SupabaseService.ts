@@ -143,6 +143,7 @@ export class SupabaseService {
   }
 
   async getProject(id: string): Promise<Project | null> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data: project, error } = await client
       .from("projects")
@@ -152,10 +153,29 @@ export class SupabaseService {
 
     if (error) {
       if (error.code === "PGRST116") {
+        this.metricsService.recordDatabaseQuery({
+          operation: "select",
+          table: "projects",
+          durationMs: Date.now() - startTime,
+          success: true,
+        });
         return null;
       }
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "projects",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get project: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "projects",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return project;
   }
@@ -539,6 +559,7 @@ export class SupabaseService {
   // ========================================================================
 
   async getOutline(projectId: string): Promise<Outline | null> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data, error } = await client
       .from("outlines")
@@ -548,10 +569,29 @@ export class SupabaseService {
 
     if (error) {
       if (error.code === "PGRST116") {
+        this.metricsService.recordDatabaseQuery({
+          operation: "select",
+          table: "outlines",
+          durationMs: Date.now() - startTime,
+          success: true,
+        });
         return null;
       }
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "outlines",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get outline: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "outlines",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return data;
   }
@@ -693,6 +733,7 @@ export class SupabaseService {
   // ========================================================================
 
   async getCritiques(projectId: string): Promise<unknown[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data, error } = await client
       .from("critiques")
@@ -701,8 +742,21 @@ export class SupabaseService {
       .order("created_at", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "critiques",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get critiques: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "critiques",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return data || [];
   }
@@ -803,6 +857,7 @@ export class SupabaseService {
    * Get run artifacts by run ID
    */
   async getRunArtifacts(runId: string): Promise<unknown[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data, error } = await client
       .from("run_artifacts")
@@ -811,8 +866,21 @@ export class SupabaseService {
       .order("created_at", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "run_artifacts",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get run artifacts: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "run_artifacts",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return data || [];
   }

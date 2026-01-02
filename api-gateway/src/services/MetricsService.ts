@@ -152,6 +152,11 @@ export class MetricsService {
   private userFeedbackTotal: Counter;
   private regenerationRequestsTotal: Counter;
 
+  // LLM-as-a-Judge evaluation metrics
+  private evaluationScoreGauge: Gauge;
+  private evaluationCallsTotal: Counter;
+  private evaluationDuration: Histogram;
+
   constructor() {
     this.registry = new Registry();
     
@@ -165,6 +170,7 @@ export class MetricsService {
     this.initializeDatabaseMetrics();
     this.initializeQdrantMetrics();
     this.initializeUserFeedbackMetrics();
+    this.initializeEvaluationMetrics();
     
     console.log("MetricsService initialized with Prometheus metrics");
   }
@@ -286,6 +292,30 @@ export class MetricsService {
       name: "manoe_regeneration_requests_total",
       help: "Total regeneration requests (implicit negative feedback)",
       labelNames: ["agent_name", "scene_number"],
+      registers: [this.registry],
+    });
+  }
+
+  private initializeEvaluationMetrics(): void {
+    this.evaluationScoreGauge = new Gauge({
+      name: "manoe_evaluation_score",
+      help: "LLM-as-a-Judge evaluation scores (0-1)",
+      labelNames: ["evaluation_type", "agent_name", "run_id"],
+      registers: [this.registry],
+    });
+
+    this.evaluationCallsTotal = new Counter({
+      name: "manoe_evaluation_calls_total",
+      help: "Total number of LLM-as-a-Judge evaluation calls",
+      labelNames: ["evaluation_type", "agent_name", "status"],
+      registers: [this.registry],
+    });
+
+    this.evaluationDuration = new Histogram({
+      name: "manoe_evaluation_duration_seconds",
+      help: "LLM-as-a-Judge evaluation duration in seconds",
+      labelNames: ["evaluation_type", "agent_name"],
+      buckets: [0.5, 1, 2, 5, 10, 20, 30],
       registers: [this.registry],
     });
   }
@@ -488,6 +518,45 @@ export class MetricsService {
       agent_name: agentName,
       scene_number: sceneNumber?.toString() || "n/a",
     });
+  }
+
+  /**
+   * Record LLM-as-a-Judge evaluation result
+   */
+  recordEvaluation(
+    evaluationType: "faithfulness" | "relevance",
+    agentName: string,
+    runId: string,
+    score: number,
+    durationMs: number,
+    success: boolean
+  ): void {
+    const status = success ? "success" : "failure";
+
+    this.evaluationCallsTotal.inc({
+      evaluation_type: evaluationType,
+      agent_name: agentName,
+      status,
+    });
+
+    if (success) {
+      this.evaluationScoreGauge.set(
+        {
+          evaluation_type: evaluationType,
+          agent_name: agentName,
+          run_id: runId,
+        },
+        score
+      );
+    }
+
+    this.evaluationDuration.observe(
+      {
+        evaluation_type: evaluationType,
+        agent_name: agentName,
+      },
+      durationMs / 1000
+    );
   }
 
   /**
