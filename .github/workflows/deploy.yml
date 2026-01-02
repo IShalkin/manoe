@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Deployment target'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - api-gateway
+          - orchestrator
 
 jobs:
   deploy:
@@ -19,19 +29,63 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -e
             cd /opt/manoe
             git fetch origin
             git checkout main
             git pull origin main
             
-            # Rebuild and restart orchestrator
-            docker compose -f docker-compose.vps.yml build orchestrator
-            docker compose -f docker-compose.vps.yml up -d orchestrator
+            DEPLOY_TARGET="${{ github.event.inputs.deploy_target || 'all' }}"
+            echo "Deployment target: $DEPLOY_TARGET"
             
-            # Wait for orchestrator to be healthy (container needs time to start)
-            sleep 30
+            # Function to deploy api-gateway
+            deploy_api_gateway() {
+              echo "=== Deploying API Gateway ==="
+              docker compose -f docker-compose.vps.yml build api-gateway
+              docker compose -f docker-compose.vps.yml up -d api-gateway
+              
+              echo "Waiting for API Gateway to start..."
+              sleep 30
+              
+              # Verify api-gateway is running
+              if docker exec manoe-api-gateway curl -f http://localhost:3000/api/health; then
+                echo "API Gateway health check passed!"
+              else
+                echo "ERROR: API Gateway health check failed!"
+                exit 1
+              fi
+            }
             
-            # Verify orchestrator is running (check inside container since it's not exposed on localhost)
-            docker exec manoe-orchestrator curl -f http://localhost:8001/health || exit 1
+            # Function to deploy orchestrator
+            deploy_orchestrator() {
+              echo "=== Deploying Orchestrator ==="
+              docker compose -f docker-compose.vps.yml build orchestrator
+              docker compose -f docker-compose.vps.yml up -d orchestrator
+              
+              echo "Waiting for Orchestrator to start..."
+              sleep 30
+              
+              # Verify orchestrator is running
+              if docker exec manoe-orchestrator curl -f http://localhost:8001/health; then
+                echo "Orchestrator health check passed!"
+              else
+                echo "ERROR: Orchestrator health check failed!"
+                exit 1
+              fi
+            }
             
-            echo "Deployment completed successfully!"
+            # Deploy based on target
+            case "$DEPLOY_TARGET" in
+              "api-gateway")
+                deploy_api_gateway
+                ;;
+              "orchestrator")
+                deploy_orchestrator
+                ;;
+              "all"|*)
+                deploy_api_gateway
+                deploy_orchestrator
+                ;;
+            esac
+            
+            echo "=== Deployment completed successfully! ==="
