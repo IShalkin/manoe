@@ -695,7 +695,9 @@ export class SupabaseService {
 
     const { data, error } = await client
       .from("drafts")
-      .upsert(validatedData)
+      .upsert(validatedData, {
+        onConflict: "project_id,scene_number",
+      })
       .select()
       .single();
 
@@ -934,6 +936,8 @@ export class SupabaseService {
       phase: phase,
       content: params.content,
       created_at: new Date().toISOString(),
+    }, {
+      onConflict: "run_id,phase,artifact_type",
     });
 
     if (error) {
