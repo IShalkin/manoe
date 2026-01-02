@@ -66,16 +66,7 @@ export class MemoryController {
     @QueryParams("type") elementType?: string
   ): Promise<{ elements: WorldbuildingDTO[]; count: number }> {
     const elements = await this.supabaseService.getWorldbuilding(projectId, elementType);
-    const elementDTOs = elements.map(e => mapWorldbuildingToDTO(e as {
-      id: string;
-      project_id: string;
-      element_type: string;
-      name: string;
-      description: string;
-      attributes?: unknown;
-      qdrant_id?: string;
-      created_at: string;
-    }));
+    const elementDTOs = elements.map(mapWorldbuildingToDTO);
     return {
       elements: elementDTOs,
       count: elements.length,
@@ -103,15 +94,13 @@ export class MemoryController {
     @PathParams("projectId") projectId: string,
     @PathParams("sceneNumber") sceneNumber: number
   ): Promise<DraftDTO> {
-    const drafts = await this.supabaseService.getDrafts(projectId);
-    const sceneDTOs = drafts.map(mapDraftToDTO);
-    const scene = sceneDTOs.find(d => d.sceneNumber === sceneNumber);
+    const draft = await this.supabaseService.getDraftBySceneNumber(projectId, sceneNumber);
     
-    if (!scene) {
+    if (!draft) {
       throw new Error(`Scene ${sceneNumber} not found`);
     }
     
-    return scene;
+    return mapDraftToDTO(draft);
   }
 
   @Get("/outline/:projectId")
@@ -136,15 +125,7 @@ export class MemoryController {
     @PathParams("projectId") projectId: string
   ): Promise<{ critiques: CritiqueDTO[]; count: number }> {
     const critiques = await this.supabaseService.getCritiques(projectId);
-    const critiqueDTOs = critiques.map(c => mapCritiqueToDTO(c as {
-      id: string;
-      project_id: string;
-      scene_number: number;
-      overall_score?: number;
-      feedback?: string;
-      suggestions?: unknown[];
-      created_at: string;
-    }));
+    const critiqueDTOs = critiques.map(mapCritiqueToDTO);
     return {
       critiques: critiqueDTOs,
       count: critiques.length,
@@ -160,17 +141,7 @@ export class MemoryController {
     @QueryParams("limit") limit: number = 50
   ): Promise<{ logs: AuditLogDTO[]; count: number }> {
     const logs = await this.supabaseService.getAuditLogs(projectId, agentName, limit);
-    const logDTOs = logs.map(l => mapAuditLogToDTO(l as {
-      id: string;
-      project_id: string;
-      agent_name: string;
-      action: string;
-      input_summary?: string;
-      output_summary?: string;
-      token_usage?: unknown;
-      duration_ms?: number;
-      created_at: string;
-    }));
+    const logDTOs = logs.map(mapAuditLogToDTO);
     return {
       logs: logDTOs,
       count: logs.length,

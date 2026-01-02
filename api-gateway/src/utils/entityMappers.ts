@@ -9,7 +9,7 @@
  * then work with camelCase consistently in controllers.
  */
 
-import { Character, Draft } from "../services/SupabaseService";
+import { Character, Draft, Outline, Worldbuilding, Critique, AuditLog } from "../services/SupabaseService";
 
 // ============================================================================
 // DTO Interfaces (camelCase for API responses)
@@ -33,6 +33,8 @@ export interface DraftDTO {
   projectId: string;
   sceneNumber: number;
   content: string;
+  title?: string;
+  wordCount?: number;
   sensoryDetails?: unknown;
   subtextLayer?: string;
   emotionalShift?: string;
@@ -64,9 +66,13 @@ export interface CritiqueDTO {
   id: string;
   projectId: string;
   sceneNumber: number;
-  overallScore?: number;
-  feedback?: string;
-  suggestions?: unknown[];
+  overallScore: number;
+  approved: boolean;
+  feedbackItems?: unknown[];
+  strengths?: unknown;
+  weaknesses?: unknown;
+  revisionRequired?: boolean;
+  revisionFocus?: unknown;
   createdAt: string;
 }
 
@@ -106,7 +112,9 @@ export function mapDraftToDTO(draft: Draft): DraftDTO {
     id: draft.id,
     projectId: draft.project_id,
     sceneNumber: draft.scene_number,
-    content: draft.content,
+    content: draft.narrative_content,
+    title: draft.title,
+    wordCount: draft.word_count,
     sensoryDetails: draft.sensory_details,
     subtextLayer: draft.subtext_layer,
     emotionalShift: draft.emotional_shift,
@@ -116,13 +124,7 @@ export function mapDraftToDTO(draft: Draft): DraftDTO {
   };
 }
 
-export function mapOutlineToDTO(outline: {
-  id: string;
-  project_id: string;
-  structure_type: string;
-  scenes: unknown[];
-  created_at: string;
-}): OutlineDTO {
+export function mapOutlineToDTO(outline: Outline): OutlineDTO {
   return {
     id: outline.id,
     projectId: outline.project_id,
@@ -132,16 +134,7 @@ export function mapOutlineToDTO(outline: {
   };
 }
 
-export function mapWorldbuildingToDTO(element: {
-  id: string;
-  project_id: string;
-  element_type: string;
-  name: string;
-  description: string;
-  attributes?: unknown;
-  qdrant_id?: string;
-  created_at: string;
-}): WorldbuildingDTO {
+export function mapWorldbuildingToDTO(element: Worldbuilding): WorldbuildingDTO {
   return {
     id: element.id,
     projectId: element.project_id,
@@ -154,37 +147,23 @@ export function mapWorldbuildingToDTO(element: {
   };
 }
 
-export function mapCritiqueToDTO(critique: {
-  id: string;
-  project_id: string;
-  scene_number: number;
-  overall_score?: number;
-  feedback?: string;
-  suggestions?: unknown[];
-  created_at: string;
-}): CritiqueDTO {
+export function mapCritiqueToDTO(critique: Critique): CritiqueDTO {
   return {
     id: critique.id,
     projectId: critique.project_id,
     sceneNumber: critique.scene_number,
     overallScore: critique.overall_score,
-    feedback: critique.feedback,
-    suggestions: critique.suggestions,
+    approved: critique.approved,
+    feedbackItems: critique.feedback_items,
+    strengths: critique.strengths,
+    weaknesses: critique.weaknesses,
+    revisionRequired: critique.revision_required,
+    revisionFocus: critique.revision_focus,
     createdAt: critique.created_at,
   };
 }
 
-export function mapAuditLogToDTO(log: {
-  id: string;
-  project_id: string;
-  agent_name: string;
-  action: string;
-  input_summary?: string;
-  output_summary?: string;
-  token_usage?: unknown;
-  duration_ms?: number;
-  created_at: string;
-}): AuditLogDTO {
+export function mapAuditLogToDTO(log: AuditLog): AuditLogDTO {
   return {
     id: log.id,
     projectId: log.project_id,
