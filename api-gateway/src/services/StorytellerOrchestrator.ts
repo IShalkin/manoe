@@ -746,9 +746,10 @@ export class StorytellerOrchestrator {
    * Drafting Loop - Draft, Critique, Revise for each scene
    * 
    * Key improvements:
-   * 1. Word count validation with expansion loop before Critic
-   * 2. Polish only runs if scene was approved (not after failed revisions)
-   * 3. Strips fake "Word count:" claims from Writer output
+   * 1. Proactive Beats Method for scenes > 1000 target words (split into 3-4 parts upfront)
+   * 2. Word count validation with expansion loop before Critic (for shorter scenes)
+   * 3. Polish only runs if scene was approved (not after failed revisions)
+   * 4. Strips fake "Word count:" claims from Writer output
    */
   private async runDraftingLoop(
     runId: string,
@@ -770,12 +771,20 @@ export class StorytellerOrchestrator {
       const targetWordCount = safeParseWordCount(scene.wordCount, 1500);
       const minWordCount = Math.floor(targetWordCount * 0.7); // 70% threshold
 
-      // Draft the scene
-      await this.draftScene(runId, options, sceneNum + 1, scene);
+      // PROACTIVE BEATS METHOD: For scenes with target > 1000 words, split into parts upfront
+      // This prevents the Writer↔Critic deadlock where LLMs can't produce 1500+ words in one shot
+      const BEATS_THRESHOLD = 1000;
+      if (targetWordCount > BEATS_THRESHOLD) {
+        console.log(`[Orchestrator] Scene ${sceneNum + 1} target ${targetWordCount} words > ${BEATS_THRESHOLD}, using Proactive Beats Method`);
+        await this.draftSceneWithBeats(runId, options, sceneNum + 1, scene, targetWordCount);
+      } else {
+        // Standard single-shot drafting for shorter scenes
+        await this.draftScene(runId, options, sceneNum + 1, scene);
+      }
       if (this.shouldStop(runId)) return;
 
-      // Word count expansion loop - expand if too short before calling Critic
-      // This prevents the Critic↔Writer deadlock where Writer can't produce enough words
+      // Word count expansion loop - expand if still too short before calling Critic
+      // This is a fallback safety net after beats method or single-shot drafting
       let expansionAttempts = 0;
       const maxExpansions = 3;
       while (expansionAttempts < maxExpansions) {
@@ -976,6 +985,231 @@ export class StorytellerOrchestrator {
         $log.info(`[StorytellerOrchestrator] draftScene: triggered faithfulness evaluation for scene ${sceneNum} (rate limited), runId: ${runId}`);
       } catch (evalError) {
         $log.warn(`[StorytellerOrchestrator] draftScene: evaluation setup failed, continuing anyway, runId: ${runId}`, evalError);
+      }
+    }
+  }
+
+  /**
+   * Draft a scene using the Proactive Beats Method
+   * Splits the scene into 3-4 parts and generates each sequentially
+   * This prevents the Writer↔Critic deadlock where LLMs can't produce 1500+ words in one shot
+   * 
+   * @param targetWordCount - Total target word count for the scene
+   */
+  private async draftSceneWithBeats(
+    runId: string,
+    options: GenerationOptions,
+    sceneNum: number,
+    sceneOutline: Record<string, unknown>,
+    targetWordCount: number
+  ): Promise<void> {
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+
+    state.phase = GenerationPhase.DRAFTING;
+    state.currentScene = sceneNum;
+    
+    await this.publishEvent(runId, "scene_draft_start", { sceneNum, method: "beats" });
+
+    const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
+
+    // Calculate number of parts (3-4 based on target word count)
+    // ~500 words per part is optimal for LLM generation
+    const WORDS_PER_PART = 500;
+    const partsTotal = Math.min(4, Math.max(3, Math.ceil(targetWordCount / WORDS_PER_PART)));
+    const partTargetWords = Math.ceil(targetWordCount / partsTotal);
+
+    console.log(`[Orchestrator] Scene ${sceneNum} Beats Method: ${partsTotal} parts, ~${partTargetWords} words each`);
+
+    // Retrieve relevant context from Qdrant for hallucination prevention
+    const relevantContext = await this.getRelevantContext(options.projectId, sceneOutline);
+
+    let combinedContent = "";
+    const maxRetriesPerPart = 3;
+
+    for (let partIndex = 1; partIndex <= partsTotal; partIndex++) {
+      if (this.shouldStop(runId)) return;
+
+      await this.publishEvent(runId, "scene_beat_start", { 
+        sceneNum, 
+        partIndex, 
+        partsTotal,
+        partTargetWords 
+      });
+
+      let partContent = "";
+      let retryCount = 0;
+      const minPartWords = Math.floor(partTargetWords * 0.5); // 50% threshold per part
+
+      // Retry loop for this part
+      while (retryCount < maxRetriesPerPart) {
+        // Set currentSceneOutline with beat-specific instructions
+        state.currentSceneOutline = {
+          ...sceneOutline,
+          retrievedContext: relevantContext,
+          beatsMode: true,
+          partIndex,
+          partsTotal,
+          partTargetWords,
+          existingContent: combinedContent || undefined,
+          isFirstPart: partIndex === 1,
+          isFinalPart: partIndex === partsTotal,
+        };
+
+        // Use WriterAgent through AgentFactory
+        const agent = this.agentFactory.getAgent(AgentType.WRITER);
+        const context: AgentContext = {
+          runId,
+          state,
+          projectId: options.projectId,
+        };
+
+        const output = await agent.execute(context, options);
+        partContent = this.stripFakeWordCount(output.content as string);
+
+        // For parts 2+, strip overlap with existing content
+        if (partIndex > 1 && combinedContent) {
+          const rawPartContent = partContent;
+          const strippedContent = this.stripOverlap(combinedContent, partContent);
+          // Handle case where stripOverlap returns empty (LLM repeated all content)
+          if (!strippedContent || strippedContent.trim().length === 0) {
+            console.warn(`[Orchestrator] Scene ${sceneNum} Part ${partIndex}: stripOverlap returned empty, using raw content`);
+            partContent = rawPartContent; // Keep raw content instead of empty string
+          } else {
+            partContent = strippedContent;
+          }
+        }
+
+        const partWordCount = partContent.split(/\s+/).length;
+        
+        if (partWordCount >= minPartWords) {
+          console.log(`[Orchestrator] Scene ${sceneNum} Part ${partIndex}/${partsTotal}: ${partWordCount} words (target: ${partTargetWords})`);
+          break;
+        }
+
+        retryCount++;
+        console.log(`[Orchestrator] Scene ${sceneNum} Part ${partIndex} too short (${partWordCount}/${minPartWords}), retry ${retryCount}/${maxRetriesPerPart}`);
+      }
+
+      // FAIL-FAST: Check if we exhausted retries without meeting minimum word count
+      const finalPartWordCount = partContent.split(/\s+/).length;
+      if (retryCount >= maxRetriesPerPart && finalPartWordCount < minPartWords) {
+        await this.publishEvent(runId, "scene_beat_error", {
+          sceneNum,
+          partIndex,
+          partsTotal,
+          reason: `Failed to generate sufficient content after ${maxRetriesPerPart} attempts`,
+          wordsGenerated: finalPartWordCount,
+          wordsRequired: minPartWords
+        });
+        
+        console.error(`[Orchestrator] Scene ${sceneNum} Part ${partIndex} failed after ${maxRetriesPerPart} retries (${finalPartWordCount}/${minPartWords} words)`);
+        
+        throw new Error(`Scene ${sceneNum} beat ${partIndex} generation failed: insufficient content after ${maxRetriesPerPart} retries (got ${finalPartWordCount} words, needed ${minPartWords})`);
+      }
+
+      // Append part to combined content
+      if (partIndex === 1) {
+        combinedContent = partContent;
+      } else {
+        combinedContent = combinedContent + "\n\n" + partContent;
+      }
+
+      await this.publishEvent(runId, "scene_beat_complete", { 
+        sceneNum, 
+        partIndex, 
+        partsTotal,
+        partWordCount: partContent.split(/\s+/).length,
+        totalWordCount: combinedContent.split(/\s+/).length
+      });
+    }
+
+    // Create the final draft from combined content
+    const draft = {
+      sceneNum,
+      title: sceneTitle,
+      content: combinedContent,
+      wordCount: combinedContent.split(/\s+/).length,
+      createdAt: new Date().toISOString(),
+      beatsMethod: true,
+      partsGenerated: partsTotal,
+    };
+
+    state.drafts.set(sceneNum, draft);
+    state.updatedAt = new Date().toISOString();
+
+    // Extract and log raw facts
+    await this.extractRawFacts(runId, sceneNum, combinedContent, AgentType.WRITER);
+
+    // Store scene in Qdrant and Supabase (same as draftScene)
+    try {
+      const qdrantId = await this.qdrantMemory.storeScene(options.projectId, sceneNum, draft);
+
+      try {
+        await this.supabase.saveDraft(options.projectId, draft as Partial<Draft>, qdrantId, runId);
+      } catch (supabaseError) {
+        $log.error(
+          `[StorytellerOrchestrator] draftSceneWithBeats: Supabase storage failed for scene ${sceneNum} (continuing anyway), runId: ${runId}`,
+          supabaseError
+        );
+      }
+    } catch (qdrantError) {
+      $log.error(
+        `[StorytellerOrchestrator] draftSceneWithBeats: Qdrant storage failed for scene ${sceneNum} (continuing anyway), runId: ${runId}`,
+        qdrantError
+      );
+    }
+
+    await this.saveArtifact(runId, options.projectId, `draft_scene_${sceneNum}`, draft);
+
+    // Save draft to normalized Supabase table
+    try {
+      await this.supabase.upsertDraft({
+        projectId: options.projectId,
+        runId,
+        sceneNumber: sceneNum,
+        content: combinedContent,
+        wordCount: draft.wordCount,
+        status: "draft",
+        revisionCount: 0,
+      });
+      $log.info(`[StorytellerOrchestrator] draftSceneWithBeats: saved draft to Supabase, scene ${sceneNum}, runId: ${runId}`);
+    } catch (supabaseError) {
+      $log.error(`[StorytellerOrchestrator] draftSceneWithBeats: Supabase upsertDraft failed, continuing anyway, runId: ${runId}`, supabaseError);
+    }
+
+    // Restore the original scene outline (without beats mode)
+    state.currentSceneOutline = {
+      ...sceneOutline,
+      retrievedContext: relevantContext,
+    };
+
+    await this.publishEvent(runId, "scene_draft_complete", { 
+      sceneNum, 
+      wordCount: draft.wordCount,
+      method: "beats",
+      partsGenerated: partsTotal
+    });
+
+    // LLM-as-a-Judge evaluation (same as draftScene)
+    if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+      try {
+        const architectPlan = JSON.stringify(sceneOutline, null, 2);
+        
+        this.evaluationRateLimiter(() =>
+          this.evaluationService.evaluateFaithfulness({
+            runId,
+            writerOutput: combinedContent,
+            architectPlan,
+            sceneNumber: sceneNum,
+          })
+        ).catch((err) => {
+          $log.warn(`[StorytellerOrchestrator] Faithfulness evaluation failed for scene ${sceneNum}: ${err.message}`);
+        });
+        
+        $log.info(`[StorytellerOrchestrator] draftSceneWithBeats: triggered faithfulness evaluation for scene ${sceneNum} (rate limited), runId: ${runId}`);
+      } catch (evalError) {
+        $log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: evaluation setup failed, continuing anyway, runId: ${runId}`, evalError);
       }
     }
   }

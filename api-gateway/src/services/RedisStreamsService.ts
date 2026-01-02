@@ -550,9 +550,21 @@ export class RedisStreamsService {
     const client = this.getClient();
     const streamKey = this.getStreamKey(runId);
 
+    // Cap at 5000 to prevent memory issues if consumer is far behind
+    // This gives approximate lag which is sufficient for metrics
+    const MAX_LAG_COUNT = 5000;
+
     try {
-      // Use XRANGE to count events after the given ID
-      const entries = await client.xrange(streamKey, `(${afterId}`, "+");
+      // Use XRANGE with COUNT limit to avoid loading too many entries into memory
+      const entries = await client.xrange(
+        streamKey,
+        `(${afterId}`,
+        "+",
+        "COUNT",
+        MAX_LAG_COUNT.toString()
+      );
+      // If we hit the limit, return the limit as approximate lag
+      // (actual lag may be higher but this is sufficient for alerting)
       return entries.length;
     } catch (error) {
       console.error("[RedisStreamsService] Error counting events after ID:", error);
