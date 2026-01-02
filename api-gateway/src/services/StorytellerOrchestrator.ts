@@ -42,6 +42,7 @@ import { SupabaseService } from "./SupabaseService";
 import { AgentFactory } from "../agents/AgentFactory";
 import { AgentContext } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
+import { ArchivistAgent } from "../agents/ArchivistAgent";
 
 /**
  * LLM Configuration for generation
@@ -426,6 +427,17 @@ export class StorytellerOrchestrator {
       }
     } catch (supabaseError) {
       $log.error(`[StorytellerOrchestrator] runCharactersPhase: Supabase upsertCharacters failed, continuing anyway, runId: ${runId}`, supabaseError);
+    }
+
+    // Phase 4: Initialize world state after characters are created
+    try {
+      if (Array.isArray(state.characters)) {
+        const archivistAgent = this.agentFactory.getAgent(AgentType.ARCHIVIST) as ArchivistAgent;
+        state.worldState = archivistAgent.buildInitialWorldState(runId, state.characters);
+        $log.info(`[StorytellerOrchestrator] runCharactersPhase: initialized world state with ${state.characters.length} characters, runId: ${runId}`);
+      }
+    } catch (worldStateError) {
+      $log.error(`[StorytellerOrchestrator] runCharactersPhase: world state initialization failed, continuing anyway, runId: ${runId}`, worldStateError);
     }
 
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: publishing phase complete, runId: ${runId}`);
@@ -1264,6 +1276,21 @@ export class StorytellerOrchestrator {
         } else {
           state.keyConstraints.push(newConstraint);
         }
+      }
+    }
+
+    // Phase 4: Apply world state diff from Archivist output
+    if (result.worldStateDiff && state.worldState) {
+      try {
+        const archivistAgent = agent as ArchivistAgent;
+        state.worldState = archivistAgent.applyWorldStateDiff(
+          state.worldState,
+          result.worldStateDiff as Record<string, unknown>,
+          upToScene
+        );
+        $log.info(`[StorytellerOrchestrator] runArchivistCheck: applied world state diff for scene ${upToScene}, runId: ${runId}`);
+      } catch (worldStateError) {
+        $log.error(`[StorytellerOrchestrator] runArchivistCheck: world state diff application failed, continuing anyway, runId: ${runId}`, worldStateError);
       }
     }
 

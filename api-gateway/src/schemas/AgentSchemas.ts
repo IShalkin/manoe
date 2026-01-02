@@ -231,6 +231,23 @@ export const ArchivistOutputSchema = z.object({
   ),
   conflicts_resolved: z.array(z.string()).optional(),
   discarded_facts: z.array(z.string()).optional(),
+  worldStateDiff: z.object({
+    characterUpdates: z.array(z.object({
+      name: z.string(),
+      status: z.enum(["alive", "dead", "unknown", "transformed"]).optional(),
+      currentLocation: z.string().optional(),
+      newAttributes: z.record(z.string()).optional(),
+    })).optional(),
+    newLocations: z.array(z.object({
+      name: z.string(),
+      type: z.string(),
+      description: z.string().optional(),
+    })).optional(),
+    timelineEvents: z.array(z.object({
+      event: z.string(),
+      significance: z.enum(["major", "minor", "background"]).optional(),
+    })).optional(),
+  }).optional(),
 });
 
 /**
