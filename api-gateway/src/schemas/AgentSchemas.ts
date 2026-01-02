@@ -236,7 +236,8 @@ const normalizeSignificance = (val: unknown): "major" | "minor" | "background" |
   }
   // Only use includes() if the string doesn't contain conflicting keywords
   // This prevents "slightly critical" from being classified as "major"
-  if (!lower.includes("small") && !lower.includes("slight") && !lower.includes("minor")) {
+  // Use word boundaries to avoid matching "minor" in "minority" etc.
+  if (!/\b(small|slight|minor)\b/.test(lower)) {
     if (lower.includes("critical") || 
         lower.includes("turning point") ||
         lower.includes("pivotal") ||
