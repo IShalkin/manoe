@@ -195,6 +195,73 @@ const ArchivistConstraintSchema = z.object({
 });
 
 /**
+ * Normalize character status from LLM output to valid enum value
+ * Maps common variations to standard values
+ */
+const normalizeCharacterStatus = (val: unknown): "alive" | "dead" | "unknown" | "transformed" | undefined => {
+  if (val === null || val === undefined) return undefined;
+  if (typeof val !== "string") return undefined;
+  
+  const lower = val.toLowerCase().trim();
+  
+  // Map to "alive"
+  if (["alive", "active", "living", "healthy", "well", "present"].includes(lower)) {
+    return "alive";
+  }
+  // Map to "dead"
+  if (["dead", "deceased", "killed", "died", "perished"].includes(lower)) {
+    return "dead";
+  }
+  // Map to "transformed"
+  if (["transformed", "changed", "mutated", "evolved", "altered"].includes(lower)) {
+    return "transformed";
+  }
+  // Default to "unknown" for unrecognized values
+  return "unknown";
+};
+
+/**
+ * Normalize event significance from LLM output to valid enum value
+ * Maps common variations and descriptions to standard values
+ */
+const normalizeSignificance = (val: unknown): "major" | "minor" | "background" | undefined => {
+  if (val === null || val === undefined) return undefined;
+  if (typeof val !== "string") return undefined;
+  
+  const lower = val.toLowerCase().trim();
+  
+  // Map to "major" - check for keywords indicating high importance
+  if (lower === "major" || 
+      lower.includes("critical") || 
+      lower.includes("turning point") ||
+      lower.includes("pivotal") ||
+      lower.includes("key") ||
+      lower.includes("crucial") ||
+      lower.includes("significant")) {
+    return "major";
+  }
+  // Map to "minor"
+  if (lower === "minor" || lower.includes("small") || lower.includes("slight")) {
+    return "minor";
+  }
+  // Map to "background"
+  if (lower === "background" || lower.includes("flavor") || lower.includes("ambient") || lower.includes("detail")) {
+    return "background";
+  }
+  // Default to "minor" for unrecognized values (safer than major)
+  return "minor";
+};
+
+/**
+ * Preprocess null to undefined for optional string fields
+ */
+const nullToUndefined = (val: unknown): string | undefined => {
+  if (val === null || val === undefined) return undefined;
+  if (typeof val !== "string") return undefined;
+  return val;
+};
+
+/**
  * Archivist Output schema (from ArchivistAgent)
  * Uses preprocessing to filter out invalid constraints (null values, empty strings)
  * before validation to handle LLM returning malformed data
@@ -232,21 +299,50 @@ export const ArchivistOutputSchema = z.object({
   conflicts_resolved: z.array(z.string()).optional(),
   discarded_facts: z.array(z.string()).optional(),
   worldStateDiff: z.object({
-    characterUpdates: z.array(z.object({
-      name: z.string(),
-      status: z.enum(["alive", "dead", "unknown", "transformed"]).optional(),
-      currentLocation: z.string().optional(),
-      newAttributes: z.record(z.string()).optional(),
-    })).optional(),
+    characterUpdates: z.preprocess(
+      (val) => {
+        if (!Array.isArray(val)) return val;
+        // Normalize each character update's status and currentLocation
+        return val.map((item) => {
+          if (typeof item !== "object" || item === null) return item;
+          const obj = item as Record<string, unknown>;
+          return {
+            ...obj,
+            status: normalizeCharacterStatus(obj.status),
+            currentLocation: nullToUndefined(obj.currentLocation),
+          };
+        });
+      },
+      z.array(z.object({
+        name: z.string(),
+        status: z.enum(["alive", "dead", "unknown", "transformed"]).optional(),
+        currentLocation: z.string().optional(),
+        newAttributes: z.record(z.string()).optional(),
+      })).optional()
+    ),
     newLocations: z.array(z.object({
       name: z.string(),
       type: z.string(),
       description: z.string().optional(),
     })).optional(),
-    timelineEvents: z.array(z.object({
-      event: z.string(),
-      significance: z.enum(["major", "minor", "background"]).optional(),
-    })).optional(),
+    timelineEvents: z.preprocess(
+      (val) => {
+        if (!Array.isArray(val)) return val;
+        // Normalize each timeline event's significance
+        return val.map((item) => {
+          if (typeof item !== "object" || item === null) return item;
+          const obj = item as Record<string, unknown>;
+          return {
+            ...obj,
+            significance: normalizeSignificance(obj.significance),
+          };
+        });
+      },
+      z.array(z.object({
+        event: z.string(),
+        significance: z.enum(["major", "minor", "background"]).optional(),
+      })).optional()
+    ),
   }).optional(),
 });
 
