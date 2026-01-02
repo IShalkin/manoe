@@ -215,6 +215,86 @@ docker restart supabase-kong
 | Langfuse | 3000 | Via nginx-proxy |
 | Redis | 6379 | Internal only |
 
+## State Recovery
+
+The orchestrator supports automatic state recovery after container restarts. This ensures that active generation runs survive deployments and crashes.
+
+### How It Works
+
+1. **Graceful Shutdown**: When the api-gateway receives SIGTERM/SIGINT, it pauses all active runs and saves their state to Supabase as "run_snapshot" artifacts.
+
+2. **Automatic Restoration**: On startup, the server calls `restoreAllInterruptedRuns()` which:
+   - Queries Supabase for all interrupted run snapshots
+   - Deserializes the state (including Maps for drafts, critiques, revision counts)
+   - Restores runs to memory
+   - Publishes `run_restored` events to notify connected clients
+
+3. **Client Notification**: Clients receive a `run_restored` event with the message "Generation restored after server restart. Call resume to continue."
+
+### Verification
+
+Check the api-gateway logs after a restart to verify state recovery:
+
+```bash
+docker logs manoe-api-gateway 2>&1 | grep -E "Server:|Orchestrator:" | head -20
+```
+
+Expected output:
+```
+Server: Initializing state recovery...
+Orchestrator: Checking for ALL interrupted runs to restore...
+Orchestrator: Found N interrupted runs to restore
+Orchestrator: Restored run <uuid> (phase: drafting, scene: 5)
+...
+```
+
+### Manual Recovery
+
+To manually restore a specific run:
+
+```bash
+# Call the restore endpoint (if implemented)
+curl -X POST https://manoe-gateway.yourdomain.com/api/orchestration/restore/<runId>
+```
+
+## Monitoring
+
+### Grafana
+
+Grafana provides dashboards for monitoring agent performance and LLM costs.
+
+**URL**: `https://grafana.yourdomain.com`
+
+**Key Dashboards**:
+- **MANOE Agent Metrics**: Shows agent success rate, latency (p95), LLM costs per agent, and token usage
+
+**Metrics Tracked**:
+- Agent success/failure rates
+- Agent latency percentiles
+- Token usage per agent (hourly)
+- LLM cost per agent (hourly)
+
+### Langfuse
+
+Langfuse provides LLM tracing, prompt management, and cost tracking.
+
+**URL**: `https://langfuse.yourdomain.com`
+
+**Key Features**:
+- **Traces**: View detailed traces for each generation run
+- **Agent Calls**: See individual agent calls (architect, profiler, worldbuilder, writer, critic) with:
+  - Duration and cost
+  - Model used
+  - Input/output token counts
+- **Cost Tracking**: Total cost per trace and per model
+- **Tags**: Filter by phase (genesis, characters, worldbuilding, drafting, etc.)
+
+**Verification**:
+```bash
+# Check Langfuse is healthy
+curl https://langfuse.yourdomain.com/api/public/health
+```
+
 ## Health Checks
 
 Verify all services are healthy:
@@ -228,4 +308,7 @@ docker exec manoe-api-gateway curl http://qdrant:6333/
 
 # Langfuse
 curl https://langfuse.yourdomain.com/api/public/health
+
+# Grafana
+curl -I https://grafana.yourdomain.com
 ```
