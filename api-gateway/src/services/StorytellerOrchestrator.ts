@@ -124,6 +124,24 @@ export interface RunStatus {
   updatedAt: string;
 }
 
+/**
+ * Scene draft with optional semantic consistency check results
+ * Used internally during generation before persisting to Supabase
+ * Index signature allows compatibility with Record<string, unknown> for state.drafts
+ */
+interface SceneDraft {
+  sceneNum: number;
+  title: string;
+  content: string;
+  wordCount: number;
+  createdAt: string;
+  beatsMethod?: boolean;
+  partsGenerated?: number;
+  semanticCheckError?: string;
+  contradictionScore?: number;
+  [key: string]: string | number | boolean | undefined;
+}
+
 @Service()
 export class StorytellerOrchestrator {
   private activeRuns: Map<string, GenerationState> = new Map();
@@ -203,14 +221,20 @@ export class StorytellerOrchestrator {
       options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined
     );
 
-    // Initialize WorldBibleEmbeddingService with dedicated embedding API key
-    // Falls back to LLM provider key if no dedicated embedding key is provided
-    const embeddingOpenAiKey = options.llmConfig.provider === LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined;
+    // Initialize WorldBibleEmbeddingService with embedding API key
+    // Priority: 1) Dedicated embedding API key (Gemini), 2) LLM provider key as fallback
+    // Note: WorldBibleEmbeddingService prefers Gemini over OpenAI when both keys are provided
+    // This allows users to use a dedicated Gemini key for embeddings even when using OpenAI for LLM
     const embeddingGeminiKey = options.embeddingApiKey || 
       (options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined);
+    const embeddingOpenAiKey = !embeddingGeminiKey && options.llmConfig.provider === LLMProvider.OPENAI 
+      ? options.llmConfig.apiKey 
+      : undefined;
     
     await this.worldBibleEmbedding.connect(embeddingOpenAiKey, embeddingGeminiKey);
-    $log.info(`[StorytellerOrchestrator] WorldBibleEmbeddingService initialized, embeddingApiKey: ${options.embeddingApiKey ? 'dedicated' : 'fallback to LLM key'}`);
+    const embeddingSource = options.embeddingApiKey ? 'dedicated Gemini key' : 
+      (embeddingGeminiKey ? 'LLM Gemini key' : (embeddingOpenAiKey ? 'LLM OpenAI key' : 'none'));
+    $log.info(`[StorytellerOrchestrator] WorldBibleEmbeddingService initialized with: ${embeddingSource}`);
 
     // Start Langfuse trace
     this.langfuse.startTrace({
@@ -958,7 +982,7 @@ export class StorytellerOrchestrator {
     // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
     const response = this.stripFakeWordCount(output.content as string);
 
-    const draft = {
+    const draft: SceneDraft = {
       sceneNum,
       title: sceneTitle,
       content: response,
@@ -971,7 +995,6 @@ export class StorytellerOrchestrator {
 
     // Check semantic consistency against World Bible entries
     // This helps detect contradictions between new content and established facts
-    let semanticCheckError: string | undefined;
     if (this.worldBibleEmbedding.connected) {
       try {
         const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(
@@ -979,11 +1002,9 @@ export class StorytellerOrchestrator {
           response
         );
         if (consistencyResult.hasContradiction) {
-          semanticCheckError = consistencyResult.explanation;
-          $log.warn(`[StorytellerOrchestrator] draftScene: Semantic consistency warning for scene ${sceneNum}: ${semanticCheckError}, runId: ${runId}`);
-          // Store the semantic check result in the draft for frontend display
-          (draft as Record<string, unknown>).semanticCheckError = semanticCheckError;
-          (draft as Record<string, unknown>).contradictionScore = consistencyResult.contradictionScore;
+          draft.semanticCheckError = consistencyResult.explanation;
+          draft.contradictionScore = consistencyResult.contradictionScore;
+          $log.warn(`[StorytellerOrchestrator] draftScene: Semantic consistency warning for scene ${sceneNum}: ${draft.semanticCheckError}, runId: ${runId}`);
         } else {
           $log.info(`[StorytellerOrchestrator] draftScene: Semantic consistency check passed for scene ${sceneNum}, runId: ${runId}`);
         }
@@ -1198,7 +1219,7 @@ export class StorytellerOrchestrator {
     }
 
     // Create the final draft from combined content
-    const draft = {
+    const draft: SceneDraft = {
       sceneNum,
       title: sceneTitle,
       content: combinedContent,
@@ -1213,7 +1234,6 @@ export class StorytellerOrchestrator {
 
     // Check semantic consistency against World Bible entries (same as draftScene)
     // This helps detect contradictions between new content and established facts
-    let semanticCheckError: string | undefined;
     if (this.worldBibleEmbedding.connected) {
       try {
         const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(
@@ -1221,11 +1241,9 @@ export class StorytellerOrchestrator {
           combinedContent
         );
         if (consistencyResult.hasContradiction) {
-          semanticCheckError = consistencyResult.explanation;
-          $log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency warning for scene ${sceneNum}: ${semanticCheckError}, runId: ${runId}`);
-          // Store the semantic check result in the draft for frontend display
-          (draft as Record<string, unknown>).semanticCheckError = semanticCheckError;
-          (draft as Record<string, unknown>).contradictionScore = consistencyResult.contradictionScore;
+          draft.semanticCheckError = consistencyResult.explanation;
+          draft.contradictionScore = consistencyResult.contradictionScore;
+          $log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency warning for scene ${sceneNum}: ${draft.semanticCheckError}, runId: ${runId}`);
         } else {
           $log.info(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency check passed for scene ${sceneNum}, runId: ${runId}`);
         }
