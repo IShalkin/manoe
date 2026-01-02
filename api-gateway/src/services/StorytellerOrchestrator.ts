@@ -45,6 +45,7 @@ import { AgentContext } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
+import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
 
 /**
  * Simple rate limiter for concurrent async operations
@@ -103,6 +104,8 @@ export interface GenerationOptions {
   llmConfig: LLMConfiguration;
   mode: "full" | "branching";
   settings?: Record<string, unknown>;
+  /** Embedding API key for WorldBibleEmbeddingService (Gemini API key) */
+  embeddingApiKey?: string;
 }
 
 /**
@@ -155,6 +158,9 @@ export class StorytellerOrchestrator {
   @Inject()
   private evaluationService: EvaluationService;
 
+  @Inject()
+  private worldBibleEmbedding: WorldBibleEmbeddingService;
+
   /**
    * Start a new generation run
    * 
@@ -196,6 +202,15 @@ export class StorytellerOrchestrator {
       options.llmConfig.provider === LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined,
       options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined
     );
+
+    // Initialize WorldBibleEmbeddingService with dedicated embedding API key
+    // Falls back to LLM provider key if no dedicated embedding key is provided
+    const embeddingOpenAiKey = options.llmConfig.provider === LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined;
+    const embeddingGeminiKey = options.embeddingApiKey || 
+      (options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined);
+    
+    await this.worldBibleEmbedding.connect(embeddingOpenAiKey, embeddingGeminiKey);
+    $log.info(`[StorytellerOrchestrator] WorldBibleEmbeddingService initialized, embeddingApiKey: ${options.embeddingApiKey ? 'dedicated' : 'fallback to LLM key'}`);
 
     // Start Langfuse trace
     this.langfuse.startTrace({
@@ -585,6 +600,23 @@ export class StorytellerOrchestrator {
       }
     }
 
+    // Index characters in WorldBibleEmbeddingService for semantic consistency checking
+    // Runs asynchronously to not block generation - errors are logged but don't fail the phase
+    if (this.worldBibleEmbedding.connected && Array.isArray(state.characters)) {
+      try {
+        const indexResult = await this.worldBibleEmbedding.indexCharacters(
+          options.projectId,
+          state.characters
+        );
+        $log.info(`[StorytellerOrchestrator] runCharactersPhase: indexed ${indexResult.indexed} characters in WorldBibleEmbedding, errors: ${indexResult.errors.length}, runId: ${runId}`);
+        if (indexResult.errors.length > 0) {
+          $log.warn(`[StorytellerOrchestrator] runCharactersPhase: WorldBibleEmbedding indexing errors: ${indexResult.errors.join(', ')}, runId: ${runId}`);
+        }
+      } catch (embeddingError) {
+        $log.warn(`[StorytellerOrchestrator] runCharactersPhase: WorldBibleEmbedding indexing failed, continuing anyway, runId: ${runId}`, embeddingError);
+      }
+    }
+
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: publishing phase complete, runId: ${runId}`);
     await this.publishPhaseComplete(runId, GenerationPhase.CHARACTERS, state.characters);
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: completed, runId: ${runId}`);
@@ -679,6 +711,24 @@ export class StorytellerOrchestrator {
     }
 
     await this.saveArtifact(runId, options.projectId, "worldbuilding", state.worldbuilding);
+
+    // Index worldbuilding in WorldBibleEmbeddingService for semantic consistency checking
+    // Runs after storage to ensure data is persisted first - errors are logged but don't fail the phase
+    if (this.worldBibleEmbedding.connected && state.worldbuilding) {
+      try {
+        const indexResult = await this.worldBibleEmbedding.indexWorldbuilding(
+          options.projectId,
+          state.worldbuilding as Record<string, unknown>
+        );
+        $log.info(`[StorytellerOrchestrator] runWorldbuildingPhase: indexed ${indexResult.indexed} worldbuilding elements in WorldBibleEmbedding, errors: ${indexResult.errors.length}, runId: ${runId}`);
+        if (indexResult.errors.length > 0) {
+          $log.warn(`[StorytellerOrchestrator] runWorldbuildingPhase: WorldBibleEmbedding indexing errors: ${indexResult.errors.join(', ')}, runId: ${runId}`);
+        }
+      } catch (embeddingError) {
+        $log.warn(`[StorytellerOrchestrator] runWorldbuildingPhase: WorldBibleEmbedding indexing failed, continuing anyway, runId: ${runId}`, embeddingError);
+      }
+    }
+
     await this.publishPhaseComplete(runId, GenerationPhase.WORLDBUILDING, state.worldbuilding);
   }
 
@@ -919,6 +969,29 @@ export class StorytellerOrchestrator {
     state.drafts.set(sceneNum, draft);
     state.updatedAt = new Date().toISOString();
 
+    // Check semantic consistency against World Bible entries
+    // This helps detect contradictions between new content and established facts
+    let semanticCheckError: string | undefined;
+    if (this.worldBibleEmbedding.connected) {
+      try {
+        const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(
+          options.projectId,
+          response
+        );
+        if (consistencyResult.hasContradiction) {
+          semanticCheckError = consistencyResult.explanation;
+          $log.warn(`[StorytellerOrchestrator] draftScene: Semantic consistency warning for scene ${sceneNum}: ${semanticCheckError}, runId: ${runId}`);
+          // Store the semantic check result in the draft for frontend display
+          (draft as Record<string, unknown>).semanticCheckError = semanticCheckError;
+          (draft as Record<string, unknown>).contradictionScore = consistencyResult.contradictionScore;
+        } else {
+          $log.info(`[StorytellerOrchestrator] draftScene: Semantic consistency check passed for scene ${sceneNum}, runId: ${runId}`);
+        }
+      } catch (consistencyError) {
+        $log.warn(`[StorytellerOrchestrator] draftScene: Semantic consistency check failed, continuing anyway, runId: ${runId}`, consistencyError);
+      }
+    }
+
     // Extract and log raw facts
     await this.extractRawFacts(runId, sceneNum, response, AgentType.WRITER);
 
@@ -1137,6 +1210,29 @@ export class StorytellerOrchestrator {
 
     state.drafts.set(sceneNum, draft);
     state.updatedAt = new Date().toISOString();
+
+    // Check semantic consistency against World Bible entries (same as draftScene)
+    // This helps detect contradictions between new content and established facts
+    let semanticCheckError: string | undefined;
+    if (this.worldBibleEmbedding.connected) {
+      try {
+        const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(
+          options.projectId,
+          combinedContent
+        );
+        if (consistencyResult.hasContradiction) {
+          semanticCheckError = consistencyResult.explanation;
+          $log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency warning for scene ${sceneNum}: ${semanticCheckError}, runId: ${runId}`);
+          // Store the semantic check result in the draft for frontend display
+          (draft as Record<string, unknown>).semanticCheckError = semanticCheckError;
+          (draft as Record<string, unknown>).contradictionScore = consistencyResult.contradictionScore;
+        } else {
+          $log.info(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency check passed for scene ${sceneNum}, runId: ${runId}`);
+        }
+      } catch (consistencyError) {
+        $log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency check failed, continuing anyway, runId: ${runId}`, consistencyError);
+      }
+    }
 
     // Extract and log raw facts
     await this.extractRawFacts(runId, sceneNum, combinedContent, AgentType.WRITER);
