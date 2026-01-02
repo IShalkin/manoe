@@ -126,6 +126,10 @@ export class StorytellerOrchestrator {
   private activeRuns: Map<string, GenerationState> = new Map();
   private pauseCallbacks: Map<string, () => boolean> = new Map();
   private isShuttingDown: boolean = false;
+  
+  // Shared rate limiter for all evaluation calls (max 3 concurrent)
+  // This ensures consistent rate limiting across relevance and faithfulness evaluations
+  private evaluationRateLimiter = createRateLimiter(3);
 
   @Inject()
   private llmProvider: LLMProviderService;
@@ -557,15 +561,13 @@ export class StorytellerOrchestrator {
     if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
       try {
         if (Array.isArray(state.characters)) {
-          // Rate limit concurrent evaluation calls to avoid hitting LLM provider limits
-          const evaluationLimit = createRateLimiter(3);
-          
           for (const character of state.characters) {
             const characterName = String(character.name || "Unknown");
             const profilerOutput = JSON.stringify(character, null, 2);
             
             // Fire and forget with rate limiting - don't await to avoid blocking generation
-            evaluationLimit(() => 
+            // Uses shared class-level rate limiter (max 3 concurrent) for all evaluation calls
+            this.evaluationRateLimiter(() => 
               this.evaluationService.evaluateRelevance({
                 runId,
                 profilerOutput,
@@ -953,21 +955,25 @@ export class StorytellerOrchestrator {
 
     // LLM-as-a-Judge: Evaluate faithfulness of Writer output to Architect plan
     // Runs asynchronously to not block generation
+    // Uses shared rate limiter (max 3 concurrent) to avoid hitting LLM provider rate limits
     if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
       try {
         const architectPlan = JSON.stringify(sceneOutline, null, 2);
         
-        // Fire and forget - don't await to avoid blocking generation
-        this.evaluationService.evaluateFaithfulness({
-          runId,
-          writerOutput: response,
-          architectPlan,
-          sceneNumber: sceneNum,
-        }).catch((err) => {
+        // Fire and forget with rate limiting - don't await to avoid blocking generation
+        // Uses shared class-level rate limiter (max 3 concurrent) for all evaluation calls
+        this.evaluationRateLimiter(() =>
+          this.evaluationService.evaluateFaithfulness({
+            runId,
+            writerOutput: response,
+            architectPlan,
+            sceneNumber: sceneNum,
+          })
+        ).catch((err) => {
           $log.warn(`[StorytellerOrchestrator] Faithfulness evaluation failed for scene ${sceneNum}: ${err.message}`);
         });
         
-        $log.info(`[StorytellerOrchestrator] draftScene: triggered faithfulness evaluation for scene ${sceneNum}, runId: ${runId}`);
+        $log.info(`[StorytellerOrchestrator] draftScene: triggered faithfulness evaluation for scene ${sceneNum} (rate limited), runId: ${runId}`);
       } catch (evalError) {
         $log.warn(`[StorytellerOrchestrator] draftScene: evaluation setup failed, continuing anyway, runId: ${runId}`, evalError);
       }
