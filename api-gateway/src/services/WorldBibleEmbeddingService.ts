@@ -18,6 +18,7 @@ import { QdrantClient } from "@qdrant/js-client-rest";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { v4 as uuidv4 } from "uuid";
+import crypto from "crypto";
 import { MetricsService } from "./MetricsService";
 import { stringifyForPrompt } from "../utils/schemaNormalizers";
 
@@ -178,21 +179,22 @@ export class WorldBibleEmbeddingService {
       const result = await model.embedContent(text);
       return result.embedding.values;
     } else {
+      // WARNING: Local embeddings use random vectors - semantic search will not work correctly
+      // In production, configure OpenAI or Gemini API key for real embeddings
+      console.warn(
+        "WorldBibleEmbedding: Using random vectors for local embeddings. " +
+        "Semantic consistency checking will NOT work correctly. " +
+        "Configure OPENAI_API_KEY or GEMINI_API_KEY for real embeddings."
+      );
       return Array.from({ length: this.embeddingDimension }, () => Math.random() - 0.5);
     }
   }
 
   /**
-   * Generate a content hash for deduplication
+   * Generate a content hash for deduplication using SHA-256
    */
   private generateContentHash(content: string): string {
-    let hash = 0;
-    for (let i = 0; i < content.length; i++) {
-      const char = content.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return Math.abs(hash).toString(16);
+    return crypto.createHash("sha256").update(content).digest("hex");
   }
 
   /**

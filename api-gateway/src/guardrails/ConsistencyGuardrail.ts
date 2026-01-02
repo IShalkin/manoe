@@ -223,7 +223,7 @@ export class ConsistencyGuardrail {
             `Contradicts constraint: ${constraint.key} = ${constraint.value} (Scene ${constraint.sceneNumber})`
           );
         }
-        if (constraintValue.includes("alive") && contentLower.includes("died") || contentLower.includes("dead")) {
+        if (constraintValue.includes("alive") && (contentLower.includes("died") || contentLower.includes("dead"))) {
           violations.push(
             `Contradicts constraint: ${constraint.key} = ${constraint.value} (Scene ${constraint.sceneNumber})`
           );
