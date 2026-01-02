@@ -109,13 +109,13 @@ describe("WorldBibleEmbeddingService", () => {
       };
 
       const pointId = await service.storeCharacter("project-1", character);
-      expect(pointId).toBe("test-uuid-1234");
+      expect(pointId).toMatch(/^[a-f0-9]{64}$/);
       expect(mockUpsert).toHaveBeenCalledWith(
         expect.stringContaining("world_bible"),
         expect.objectContaining({
           points: expect.arrayContaining([
             expect.objectContaining({
-              id: "test-uuid-1234",
+              id: expect.stringMatching(/^[a-f0-9]{64}$/),
               payload: expect.objectContaining({
                 projectId: "project-1",
                 sectionType: WorldBibleSectionType.CHARACTER,
@@ -126,15 +126,24 @@ describe("WorldBibleEmbeddingService", () => {
       );
     });
 
-    it("should return existing ID if content already exists", async () => {
-      mockScroll.mockResolvedValueOnce({
-        points: [{ id: "existing-id-5678" }],
-      });
-
+    it("should generate deterministic ID for same content", async () => {
       const character = { name: "Jane Doe", role: "antagonist" };
-      const pointId = await service.storeCharacter("project-1", character);
-      expect(pointId).toBe("existing-id-5678");
-      expect(mockUpsert).not.toHaveBeenCalled();
+      
+      const pointId1 = await service.storeCharacter("project-1", character);
+      jest.clearAllMocks();
+      const pointId2 = await service.storeCharacter("project-1", character);
+      
+      expect(pointId1).toBe(pointId2);
+    });
+
+    it("should call OpenAI embeddings with correct parameters", async () => {
+      const character = { name: "Test Character", role: "test" };
+      await service.storeCharacter("project-1", character);
+      
+      expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
+        model: "text-embedding-3-small",
+        input: expect.stringContaining("Test Character"),
+      });
     });
   });
 
@@ -152,7 +161,7 @@ describe("WorldBibleEmbeddingService", () => {
       };
 
       const pointId = await service.storeLocation("project-1", location);
-      expect(pointId).toBe("test-uuid-1234");
+      expect(pointId).toMatch(/^[a-f0-9]{64}$/);
       expect(mockUpsert).toHaveBeenCalledWith(
         expect.stringContaining("world_bible"),
         expect.objectContaining({
@@ -173,7 +182,7 @@ describe("WorldBibleEmbeddingService", () => {
       await service.connect("test-openai-key");
     });
 
-    it("should store a world rule", async () => {
+    it("should store a world rule and return deterministic ID", async () => {
       const rule = {
         category: "magic",
         name: "Law of Equivalent Exchange",
@@ -182,7 +191,7 @@ describe("WorldBibleEmbeddingService", () => {
       };
 
       const pointId = await service.storeRule("project-1", rule);
-      expect(pointId).toBe("test-uuid-1234");
+      expect(pointId).toMatch(/^[a-f0-9]{64}$/);
       expect(mockUpsert).toHaveBeenCalledWith(
         expect.stringContaining("world_bible"),
         expect.objectContaining({
@@ -340,6 +349,33 @@ describe("WorldBibleEmbeddingService", () => {
       expect(result.hasContradiction).toBe(true);
       expect(result.conflictingSections).toHaveLength(1);
     });
+
+    it("should flag contradictions at exact threshold boundary", async () => {
+      mockSearch.mockResolvedValueOnce([
+        {
+          id: "result-1",
+          score: 0.7,
+          payload: {
+            projectId: "project-1",
+            sectionType: WorldBibleSectionType.CHARACTER,
+            content: "Boundary test content",
+            metadata: {},
+            contentHash: "boundary",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      ]);
+
+      const result = await service.checkSemanticConsistency(
+        "project-1",
+        "Test query at boundary",
+        0.7
+      );
+
+      expect(result.hasContradiction).toBe(true);
+      expect(result.conflictingSections).toHaveLength(1);
+    });
   });
 
   describe("indexWorldbuilding", () => {
@@ -427,6 +463,7 @@ describe("WorldBibleEmbeddingService", () => {
             },
           },
         ],
+        next_page_offset: null,
       });
 
       const sections = await service.getProjectSections("project-1");
@@ -434,6 +471,10 @@ describe("WorldBibleEmbeddingService", () => {
     });
 
     it("should filter by section type", async () => {
+      mockScroll.mockResolvedValueOnce({
+        points: [],
+        next_page_offset: null,
+      });
       await service.getProjectSections("project-1", WorldBibleSectionType.CHARACTER);
       expect(mockScroll).toHaveBeenCalledWith(
         expect.any(String),
@@ -445,6 +486,27 @@ describe("WorldBibleEmbeddingService", () => {
           }),
         })
       );
+    });
+
+    it("should paginate through all results", async () => {
+      mockScroll
+        .mockResolvedValueOnce({
+          points: [
+            { id: "1", payload: { projectId: "project-1", content: "Page 1 Item 1" } },
+            { id: "2", payload: { projectId: "project-1", content: "Page 1 Item 2" } },
+          ],
+          next_page_offset: "offset-1",
+        })
+        .mockResolvedValueOnce({
+          points: [
+            { id: "3", payload: { projectId: "project-1", content: "Page 2 Item 1" } },
+          ],
+          next_page_offset: null,
+        });
+
+      const sections = await service.getProjectSections("project-1");
+      expect(sections).toHaveLength(3);
+      expect(mockScroll).toHaveBeenCalledTimes(2);
     });
   });
 

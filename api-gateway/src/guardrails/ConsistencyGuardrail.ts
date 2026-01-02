@@ -33,6 +33,7 @@ export interface GuardrailResult {
       score: number;
     }>;
   };
+  semanticCheckError?: string;
 }
 
 /**
@@ -70,6 +71,7 @@ export class ConsistencyGuardrail {
   ): Promise<GuardrailResult> {
     const violations: string[] = [];
     let semanticCheckResult: ConsistencyCheckResult | undefined;
+    let semanticCheckError: string | undefined;
 
     // Keyword-based check against KeyConstraints
     if (constraints.length > 0) {
@@ -96,6 +98,7 @@ export class ConsistencyGuardrail {
         }
       } catch (error) {
         console.warn("ConsistencyGuardrail: Semantic check failed:", error);
+        semanticCheckError = error instanceof Error ? error.message : String(error);
       }
     }
 
@@ -104,6 +107,10 @@ export class ConsistencyGuardrail {
       violations,
       severity: violations.length > 0 ? "error" : "warning",
     };
+
+    if (semanticCheckError) {
+      result.semanticCheckError = semanticCheckError;
+    }
 
     // Include semantic check details if performed
     if (semanticCheckResult) {

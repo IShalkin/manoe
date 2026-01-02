@@ -294,7 +294,16 @@ export class WorldBibleEmbeddingService {
   }
 
   /**
+   * Generate a deterministic point ID from projectId and content hash
+   * This allows idempotent upserts without needing to query for existing points
+   */
+  private generatePointId(projectId: string, contentHash: string): string {
+    return crypto.createHash("sha256").update(`${projectId}:${contentHash}`).digest("hex");
+  }
+
+  /**
    * Store a section in the World Bible
+   * Uses deterministic ID based on content hash for idempotent upserts
    */
   async storeSection(
     projectId: string,
@@ -306,25 +315,9 @@ export class WorldBibleEmbeddingService {
 
     const startTime = Date.now();
     const contentHash = this.generateContentHash(content);
-
-    const existingPoints = await this.client.scroll(this.collectionName, {
-      filter: {
-        must: [
-          { key: "projectId", match: { value: projectId } },
-          { key: "contentHash", match: { value: contentHash } },
-        ],
-      },
-      limit: 1,
-    });
-
-    if (existingPoints.points.length > 0) {
-      const existingId = String(existingPoints.points[0].id);
-      console.log(`WorldBibleEmbedding: Content already exists, returning existing ID: ${existingId}`);
-      return existingId;
-    }
+    const pointId = this.generatePointId(projectId, contentHash);
 
     const embedding = await this.generateEmbedding(content);
-    const pointId = uuidv4();
     const now = new Date().toISOString();
 
     const payload: WorldBiblePayload = {
@@ -468,6 +461,7 @@ export class WorldBibleEmbeddingService {
 
   /**
    * Get all World Bible sections for a project
+   * Uses pagination to handle large datasets (no hard limit)
    */
   async getProjectSections(
     projectId: string,
@@ -483,12 +477,30 @@ export class WorldBibleEmbeddingService {
       filter.must.push({ key: "sectionType", match: { value: sectionType } });
     }
 
-    const results = await this.client.scroll(this.collectionName, {
-      filter,
-      limit: 1000,
-    });
+    const allPoints: WorldBiblePayload[] = [];
+    const pageSize = 256;
+    let offset: string | number | undefined = undefined;
 
-    return results.points.map((point) => point.payload as WorldBiblePayload);
+    while (true) {
+      const results = await this.client.scroll(this.collectionName, {
+        filter,
+        limit: pageSize,
+        offset,
+        with_payload: true,
+        with_vector: false,
+      });
+
+      for (const point of results.points) {
+        allPoints.push(point.payload as WorldBiblePayload);
+      }
+
+      if (!results.next_page_offset) {
+        break;
+      }
+      offset = results.next_page_offset as string | number;
+    }
+
+    return allPoints;
   }
 
   /**
