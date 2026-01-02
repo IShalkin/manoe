@@ -2,15 +2,22 @@
  * World Bible Embedding Service for MANOE
  * 
  * Provides vector embeddings for World Bible content to enable semantic
- * consistency checking during scene generation. This service stores
+ * similarity search during scene generation. This service stores
  * embeddings for characters, locations, rules, and timeline events,
- * allowing the ConsistencyGuardrail to detect contradictions using
- * semantic similarity rather than simple keyword matching.
+ * allowing retrieval of related World Bible entries for human review.
+ * 
+ * IMPORTANT: This service uses cosine similarity to find RELATED content,
+ * NOT to detect contradictions. High similarity scores mean the new content
+ * is talking about similar topics as existing World Bible entries.
+ * 
+ * To detect actual contradictions (e.g., "blue eyes" vs "green eyes"),
+ * you would need an LLM or specialized NLI model to analyze the semantic
+ * meaning of similar content. This service only provides the retrieval step.
  * 
  * Architecture:
  * World Bible -> Embeddings -> Qdrant Collection "world_bible_v{dimension}"
  * New Scene -> Embedding -> Similarity Search
- * If cosine_similarity < threshold -> Flag potential contradiction
+ * If cosine_similarity >= threshold -> Flag for human review (related content found)
  */
 
 import { Service, Inject } from "@tsed/di";
@@ -58,12 +65,21 @@ export interface SemanticSearchResult {
 }
 
 /**
- * Consistency check result
+ * Semantic consistency check result
+ * 
+ * NOTE: This checks for semantic SIMILARITY, not contradiction.
+ * hasContradiction=true means related World Bible content was found
+ * that may need human review, NOT that a contradiction was detected.
+ * The contradictionScore is actually a similarity score (0-1).
  */
 export interface ConsistencyCheckResult {
+  /** True if related World Bible content was found above threshold (needs review) */
   hasContradiction: boolean;
+  /** Similarity score (0-1) - higher means MORE similar, not more contradictory */
   contradictionScore: number;
+  /** World Bible sections with high similarity to the new content */
   conflictingSections: SemanticSearchResult[];
+  /** Human-readable explanation of what was found */
   explanation?: string;
 }
 
@@ -93,10 +109,11 @@ export class WorldBibleEmbeddingService {
   private collectionName: string = "";
 
   /**
-   * Default similarity threshold for contradiction detection
-   * Sections with similarity > threshold are considered potentially contradictory
+   * Default similarity threshold for flagging related content
+   * Sections with similarity >= threshold are flagged for human review
+   * NOTE: High similarity means RELATED content, not contradictory content
    */
-  private readonly DEFAULT_CONTRADICTION_THRESHOLD = 0.7;
+  private readonly DEFAULT_SIMILARITY_THRESHOLD = 0.7;
 
   /**
    * Connect to Qdrant and initialize embedding provider
@@ -417,19 +434,23 @@ export class WorldBibleEmbeddingService {
   /**
    * Check semantic consistency of new content against World Bible
    * 
-   * This method searches for World Bible sections that are semantically
-   * similar to the new content. High similarity scores may indicate
-   * potential contradictions that need to be reviewed.
+   * IMPORTANT: This method finds RELATED content, not contradictions.
+   * High similarity scores mean the new content is talking about similar
+   * topics as existing World Bible entries - this is useful for human review
+   * but does NOT indicate actual contradiction.
+   * 
+   * To detect true contradictions (e.g., "blue eyes" vs "green eyes"),
+   * you would need an LLM or NLI model to analyze the semantic meaning.
    * 
    * @param projectId - Project ID
    * @param newContent - New scene content to check
    * @param threshold - Similarity threshold (default: 0.7)
-   * @returns Consistency check result with potential contradictions
+   * @returns Result with related World Bible sections for human review
    */
   async checkSemanticConsistency(
     projectId: string,
     newContent: string,
-    threshold: number = this.DEFAULT_CONTRADICTION_THRESHOLD
+    threshold: number = this.DEFAULT_SIMILARITY_THRESHOLD
   ): Promise<ConsistencyCheckResult> {
     const similarSections = await this.searchSimilar(projectId, newContent, 10);
 
@@ -445,10 +466,10 @@ export class WorldBibleEmbeddingService {
     let explanation: string | undefined;
     if (hasContradiction) {
       const sectionTypes = [...new Set(conflictingSections.map((s) => s.payload.sectionType))];
-      explanation = `Found ${conflictingSections.length} potentially conflicting World Bible section(s) ` +
+      explanation = `Found ${conflictingSections.length} related World Bible section(s) ` +
         `in categories: ${sectionTypes.join(", ")}. ` +
         `Highest similarity score: ${(maxScore * 100).toFixed(1)}%. ` +
-        `Review these sections to ensure consistency.`;
+        `Review these sections to ensure consistency with the new content.`;
     }
 
     return {
@@ -710,10 +731,33 @@ export class WorldBibleEmbeddingService {
   }
 
   /**
-   * Check if service is connected
+   * Check if service is connected to Qdrant
+   * Note: This only indicates Qdrant connectivity, not embedding capability.
+   * Use `semanticConsistencyEnabled` to check if semantic checks are possible.
    */
   get connected(): boolean {
     return this.isConnected;
+  }
+
+  /**
+   * Check if semantic consistency checking is enabled and functional
+   * Returns true only when:
+   * 1. Connected to Qdrant
+   * 2. An embedding provider (Gemini or OpenAI) is configured
+   * 
+   * Use this property to guard semantic consistency checks in the orchestrator.
+   * When false, semantic checks will fail with "LOCAL mode" errors.
+   */
+  get semanticConsistencyEnabled(): boolean {
+    return this.isConnected && this.embeddingProvider !== EmbeddingProvider.LOCAL;
+  }
+
+  /**
+   * Get the current embedding provider
+   * Useful for logging which provider is being used for embeddings
+   */
+  get provider(): EmbeddingProvider {
+    return this.embeddingProvider;
   }
 
   /**

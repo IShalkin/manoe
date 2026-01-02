@@ -75,6 +75,8 @@ export const SupabaseDraftSchema = z.object({
   status: z.enum(["draft", "revision", "final"]).default("draft"),
   revision_count: z.number().int().nonnegative().default(0),
   qdrant_id: z.string().uuid().optional(),
+  semantic_check_error: z.string().max(5000).optional(),
+  contradiction_score: z.number().min(0).max(1).optional(),
   created_at: z.string().datetime().optional(),
   updated_at: z.string().datetime().optional(),
 });

@@ -45,6 +45,7 @@ import { AgentContext } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
+import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
 
 /**
  * Simple rate limiter for concurrent async operations
@@ -103,6 +104,8 @@ export interface GenerationOptions {
   llmConfig: LLMConfiguration;
   mode: "full" | "branching";
   settings?: Record<string, unknown>;
+  /** Embedding API key for WorldBibleEmbeddingService (Gemini API key) */
+  embeddingApiKey?: string;
 }
 
 /**
@@ -119,6 +122,39 @@ export interface RunStatus {
   error?: string;
   startedAt: string;
   updatedAt: string;
+}
+
+/**
+ * Scene draft with optional semantic consistency check results
+ * Used internally during generation before persisting to Supabase
+ * 
+ * Semantic consistency fields (semanticCheckError, contradictionScore) store results
+ * from WorldBibleEmbeddingService similarity checks. Note: "contradiction" naming is
+ * historical - these fields actually represent semantic SIMILARITY (high score = more
+ * similar/related content found, not more contradictory). See WorldBibleEmbeddingService
+ * for detailed explanation.
+ */
+interface SceneDraft {
+  /** Scene number (1-indexed) */
+  sceneNum: number;
+  /** Scene title from outline */
+  title: string;
+  /** Generated scene content */
+  content: string;
+  /** Actual word count (computed programmatically, not LLM-reported) */
+  wordCount: number;
+  /** ISO timestamp when draft was created */
+  createdAt: string;
+  /** True if scene was generated using beats method (multiple parts) */
+  beatsMethod?: boolean;
+  /** Number of parts generated when using beats method */
+  partsGenerated?: number;
+  /** Explanation of related World Bible content found (for human review) */
+  semanticCheckError?: string;
+  /** Similarity score (0-1) - higher means more similar to World Bible entries */
+  contradictionScore?: number;
+  /** Index signature for compatibility with state.drafts Map and Qdrant storage */
+  [key: string]: string | number | boolean | undefined;
 }
 
 @Service()
@@ -154,6 +190,9 @@ export class StorytellerOrchestrator {
 
   @Inject()
   private evaluationService: EvaluationService;
+
+  @Inject()
+  private worldBibleEmbedding: WorldBibleEmbeddingService;
 
   /**
    * Start a new generation run
@@ -196,6 +235,41 @@ export class StorytellerOrchestrator {
       options.llmConfig.provider === LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined,
       options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined
     );
+
+    // Initialize WorldBibleEmbeddingService for semantic consistency checking
+    // 
+    // Embedding API Key Resolution (in priority order):
+    // 1. Dedicated embedding API key from frontend settings (always treated as Gemini key)
+    // 2. LLM provider key (only if provider is Gemini or OpenAI)
+    // 
+    // Why Gemini is preferred: Gemini embeddings are free and high-quality (768 dimensions).
+    // This allows users to use OpenAI for LLM generation while using free Gemini for embeddings.
+    // 
+    // If no embedding key is available, semantic consistency checking will be DISABLED
+    // but the service will still connect to Qdrant for other operations.
+    let geminiApiKey: string | undefined;
+    let openaiApiKey: string | undefined;
+    let embeddingSource: string;
+
+    if (options.embeddingApiKey) {
+      // Priority 1: Use dedicated embedding API key (always Gemini)
+      geminiApiKey = options.embeddingApiKey;
+      embeddingSource = "dedicated Gemini key";
+    } else if (options.llmConfig.provider === LLMProvider.GEMINI) {
+      // Priority 2: Reuse LLM Gemini key for embeddings
+      geminiApiKey = options.llmConfig.apiKey;
+      embeddingSource = "LLM Gemini key";
+    } else if (options.llmConfig.provider === LLMProvider.OPENAI) {
+      // Priority 3: Use OpenAI key for embeddings (if no Gemini key available)
+      openaiApiKey = options.llmConfig.apiKey;
+      embeddingSource = "LLM OpenAI key";
+    } else {
+      // No embedding key available - semantic checks will be disabled
+      embeddingSource = "none (semantic checks disabled)";
+    }
+
+    await this.worldBibleEmbedding.connect(openaiApiKey, geminiApiKey);
+    $log.info(`[StorytellerOrchestrator] WorldBibleEmbeddingService initialized with: ${embeddingSource}, provider: ${this.worldBibleEmbedding.provider}`);
 
     // Start Langfuse trace
     this.langfuse.startTrace({
@@ -585,6 +659,23 @@ export class StorytellerOrchestrator {
       }
     }
 
+    // Index characters in WorldBibleEmbeddingService for semantic consistency checking
+    // Runs asynchronously to not block generation - errors are logged but don't fail the phase
+    if (this.worldBibleEmbedding.connected && Array.isArray(state.characters)) {
+      try {
+        const indexResult = await this.worldBibleEmbedding.indexCharacters(
+          options.projectId,
+          state.characters
+        );
+        $log.info(`[StorytellerOrchestrator] runCharactersPhase: indexed ${indexResult.indexed} characters in WorldBibleEmbedding, errors: ${indexResult.errors.length}, runId: ${runId}`);
+        if (indexResult.errors.length > 0) {
+          $log.warn(`[StorytellerOrchestrator] runCharactersPhase: WorldBibleEmbedding indexing errors: ${indexResult.errors.join(', ')}, runId: ${runId}`);
+        }
+      } catch (embeddingError) {
+        $log.warn(`[StorytellerOrchestrator] runCharactersPhase: WorldBibleEmbedding indexing failed, continuing anyway, runId: ${runId}`, embeddingError);
+      }
+    }
+
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: publishing phase complete, runId: ${runId}`);
     await this.publishPhaseComplete(runId, GenerationPhase.CHARACTERS, state.characters);
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: completed, runId: ${runId}`);
@@ -679,6 +770,24 @@ export class StorytellerOrchestrator {
     }
 
     await this.saveArtifact(runId, options.projectId, "worldbuilding", state.worldbuilding);
+
+    // Index worldbuilding in WorldBibleEmbeddingService for semantic consistency checking
+    // Runs after storage to ensure data is persisted first - errors are logged but don't fail the phase
+    if (this.worldBibleEmbedding.connected && state.worldbuilding) {
+      try {
+        const indexResult = await this.worldBibleEmbedding.indexWorldbuilding(
+          options.projectId,
+          state.worldbuilding as Record<string, unknown>
+        );
+        $log.info(`[StorytellerOrchestrator] runWorldbuildingPhase: indexed ${indexResult.indexed} worldbuilding elements in WorldBibleEmbedding, errors: ${indexResult.errors.length}, runId: ${runId}`);
+        if (indexResult.errors.length > 0) {
+          $log.warn(`[StorytellerOrchestrator] runWorldbuildingPhase: WorldBibleEmbedding indexing errors: ${indexResult.errors.join(', ')}, runId: ${runId}`);
+        }
+      } catch (embeddingError) {
+        $log.warn(`[StorytellerOrchestrator] runWorldbuildingPhase: WorldBibleEmbedding indexing failed, continuing anyway, runId: ${runId}`, embeddingError);
+      }
+    }
+
     await this.publishPhaseComplete(runId, GenerationPhase.WORLDBUILDING, state.worldbuilding);
   }
 
@@ -908,7 +1017,7 @@ export class StorytellerOrchestrator {
     // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
     const response = this.stripFakeWordCount(output.content as string);
 
-    const draft = {
+    const draft: SceneDraft = {
       sceneNum,
       title: sceneTitle,
       content: response,
@@ -918,6 +1027,27 @@ export class StorytellerOrchestrator {
 
     state.drafts.set(sceneNum, draft);
     state.updatedAt = new Date().toISOString();
+
+    // Check semantic consistency against World Bible entries
+    // This finds related content that may need human review for consistency
+    // Note: Uses semanticConsistencyEnabled to ensure embedding provider is configured
+    if (this.worldBibleEmbedding.semanticConsistencyEnabled) {
+      try {
+        const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(
+          options.projectId,
+          response
+        );
+        if (consistencyResult.hasContradiction) {
+          draft.semanticCheckError = consistencyResult.explanation;
+          draft.contradictionScore = consistencyResult.contradictionScore;
+          $log.warn(`[StorytellerOrchestrator] draftScene: Semantic consistency warning for scene ${sceneNum}: ${draft.semanticCheckError}, runId: ${runId}`);
+        } else {
+          $log.info(`[StorytellerOrchestrator] draftScene: Semantic consistency check passed for scene ${sceneNum}, runId: ${runId}`);
+        }
+      } catch (consistencyError) {
+        $log.warn(`[StorytellerOrchestrator] draftScene: Semantic consistency check failed, continuing anyway, runId: ${runId}`, consistencyError);
+      }
+    }
 
     // Extract and log raw facts
     await this.extractRawFacts(runId, sceneNum, response, AgentType.WRITER);
@@ -954,13 +1084,20 @@ export class StorytellerOrchestrator {
         wordCount: draft.wordCount,
         status: "draft",
         revisionCount: 0,
+        semanticCheckError: draft.semanticCheckError,
+        contradictionScore: draft.contradictionScore,
       });
       $log.info(`[StorytellerOrchestrator] draftScene: saved draft to Supabase, scene ${sceneNum}, runId: ${runId}`);
     } catch (supabaseError) {
       $log.error(`[StorytellerOrchestrator] draftScene: Supabase upsertDraft failed, continuing anyway, runId: ${runId}`, supabaseError);
     }
 
-    await this.publishEvent(runId, "scene_draft_complete", { sceneNum, wordCount: draft.wordCount });
+    await this.publishEvent(runId, "scene_draft_complete", { 
+      sceneNum, 
+      wordCount: draft.wordCount,
+      semanticCheckError: draft.semanticCheckError,
+      contradictionScore: draft.contradictionScore,
+    });
 
     // LLM-as-a-Judge: Evaluate faithfulness of Writer output to Architect plan
     // Runs asynchronously to not block generation
@@ -1125,7 +1262,7 @@ export class StorytellerOrchestrator {
     }
 
     // Create the final draft from combined content
-    const draft = {
+    const draft: SceneDraft = {
       sceneNum,
       title: sceneTitle,
       content: combinedContent,
@@ -1137,6 +1274,27 @@ export class StorytellerOrchestrator {
 
     state.drafts.set(sceneNum, draft);
     state.updatedAt = new Date().toISOString();
+
+    // Check semantic consistency against World Bible entries (same as draftScene)
+    // This finds related content that may need human review for consistency
+    // Note: Uses semanticConsistencyEnabled to ensure embedding provider is configured
+    if (this.worldBibleEmbedding.semanticConsistencyEnabled) {
+      try {
+        const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(
+          options.projectId,
+          combinedContent
+        );
+        if (consistencyResult.hasContradiction) {
+          draft.semanticCheckError = consistencyResult.explanation;
+          draft.contradictionScore = consistencyResult.contradictionScore;
+          $log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency warning for scene ${sceneNum}: ${draft.semanticCheckError}, runId: ${runId}`);
+        } else {
+          $log.info(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency check passed for scene ${sceneNum}, runId: ${runId}`);
+        }
+      } catch (consistencyError) {
+        $log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency check failed, continuing anyway, runId: ${runId}`, consistencyError);
+      }
+    }
 
     // Extract and log raw facts
     await this.extractRawFacts(runId, sceneNum, combinedContent, AgentType.WRITER);
@@ -1172,6 +1330,8 @@ export class StorytellerOrchestrator {
         wordCount: draft.wordCount,
         status: "draft",
         revisionCount: 0,
+        semanticCheckError: draft.semanticCheckError,
+        contradictionScore: draft.contradictionScore,
       });
       $log.info(`[StorytellerOrchestrator] draftSceneWithBeats: saved draft to Supabase, scene ${sceneNum}, runId: ${runId}`);
     } catch (supabaseError) {
@@ -1188,7 +1348,9 @@ export class StorytellerOrchestrator {
       sceneNum, 
       wordCount: draft.wordCount,
       method: "beats",
-      partsGenerated: partsTotal
+      partsGenerated: partsTotal,
+      semanticCheckError: draft.semanticCheckError,
+      contradictionScore: draft.contradictionScore,
     });
 
     // LLM-as-a-Judge evaluation (same as draftScene)

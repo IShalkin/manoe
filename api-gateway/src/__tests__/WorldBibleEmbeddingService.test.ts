@@ -311,7 +311,7 @@ describe("WorldBibleEmbeddingService", () => {
       expect(result.hasContradiction).toBe(true);
       expect(result.contradictionScore).toBe(0.85);
       expect(result.conflictingSections).toHaveLength(1);
-      expect(result.explanation).toContain("1 potentially conflicting");
+      expect(result.explanation).toContain("1 related World Bible section");
     });
 
     it("should not flag contradictions below threshold", async () => {

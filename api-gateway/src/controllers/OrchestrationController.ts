@@ -117,6 +117,16 @@ class GenerateRequestDTO {
   @Property()
   @Description("Generation mode (legacy)")
   generation_mode?: "full" | "branching";
+
+  @Property()
+  @Groups("internal")
+  @Description("Embedding API key for WorldBibleEmbeddingService (Gemini API key)")
+  embeddingApiKey?: string;
+
+  @Property()
+  @Groups("internal")
+  @Description("Embedding API key (legacy snake_case)")
+  embedding_api_key?: string;
 }
 
 /**
@@ -286,8 +296,9 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
     const model = request.llmConfig?.model || request.model || "";
     const apiKey = request.llmConfig?.apiKey || request.api_key || "";
     const mode = request.mode || request.generation_mode || "full";
+    const embeddingApiKey = request.embeddingApiKey || request.embedding_api_key;
 
-    $log.info(`[OrchestrationController] startGeneration called, projectId: ${projectId}, seedIdea: ${seedIdea?.substring(0, 50)}...`);
+    $log.info(`[OrchestrationController] startGeneration called, projectId: ${projectId}, seedIdea: ${seedIdea?.substring(0, 50)}..., embeddingApiKey: ${embeddingApiKey ? 'provided' : 'not provided'}`);
     
     const options: GenerationOptions = {
       projectId,
@@ -300,6 +311,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
       },
       mode,
       settings: request.settings,
+      embeddingApiKey,
     };
 
     try {

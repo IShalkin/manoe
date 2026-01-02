@@ -53,6 +53,8 @@ export interface Draft {
   emotional_shift?: string;
   status: string;
   revision_count: number;
+  semantic_check_error?: string;
+  contradiction_score?: number;
   created_at: string;
 }
 
@@ -727,6 +729,10 @@ export class SupabaseService {
     const wordCount = draft.word_count ?? draftRecord.wordCount as number | undefined;
     const title = draft.title ?? draftRecord.title as string | undefined;
     
+    // Extract semantic consistency fields (camelCase from orchestrator -> snake_case for DB)
+    const semanticCheckError = draft.semantic_check_error ?? draftRecord.semanticCheckError as string | undefined;
+    const contradictionScore = draft.contradiction_score ?? draftRecord.contradictionScore as number | undefined;
+    
     const insertData = {
       project_id: projectId,
       scene_number: sceneNumber,
@@ -738,6 +744,8 @@ export class SupabaseService {
       sensory_details: draft.sensory_details,
       subtext_layer: draft.subtext_layer,
       emotional_shift: draft.emotional_shift,
+      semantic_check_error: semanticCheckError,
+      contradiction_score: contradictionScore,
       qdrant_id: qdrantId,
       created_at: new Date().toISOString(),
     };
@@ -918,6 +926,8 @@ export class SupabaseService {
     wordCount: number;
     status: string;
     revisionCount: number;
+    semanticCheckError?: string;
+    contradictionScore?: number;
   }): Promise<void> {
     const client = this.getClient();
     // Map to actual table schema - uses narrative_content instead of content
@@ -928,6 +938,8 @@ export class SupabaseService {
       word_count: params.wordCount,
       status: params.status,
       revision_count: params.revisionCount,
+      semantic_check_error: params.semanticCheckError,
+      contradiction_score: params.contradictionScore,
     }, {
       onConflict: "project_id,scene_number",
     });

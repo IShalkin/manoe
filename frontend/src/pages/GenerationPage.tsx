@@ -16,7 +16,7 @@ export function GenerationPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { hasAnyApiKey, getAgentConfig, getProviderKey } = useSettings();
+  const { hasAnyApiKey, getAgentConfig, getProviderKey, embeddingApiKey } = useSettings();
   const { 
     projects, 
     getProject,
@@ -136,6 +136,7 @@ export function GenerationPage() {
           edited_content: editedContent,
           scenes_to_regenerate: constraints.scenesToRegenerate,
           supabase_project_id: project.id,
+          ...(embeddingApiKey && { embedding_api_key: embeddingApiKey }),
         }),
       });
 
@@ -159,7 +160,7 @@ export function GenerationPage() {
     } finally {
       setIsRegenerating(false);
     }
-  }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration, runId]);
+  }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration, runId, embeddingApiKey]);
 
   // Handle updating project result (for persisting edits/locks)
   const handleUpdateResult = useCallback(async (result: ProjectResult) => {
@@ -211,6 +212,7 @@ export function GenerationPage() {
           start_from_phase: startFromPhase,
           previous_run_id: previousRunId,
           supabase_project_id: project.id,
+          ...(embeddingApiKey && { embedding_api_key: embeddingApiKey }),
         }),
       });
 
@@ -234,7 +236,7 @@ export function GenerationPage() {
     } finally {
       setIsRegenerating(false);
     }
-  }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration]);
+  }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration, embeddingApiKey]);
 
   const startNewGeneration = async () => {
     if (!project || isStarting) return;
@@ -277,6 +279,7 @@ export function GenerationPage() {
           generation_mode: generationMode,
           supabase_project_id: project.id,
           ...(selectedNarrative && { selected_narrative: selectedNarrative }),
+          ...(embeddingApiKey && { embedding_api_key: embeddingApiKey }),
         }),
       });
 
