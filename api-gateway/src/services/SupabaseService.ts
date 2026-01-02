@@ -143,6 +143,7 @@ export class SupabaseService {
   }
 
   async getProject(id: string): Promise<Project | null> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data: project, error } = await client
       .from("projects")
@@ -152,10 +153,29 @@ export class SupabaseService {
 
     if (error) {
       if (error.code === "PGRST116") {
+        this.metricsService.recordDatabaseQuery({
+          operation: "select",
+          table: "projects",
+          durationMs: Date.now() - startTime,
+          success: true,
+        });
         return null;
       }
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "projects",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get project: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "projects",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return project;
   }
@@ -539,6 +559,7 @@ export class SupabaseService {
   // ========================================================================
 
   async getOutline(projectId: string): Promise<Outline | null> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data, error } = await client
       .from("outlines")
@@ -548,10 +569,29 @@ export class SupabaseService {
 
     if (error) {
       if (error.code === "PGRST116") {
+        this.metricsService.recordDatabaseQuery({
+          operation: "select",
+          table: "outlines",
+          durationMs: Date.now() - startTime,
+          success: true,
+        });
         return null;
       }
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "outlines",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get outline: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "outlines",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return data;
   }
@@ -693,6 +733,7 @@ export class SupabaseService {
   // ========================================================================
 
   async getCritiques(projectId: string): Promise<unknown[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data, error } = await client
       .from("critiques")
@@ -701,10 +742,128 @@ export class SupabaseService {
       .order("created_at", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "critiques",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get critiques: ${error.message}`);
     }
 
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "critiques",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
+
     return data || [];
+  }
+
+  /**
+   * Save a critique for a scene
+   * Phase 5.1: Integrate write-path for critiques table
+   */
+  async saveCritique(params: {
+    projectId: string;
+    runId: string;
+    sceneNumber: number;
+    critique: Record<string, unknown>;
+    revisionNumber: number;
+  }): Promise<void> {
+    const client = this.getClient();
+    // Map to actual table schema
+    const { error } = await client.from("critiques").insert({
+      project_id: params.projectId,
+      scene_number: params.sceneNumber,
+      overall_score: params.critique.score ?? 5,
+      approved: params.critique.approved ?? false,
+      feedback_items: params.critique.issues || [],
+      strengths: params.critique.strengths,
+      weaknesses: params.critique.issues,
+      revision_required: params.critique.revision_needed ?? true,
+      revision_focus: params.critique.revisionRequests,
+    });
+
+    if (error) {
+      // Log but don't throw - critique persistence is not critical path
+      console.error(`Failed to save critique: ${error.message}`);
+    }
+  }
+
+  /**
+   * Upsert characters for a project
+   * Phase 5.1: Integrate write-path for characters table
+   */
+  async upsertCharacters(
+    projectId: string,
+    runId: string,
+    characters: Record<string, unknown>[]
+  ): Promise<void> {
+    const client = this.getClient();
+    
+    for (const char of characters) {
+      // Map character fields to actual table schema columns
+      const { error } = await client.from("characters").upsert({
+        project_id: projectId,
+        name: String(char.name || char.fullName || "Unknown"),
+        archetype: char.archetype || char.role,
+        core_motivation: char.coreMotivation || char.motivation,
+        inner_trap: char.innerTrap || char.flaw,
+        psychological_wound: char.psychologicalWound || char.wound,
+        visual_signature: char.visualSignature || char.appearance,
+        // Map additional fields to table columns
+        coping_mechanism: char.copingMechanism,
+        deepest_fear: char.deepestFear,
+        breaking_point: char.breakingPoint,
+        occupation_role: char.occupationRole || char.occupation || char.role,
+        public_goal: char.publicGoal,
+        hidden_goal: char.hiddenGoal,
+        defining_moment: char.definingMoment,
+        family_background: char.familyBackground,
+        special_skill: char.specialSkill,
+        moral_stance: char.moralStance,
+        potential_arc: char.potentialArc || char.arc,
+      }, {
+        onConflict: "project_id,name",
+      });
+
+      if (error) {
+        console.error(`Failed to upsert character ${char.name}: ${error.message}`);
+      }
+    }
+  }
+
+  /**
+   * Upsert a draft for a scene
+   * Phase 5.1: Integrate write-path for drafts table
+   */
+  async upsertDraft(params: {
+    projectId: string;
+    runId: string;
+    sceneNumber: number;
+    content: string;
+    wordCount: number;
+    status: string;
+    revisionCount: number;
+  }): Promise<void> {
+    const client = this.getClient();
+    // Map to actual table schema - uses narrative_content instead of content
+    const { error } = await client.from("drafts").upsert({
+      project_id: params.projectId,
+      scene_number: params.sceneNumber,
+      narrative_content: params.content,
+      word_count: params.wordCount,
+      status: params.status,
+      revision_count: params.revisionCount,
+    }, {
+      onConflict: "project_id,scene_number",
+    });
+
+    if (error) {
+      console.error(`Failed to upsert draft: ${error.message}`);
+    }
   }
 
   // ========================================================================
@@ -803,6 +962,7 @@ export class SupabaseService {
    * Get run artifacts by run ID
    */
   async getRunArtifacts(runId: string): Promise<unknown[]> {
+    const startTime = Date.now();
     const client = this.getClient();
     const { data, error } = await client
       .from("run_artifacts")
@@ -811,8 +971,21 @@ export class SupabaseService {
       .order("created_at", { ascending: true });
 
     if (error) {
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "run_artifacts",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
       throw new Error(`Failed to get run artifacts: ${error.message}`);
     }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "run_artifacts",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
 
     return data || [];
   }

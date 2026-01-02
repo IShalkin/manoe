@@ -43,6 +43,7 @@ import { MetricsService } from "./MetricsService";
 import { AgentFactory } from "../agents/AgentFactory";
 import { AgentContext } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
+import { ArchivistAgent } from "../agents/ArchivistAgent";
 
 /**
  * LLM Configuration for generation
@@ -486,6 +487,28 @@ export class StorytellerOrchestrator {
 
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: saving artifact, runId: ${runId}`);
     await this.saveArtifact(runId, options.projectId, "characters", state.characters);
+
+    // Phase 5: Save characters to normalized Supabase table
+    try {
+      if (Array.isArray(state.characters)) {
+        await this.supabase.upsertCharacters(options.projectId, runId, state.characters);
+        $log.info(`[StorytellerOrchestrator] runCharactersPhase: saved ${state.characters.length} characters to Supabase, runId: ${runId}`);
+      }
+    } catch (supabaseError) {
+      $log.error(`[StorytellerOrchestrator] runCharactersPhase: Supabase upsertCharacters failed, continuing anyway, runId: ${runId}`, supabaseError);
+    }
+
+    // Phase 4: Initialize world state after characters are created
+    try {
+      if (Array.isArray(state.characters)) {
+        const archivistAgent = this.agentFactory.getAgent(AgentType.ARCHIVIST) as ArchivistAgent;
+        state.worldState = archivistAgent.buildInitialWorldState(runId, state.characters);
+        $log.info(`[StorytellerOrchestrator] runCharactersPhase: initialized world state with ${state.characters.length} characters, runId: ${runId}`);
+      }
+    } catch (worldStateError) {
+      $log.error(`[StorytellerOrchestrator] runCharactersPhase: world state initialization failed, continuing anyway, runId: ${runId}`, worldStateError);
+    }
+
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: publishing phase complete, runId: ${runId}`);
     await this.publishPhaseComplete(runId, GenerationPhase.CHARACTERS, state.characters);
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: completed, runId: ${runId}`);
@@ -835,6 +858,23 @@ export class StorytellerOrchestrator {
     }
 
     await this.saveArtifact(runId, options.projectId, `draft_scene_${sceneNum}`, draft);
+
+    // Phase 5: Save draft to normalized Supabase table
+    try {
+      await this.supabase.upsertDraft({
+        projectId: options.projectId,
+        runId,
+        sceneNumber: sceneNum,
+        content: response,
+        wordCount: draft.wordCount,
+        status: "draft",
+        revisionCount: 0,
+      });
+      $log.info(`[StorytellerOrchestrator] draftScene: saved draft to Supabase, scene ${sceneNum}, runId: ${runId}`);
+    } catch (supabaseError) {
+      $log.error(`[StorytellerOrchestrator] draftScene: Supabase upsertDraft failed, continuing anyway, runId: ${runId}`, supabaseError);
+    }
+
     await this.publishEvent(runId, "scene_draft_complete", { sceneNum, wordCount: draft.wordCount });
   }
 
@@ -874,6 +914,22 @@ export class StorytellerOrchestrator {
     state.updatedAt = new Date().toISOString();
 
     await this.saveArtifact(runId, options.projectId, `critique_scene_${sceneNum}`, critique);
+
+    // Phase 5: Save critique to normalized Supabase table
+    try {
+      const revisionCount = state.revisionCount.get(sceneNum) || 0;
+      await this.supabase.saveCritique({
+        projectId: options.projectId,
+        runId,
+        sceneNumber: sceneNum,
+        critique,
+        revisionNumber: revisionCount,
+      });
+      $log.info(`[StorytellerOrchestrator] critiqueScene: saved critique to Supabase, scene ${sceneNum}, runId: ${runId}`);
+    } catch (supabaseError) {
+      $log.error(`[StorytellerOrchestrator] critiqueScene: Supabase saveCritique failed, continuing anyway, runId: ${runId}`, supabaseError);
+    }
+
     await this.publishEvent(runId, "scene_critique_complete", { sceneNum, critique });
 
     return critique;
@@ -1360,6 +1416,21 @@ export class StorytellerOrchestrator {
       }
     }
 
+    // Phase 4: Apply world state diff from Archivist output
+    if (result.worldStateDiff && state.worldState) {
+      try {
+        const archivistAgent = agent as ArchivistAgent;
+        state.worldState = archivistAgent.applyWorldStateDiff(
+          state.worldState,
+          result.worldStateDiff as Record<string, unknown>,
+          upToScene
+        );
+        $log.info(`[StorytellerOrchestrator] runArchivistCheck: applied world state diff for scene ${upToScene}, runId: ${runId}`);
+      } catch (worldStateError) {
+        $log.error(`[StorytellerOrchestrator] runArchivistCheck: world state diff application failed, continuing anyway, runId: ${runId}`, worldStateError);
+      }
+    }
+
     state.lastArchivistScene = upToScene;
     state.updatedAt = new Date().toISOString();
 
@@ -1370,7 +1441,8 @@ export class StorytellerOrchestrator {
   }
 
   /**
-   * Extract raw facts from generated content
+   * Extract raw facts from generated content and emit to frontend
+   * Uses canonical character names from state.characters as allowlist
    */
   private async extractRawFacts(
     runId: string,
@@ -1381,22 +1453,100 @@ export class StorytellerOrchestrator {
     const state = this.activeRuns.get(runId);
     if (!state) return;
 
-    // Simple fact extraction - in production, use LLM for better extraction
+    console.log(`[extractRawFacts] Called for scene ${sceneNum}, content length: ${content.length}`);
+
+    // Build allowlist of canonical character names from state.characters
+    const canonicalNames = new Set<string>();
+    if (state.characters && Array.isArray(state.characters)) {
+      for (const char of state.characters) {
+        const charObj = char as Record<string, unknown>;
+        const name = charObj.name as string;
+        if (name) {
+          // Add full name and first name
+          canonicalNames.add(name.toLowerCase());
+          const firstName = name.split(' ')[0];
+          if (firstName) canonicalNames.add(firstName.toLowerCase());
+          // Add last name if present
+          const parts = name.split(' ');
+          if (parts.length > 1) {
+            canonicalNames.add(parts[parts.length - 1].toLowerCase());
+          }
+        }
+      }
+    }
+    console.log(`[extractRawFacts] Canonical names: ${Array.from(canonicalNames).join(', ')}`);
+
+    // Patterns that capture meaningful character actions
     const factPatterns = [
-      /(\w+) (was|is|became|had|has) (wounded|injured|killed|married|born|died)/gi,
-      /(\w+)'s (health|status|location|relationship) (changed|is|was)/gi,
+      // Character speech (most reliable - "Elena said", "Marcus whispered")
+      /([A-Z][a-z]+) (said|asked|replied|answered|whispered|shouted|muttered|spoke|exclaimed|demanded|insisted)/g,
+      // Character movement (location changes)
+      /([A-Z][a-z]+) (walked|ran|moved|entered|left|arrived|departed|stepped|approached|retreated)/g,
+      // Character discoveries/realizations
+      /([A-Z][a-z]+) (discovered|found|learned|realized|understood|noticed|recognized|remembered)/g,
+      // Character emotions/reactions
+      /([A-Z][a-z]+) (smiled|frowned|laughed|cried|sighed|nodded|shook|gasped|trembled|froze)/g,
+      // Character state changes (significant events)
+      /([A-Z][a-z]+) (died|killed|married|betrayed|escaped|collapsed|awakened|transformed|vanished)/g,
     ];
+
+    const newFacts: Array<{ subject: string; change: string; category: 'char' | 'world' | 'plot' }> = [];
+    const seenFacts = new Set<string>(); // Deduplicate facts
 
     for (const pattern of factPatterns) {
       const matches = content.matchAll(pattern);
       for (const match of matches) {
+        const subject = match[1] || "";
+        const action = match[2] || "";
+        
+        // Only accept subjects that are canonical character names
+        if (!canonicalNames.has(subject.toLowerCase())) {
+          continue;
+        }
+        
+        // Deduplicate by subject+action
+        const factKey = `${subject.toLowerCase()}-${action.toLowerCase()}`;
+        if (seenFacts.has(factKey)) continue;
+        seenFacts.add(factKey);
+        
+        // Determine category based on action type
+        let category: 'char' | 'world' | 'plot' = 'plot';
+        const charActions = ['smiled', 'frowned', 'laughed', 'cried', 'sighed', 'nodded', 'shook', 'gasped', 'trembled', 'froze'];
+        const worldActions = ['walked', 'ran', 'moved', 'entered', 'left', 'arrived', 'departed', 'stepped', 'approached', 'retreated'];
+        const plotActions = ['died', 'killed', 'married', 'betrayed', 'escaped', 'collapsed', 'awakened', 'transformed', 'vanished', 'discovered', 'found', 'learned', 'realized'];
+        
+        if (charActions.includes(action.toLowerCase())) {
+          category = 'char';
+        } else if (worldActions.includes(action.toLowerCase())) {
+          category = 'world';
+        } else if (plotActions.includes(action.toLowerCase())) {
+          category = 'plot';
+        }
+
         state.rawFactsLog.push({
-          fact: match[0],
+          fact: `${subject} ${action}`,
           source,
           sceneNumber: sceneNum,
           timestamp: new Date().toISOString(),
         });
+
+        newFacts.push({
+          subject,
+          change: action,
+          category,
+        });
       }
+    }
+
+    console.log(`[extractRawFacts] Extracted ${newFacts.length} facts from scene ${sceneNum}`);
+
+    // Only emit if we have meaningful facts
+    if (newFacts.length > 0) {
+      await this.publishEvent(runId, "new_developments_collected", {
+        sceneNum,
+        developments: newFacts,
+        totalFacts: state.rawFactsLog.length,
+      });
     }
   }
 
@@ -1654,12 +1804,23 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
   /**
    * Publish event to Redis Streams
+   * DEBUG: Log scene-related events to help diagnose duplication issues
    */
   private async publishEvent(
     runId: string,
     eventType: string,
     data: Record<string, unknown>
   ): Promise<void> {
+    // DEBUG: Log scene-related events for debugging duplication issues
+    if (eventType.startsWith('scene_')) {
+      console.log(`[StorytellerOrchestrator] Publishing ${eventType}:`, {
+        runId,
+        sceneNum: data.sceneNum,
+        polishStatus: data.polishStatus,
+        hasFinalContent: !!data.finalContent,
+        wordCount: data.wordCount,
+      });
+    }
     await this.redisStreams.publishEvent(runId, eventType, data);
   }
 

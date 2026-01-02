@@ -205,11 +205,17 @@ ${autonomousInstruction}`;
 Scene outline:
 ${JSON.stringify(sceneOutline, null, 2)}
 
+SCOPE CONTROL (CRITICAL):
+- Cover ONLY what's in this scene outline - do not advance the plot beyond what's specified
+- FORBIDDEN: Depicting events, revelations, or conflicts from later scenes
+- FORBIDDEN: Resolving tensions that should carry into future scenes
+- End condition: The last paragraph MUST land on the specified hook - do not go past it
+
 Requirements:
 - Follow the emotional beat and conflict specified
 - Maintain character voices and consistency
 - Include sensory details and atmosphere
-- End with the specified hook
+- End with the specified hook (not before, not after)
 - Target word count: ${sceneOutline.wordCount ?? 1500} words
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
@@ -228,7 +234,27 @@ ${autonomousInstruction}`;
         throw new Error(`No draft found for scene ${sceneNum}`);
       }
 
+      // Get scene outline for context (goals, hook, characters)
+      const outline = state.outline as Record<string, unknown>;
+      const scenes = (outline?.scenes as unknown[]) || [];
+      const sceneOutline = state.currentSceneOutline ?? (scenes[sceneNum - 1] as Record<string, unknown>) ?? {};
+      
+      // Include retrieved context from Qdrant for hallucination prevention
+      const retrievedContext = String(sceneOutline.retrievedContext ?? "");
+
+      // Build canonical character names block to prevent name amnesia
+      const characterNames = this.buildCanonicalNamesBlock(state.characters);
+
       return `Revise Scene ${sceneNum} based on critique feedback.
+
+CANONICAL NAMES (DO NOT INTRODUCE NEW NAMED CHARACTERS):
+${characterNames}
+
+CHARACTER PROFILES:
+${JSON.stringify(state.characters || [], null, 2)}
+
+SCENE OUTLINE (goals, hook, characters):
+${JSON.stringify(sceneOutline, null, 2)}
 
 Original draft:
 ${(draft as Record<string, unknown>).content}
@@ -239,6 +265,12 @@ Revision requests: ${JSON.stringify(latestCritique.revisionRequests || [])}
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
+${retrievedContext}
+
+CRITICAL: When revising, you MUST:
+- Use ONLY the canonical character names listed above
+- Do NOT introduce new named characters not in the character profiles
+- Maintain consistency with established facts and character traits
 ${autonomousInstruction}`;
     }
 
@@ -292,6 +324,34 @@ ${autonomousInstruction}`;
     ];
 
     return personaBreakPatterns.some(pattern => pattern.test(content));
+  }
+
+  /**
+   * Build canonical names block from character profiles
+   * Used to prevent "name amnesia" where LLM introduces new character names during revision
+   */
+  private buildCanonicalNamesBlock(characters: unknown): string {
+    if (!characters || !Array.isArray(characters)) {
+      return "No characters established yet.";
+    }
+
+    const names: string[] = [];
+    for (const char of characters) {
+      if (typeof char === "object" && char !== null) {
+        const charObj = char as Record<string, unknown>;
+        // Extract name from various possible fields
+        const name = charObj.name || charObj.fullName || charObj.characterName;
+        if (typeof name === "string" && name.trim()) {
+          names.push(name.trim());
+        }
+      }
+    }
+
+    if (names.length === 0) {
+      return "No named characters established yet.";
+    }
+
+    return names.map(name => `- ${name}`).join("\n");
   }
 }
 

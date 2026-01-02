@@ -166,7 +166,7 @@ flowchart LR
 **Workflow Details:**
 - **Planning (6 phases)**: Architect creates narrative possibility, Profiler builds characters, Worldbuilder creates setting, Strategist plans scenes
 - **Drafting Loop**: Writer drafts scene → Critic scores (threshold 7/10) → Revision if needed (max 2 iterations)
-- **Archivist**: Runs every 3 scenes to update Key Constraints and prevent context drift
+- **Archivist**: Runs every 3 scenes to update Key Constraints, track world state changes (character status, locations, timeline events), and prevent context drift
 - **Quality Gates**: Originality check (plagiarism), Impact assessment (emotional resonance), Polish (final refinement)
 
 ### Agent System & Data Dependencies
@@ -514,9 +514,24 @@ The system uses Qdrant vector database to maintain narrative consistency:
 - **Worldbuilding Memory**: World elements are stored and retrieved for consistent world details
 - **Scene Memory**: Previous scenes are embedded for continuity in subsequent scenes
 
+### World State Tracking
+
+MANOE maintains a dynamic world state that tracks changes throughout the narrative generation process. This ensures consistency in character status, locations, and timeline events across scenes.
+
+**World State Components:**
+- **Character Updates**: Tracks character status (alive, dead, unknown, transformed), current location, and new attributes discovered during the story
+- **New Locations**: Records new locations introduced in scenes with type and description
+- **Timeline Events**: Logs significant events with their narrative importance (major, minor, background)
+
+**How It Works:**
+1. World state is initialized after the Characters phase using character profiles
+2. The Archivist agent runs every 3 scenes and outputs a `worldStateDiff` with changes
+3. Diffs are applied to the world state, maintaining a consistent view of the story world
+4. The world state is available to agents for context during drafting and revision
+
 ### Artifact Persistence
 
-All generation artifacts are stored in Supabase for resuming interrupted generations, phase-based selective regeneration, scene-level selective regeneration, and project history/versioning.
+All generation artifacts are stored in Supabase for resuming interrupted generations, phase-based selective regeneration, scene-level selective regeneration, and project history/versioning. Characters, drafts, and critiques are also persisted to normalized database tables for efficient querying and cross-project analysis.
 
 ### Marketing Research Integration
 
@@ -577,6 +592,26 @@ The `config.model` field in Langfuse prompts is metadata/documentation only - it
 | langfuse-minio | S3-compatible blob storage |
 
 Tracing is automatically enabled when `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are configured in the orchestrator environment.
+
+### LLM-as-a-Judge Evaluation
+
+MANOE includes automatic quality evaluation using LLM-as-a-Judge methodology. The EvaluationService runs lightweight evaluations to score generation quality without manual review.
+
+**Evaluation Types:**
+- **Faithfulness**: Measures how well Writer output matches the Architect's plan (score 0-1)
+- **Relevance**: Measures how well Profiler character output matches the user's seed idea (score 0-1)
+
+**Features:**
+- Uses cost-effective models (default: gpt-4o-mini) for evaluations
+- Records scores in both Langfuse (for tracing) and Prometheus (for dashboards)
+- Configurable via environment variables: `EVALUATION_LLM_PROVIDER`, `EVALUATION_LLM_MODEL`, `EVALUATION_LLM_API_KEY`
+
+**Metrics:**
+| Metric | Type | Description |
+|--------|------|-------------|
+| `manoe_evaluation_score` | Gauge | LLM-as-a-Judge evaluation scores by type and agent |
+| `manoe_evaluation_calls_total` | Counter | Total evaluation calls by type, status |
+| `manoe_evaluation_duration_seconds` | Histogram | Evaluation latency |
 
 ### Prometheus Metrics & Grafana Dashboards
 
