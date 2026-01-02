@@ -247,17 +247,28 @@ export class StorytellerOrchestrator {
     // 
     // If no embedding key is available, semantic consistency checking will be DISABLED
     // but the service will still connect to Qdrant for other operations.
-    const geminiKeyForEmbeddings = options.embeddingApiKey || 
-      (options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined);
-    const openaiKeyForEmbeddings = !geminiKeyForEmbeddings && options.llmConfig.provider === LLMProvider.OPENAI 
-      ? options.llmConfig.apiKey 
-      : undefined;
-    
-    await this.worldBibleEmbedding.connect(openaiKeyForEmbeddings, geminiKeyForEmbeddings);
-    
-    // Log which embedding provider is being used for debugging
-    const embeddingSource = options.embeddingApiKey ? 'dedicated Gemini key' : 
-      (geminiKeyForEmbeddings ? 'LLM Gemini key' : (openaiKeyForEmbeddings ? 'LLM OpenAI key' : 'none (semantic checks disabled)'));
+    let geminiApiKey: string | undefined;
+    let openaiApiKey: string | undefined;
+    let embeddingSource: string;
+
+    if (options.embeddingApiKey) {
+      // Priority 1: Use dedicated embedding API key (always Gemini)
+      geminiApiKey = options.embeddingApiKey;
+      embeddingSource = "dedicated Gemini key";
+    } else if (options.llmConfig.provider === LLMProvider.GEMINI) {
+      // Priority 2: Reuse LLM Gemini key for embeddings
+      geminiApiKey = options.llmConfig.apiKey;
+      embeddingSource = "LLM Gemini key";
+    } else if (options.llmConfig.provider === LLMProvider.OPENAI) {
+      // Priority 3: Use OpenAI key for embeddings (if no Gemini key available)
+      openaiApiKey = options.llmConfig.apiKey;
+      embeddingSource = "LLM OpenAI key";
+    } else {
+      // No embedding key available - semantic checks will be disabled
+      embeddingSource = "none (semantic checks disabled)";
+    }
+
+    await this.worldBibleEmbedding.connect(openaiApiKey, geminiApiKey);
     $log.info(`[StorytellerOrchestrator] WorldBibleEmbeddingService initialized with: ${embeddingSource}, provider: ${this.worldBibleEmbedding.provider}`);
 
     // Start Langfuse trace
