@@ -1048,13 +1048,20 @@ export class StorytellerOrchestrator {
         wordCount: draft.wordCount,
         status: "draft",
         revisionCount: 0,
+        semanticCheckError: draft.semanticCheckError,
+        contradictionScore: draft.contradictionScore,
       });
       $log.info(`[StorytellerOrchestrator] draftScene: saved draft to Supabase, scene ${sceneNum}, runId: ${runId}`);
     } catch (supabaseError) {
       $log.error(`[StorytellerOrchestrator] draftScene: Supabase upsertDraft failed, continuing anyway, runId: ${runId}`, supabaseError);
     }
 
-    await this.publishEvent(runId, "scene_draft_complete", { sceneNum, wordCount: draft.wordCount });
+    await this.publishEvent(runId, "scene_draft_complete", { 
+      sceneNum, 
+      wordCount: draft.wordCount,
+      semanticCheckError: draft.semanticCheckError,
+      contradictionScore: draft.contradictionScore,
+    });
 
     // LLM-as-a-Judge: Evaluate faithfulness of Writer output to Architect plan
     // Runs asynchronously to not block generation
@@ -1286,6 +1293,8 @@ export class StorytellerOrchestrator {
         wordCount: draft.wordCount,
         status: "draft",
         revisionCount: 0,
+        semanticCheckError: draft.semanticCheckError,
+        contradictionScore: draft.contradictionScore,
       });
       $log.info(`[StorytellerOrchestrator] draftSceneWithBeats: saved draft to Supabase, scene ${sceneNum}, runId: ${runId}`);
     } catch (supabaseError) {
@@ -1302,7 +1311,9 @@ export class StorytellerOrchestrator {
       sceneNum, 
       wordCount: draft.wordCount,
       method: "beats",
-      partsGenerated: partsTotal
+      partsGenerated: partsTotal,
+      semanticCheckError: draft.semanticCheckError,
+      contradictionScore: draft.contradictionScore,
     });
 
     // LLM-as-a-Judge evaluation (same as draftScene)
