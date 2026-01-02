@@ -29,6 +29,8 @@ export function SettingsPage() {
     hasDynamicModels,
     updateResearchProvider,
     getResearchProviderKey,
+    embeddingApiKey,
+    updateEmbeddingApiKey,
   } = useSettings();
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
@@ -227,9 +229,63 @@ export function SettingsPage() {
       </section>
 
       <section className="mb-12">
+        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+          <span className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center text-violet-400 text-sm">3</span>
+          Embedding API Key
+        </h2>
+        <p className="text-slate-400 text-sm mb-4">
+          Configure your Gemini API key for semantic consistency checking. This enables the World Bible to detect contradictions in your story using vector embeddings.
+        </p>
+        
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-violet-600 flex items-center justify-center font-bold text-white">
+                G
+              </div>
+              <div>
+                <h3 className="font-medium">Google Gemini Embeddings</h3>
+                <p className="text-xs text-slate-500">text-embedding-004 (768 dimensions)</p>
+              </div>
+            </div>
+            {embeddingApiKey && (
+              <span className="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400">
+                Configured
+              </span>
+            )}
+          </div>
+          
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                type={showKeys['embedding'] ? 'text' : 'password'}
+                value={embeddingApiKey}
+                onChange={(e) => updateEmbeddingApiKey(e.target.value)}
+                placeholder="Enter your Gemini API key (AI...)"
+                className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-primary-500 transition-colors"
+              />
+            </div>
+            <button
+              onClick={() => toggleShowKey('embedding')}
+              className="px-3 py-2 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors text-sm"
+            >
+              {showKeys['embedding'] ? 'Hide' : 'Show'}
+            </button>
+          </div>
+        </div>
+        
+        <div className="mt-4 p-4 bg-slate-900/30 rounded-xl border border-slate-700/50">
+          <h4 className="text-sm font-medium text-slate-300 mb-2">About Semantic Consistency</h4>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Semantic consistency checking uses vector embeddings to detect potential contradictions between your story content and the World Bible (characters, locations, rules, etc.). Without an embedding API key, this feature is disabled and only keyword-based consistency checking is available.
+          </p>
+        </div>
+      </section>
+
+      <section className="mb-12">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold flex items-center gap-2">
-            <span className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 text-sm">3</span>
+            <span className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 text-sm">4</span>
             Research History
           </h2>
           <button
@@ -363,7 +419,7 @@ export function SettingsPage() {
 
       <section>
         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-          <span className="w-8 h-8 rounded-lg bg-accent-500/20 flex items-center justify-center text-accent-400 text-sm">4</span>
+          <span className="w-8 h-8 rounded-lg bg-accent-500/20 flex items-center justify-center text-accent-400 text-sm">5</span>
           Agent Configuration
         </h2>
         <p className="text-slate-400 text-sm mb-4">

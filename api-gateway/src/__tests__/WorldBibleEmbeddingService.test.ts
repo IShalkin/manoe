@@ -74,10 +74,28 @@ describe("WorldBibleEmbeddingService", () => {
       expect(service.collection).toContain("1536");
     });
 
-    it("should connect with local embeddings when no API key provided", async () => {
+    it("should connect with local mode when no API key provided", async () => {
       await service.connect();
       expect(service.connected).toBe(true);
-      expect(service.collection).toContain("384");
+      expect(service.collection).toContain("768");
+    });
+
+    it("should connect with Gemini embeddings when Gemini API key provided", async () => {
+      await service.connect(undefined, "test-gemini-key");
+      expect(service.connected).toBe(true);
+      expect(service.collection).toContain("768");
+    });
+
+    it("should prioritize Gemini over OpenAI when both keys provided", async () => {
+      await service.connect("test-openai-key", "test-gemini-key");
+      expect(service.connected).toBe(true);
+      expect(service.collection).toContain("768");
+    });
+
+    it("should throw error when trying to generate embeddings in LOCAL mode", async () => {
+      await service.connect();
+      await expect(service.storeCharacter("project-1", { name: "Test" }))
+        .rejects.toThrow("Semantic search unavailable - no embedding API configured");
     });
 
     it("should not reconnect if already connected", async () => {

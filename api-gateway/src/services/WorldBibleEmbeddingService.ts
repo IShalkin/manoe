@@ -81,9 +81,9 @@ export class WorldBibleEmbeddingService {
   private client: QdrantClient | null = null;
   private openaiClient: OpenAI | null = null;
   private geminiClient: GoogleGenerativeAI | null = null;
-  private embeddingProvider: EmbeddingProvider = EmbeddingProvider.LOCAL;
-  private embeddingDimension: number = 384;
-  private embeddingModel: string = "all-MiniLM-L6-v2";
+  private embeddingProvider: EmbeddingProvider = EmbeddingProvider.GEMINI;
+  private embeddingDimension: number = 768;
+  private embeddingModel: string = "text-embedding-004";
   private isConnected: boolean = false;
 
   @Inject()
@@ -118,23 +118,27 @@ export class WorldBibleEmbeddingService {
       apiKey: qdrantApiKey,
     });
 
-    if (!preferLocal && openaiApiKey) {
+    if (!preferLocal && geminiApiKey) {
+      this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
+      this.embeddingProvider = EmbeddingProvider.GEMINI;
+      this.embeddingDimension = 768;
+      this.embeddingModel = "text-embedding-004";
+      console.log("WorldBibleEmbedding: Using Gemini text-embedding-004 (768 dimensions)");
+    } else if (!preferLocal && openaiApiKey) {
       this.openaiClient = new OpenAI({ apiKey: openaiApiKey });
       this.embeddingProvider = EmbeddingProvider.OPENAI;
       this.embeddingDimension = 1536;
       this.embeddingModel = "text-embedding-3-small";
       console.log("WorldBibleEmbedding: Using OpenAI embeddings (1536 dimensions)");
-    } else if (!preferLocal && geminiApiKey) {
-      this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
-      this.embeddingProvider = EmbeddingProvider.GEMINI;
-      this.embeddingDimension = 768;
-      this.embeddingModel = "embedding-001";
-      console.log("WorldBibleEmbedding: Using Gemini embeddings (768 dimensions)");
     } else {
       this.embeddingProvider = EmbeddingProvider.LOCAL;
-      this.embeddingDimension = 384;
-      this.embeddingModel = "all-MiniLM-L6-v2";
-      console.log("WorldBibleEmbedding: Using local embeddings (384 dimensions)");
+      this.embeddingDimension = 768;
+      this.embeddingModel = "none";
+      console.warn(
+        "WorldBibleEmbedding: No embedding API key configured. " +
+        "Semantic consistency checking is DISABLED. " +
+        "Configure a Gemini API key in Settings to enable semantic search."
+      );
     }
 
     this.collectionName = `${this.COLLECTION_PREFIX}_v1_${this.embeddingDimension}`;
@@ -175,18 +179,14 @@ export class WorldBibleEmbeddingService {
       });
       return response.data[0].embedding;
     } else if (this.embeddingProvider === EmbeddingProvider.GEMINI && this.geminiClient) {
-      const model = this.geminiClient.getGenerativeModel({ model: "embedding-001" });
+      const model = this.geminiClient.getGenerativeModel({ model: this.embeddingModel });
       const result = await model.embedContent(text);
       return result.embedding.values;
     } else {
-      // WARNING: Local embeddings use random vectors - semantic search will not work correctly
-      // In production, configure OpenAI or Gemini API key for real embeddings
-      console.warn(
-        "WorldBibleEmbedding: Using random vectors for local embeddings. " +
-        "Semantic consistency checking will NOT work correctly. " +
-        "Configure OPENAI_API_KEY or GEMINI_API_KEY for real embeddings."
+      throw new Error(
+        "Semantic search unavailable - no embedding API configured. " +
+        "Configure a Gemini API key in Settings to enable semantic consistency checking."
       );
-      return Array.from({ length: this.embeddingDimension }, () => Math.random() - 0.5);
     }
   }
 

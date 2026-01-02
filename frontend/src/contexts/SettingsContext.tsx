@@ -6,6 +6,7 @@ import { encryptData, decryptData, isEncrypted } from '../lib/crypto';
 const STORAGE_KEY = 'manoe_settings';
 const MODELS_CACHE_KEY = 'manoe_models_cache';
 const RESEARCH_KEYS_STORAGE_KEY = 'manoe_research_keys';
+const EMBEDDING_KEY_STORAGE_KEY = 'manoe_embedding_key';
 const SETTINGS_VERSION = 4;
 
 const OLD_DEFAULT_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
@@ -132,6 +133,8 @@ interface SettingsContextType {
   researchProviders: ResearchProviderConfig[];
   updateResearchProvider: (provider: ResearchProvider, apiKey: string) => void;
   getResearchProviderKey: (provider: ResearchProvider) => string | undefined;
+  embeddingApiKey: string;
+  updateEmbeddingApiKey: (apiKey: string) => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
@@ -145,6 +148,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [dynamicModels, setDynamicModels] = useState<ModelsCache>({});
   const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
   const [researchProviders, setResearchProviders] = useState<ResearchProviderConfig[]>([]);
+  const [embeddingApiKey, setEmbeddingApiKey] = useState<string>('');
 
   // Load settings from localStorage on mount (with decryption)
   useEffect(() => {
@@ -188,6 +192,18 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           console.log('[SettingsContext] Loaded research providers');
         } catch (e) {
           console.error('[SettingsContext] Failed to parse research keys:', e);
+        }
+      }
+      
+      // Load embedding API key (with decryption)
+      const storedEmbeddingKey = localStorage.getItem(EMBEDDING_KEY_STORAGE_KEY);
+      if (storedEmbeddingKey) {
+        try {
+          const embeddingKey = await decryptData(storedEmbeddingKey);
+          setEmbeddingApiKey(embeddingKey);
+          console.log('[SettingsContext] Loaded embedding API key');
+        } catch (e) {
+          console.error('[SettingsContext] Failed to decrypt embedding key:', e);
         }
       }
       
@@ -348,6 +364,23 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return researchProviders.find(p => p.provider === provider)?.apiKey;
   }, [researchProviders]);
 
+  const updateEmbeddingApiKey = useCallback((apiKey: string) => {
+    setEmbeddingApiKey(apiKey);
+    
+    if (apiKey) {
+      encryptData(apiKey).then(encrypted => {
+        localStorage.setItem(EMBEDDING_KEY_STORAGE_KEY, encrypted);
+        console.log('[SettingsContext] Updated embedding API key (encrypted), length:', apiKey.length);
+      }).catch(e => {
+        console.error('[SettingsContext] Failed to encrypt embedding key:', e);
+        localStorage.setItem(EMBEDDING_KEY_STORAGE_KEY, apiKey);
+      });
+    } else {
+      localStorage.removeItem(EMBEDDING_KEY_STORAGE_KEY);
+      console.log('[SettingsContext] Removed embedding API key');
+    }
+  }, []);
+
   return (
     <SettingsContext.Provider value={{
       settings,
@@ -364,6 +397,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       researchProviders,
       updateResearchProvider,
       getResearchProviderKey,
+      embeddingApiKey,
+      updateEmbeddingApiKey,
     }}>
       {children}
     </SettingsContext.Provider>
