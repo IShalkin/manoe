@@ -731,10 +731,33 @@ export class WorldBibleEmbeddingService {
   }
 
   /**
-   * Check if service is connected
+   * Check if service is connected to Qdrant
+   * Note: This only indicates Qdrant connectivity, not embedding capability.
+   * Use `semanticConsistencyEnabled` to check if semantic checks are possible.
    */
   get connected(): boolean {
     return this.isConnected;
+  }
+
+  /**
+   * Check if semantic consistency checking is enabled and functional
+   * Returns true only when:
+   * 1. Connected to Qdrant
+   * 2. An embedding provider (Gemini or OpenAI) is configured
+   * 
+   * Use this property to guard semantic consistency checks in the orchestrator.
+   * When false, semantic checks will fail with "LOCAL mode" errors.
+   */
+  get semanticConsistencyEnabled(): boolean {
+    return this.isConnected && this.embeddingProvider !== EmbeddingProvider.LOCAL;
+  }
+
+  /**
+   * Get the current embedding provider
+   * Useful for logging which provider is being used for embeddings
+   */
+  get provider(): EmbeddingProvider {
+    return this.embeddingProvider;
   }
 
   /**

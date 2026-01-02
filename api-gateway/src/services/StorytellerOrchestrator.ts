@@ -127,18 +127,33 @@ export interface RunStatus {
 /**
  * Scene draft with optional semantic consistency check results
  * Used internally during generation before persisting to Supabase
- * Index signature allows compatibility with Record<string, unknown> for state.drafts
+ * 
+ * Semantic consistency fields (semanticCheckError, contradictionScore) store results
+ * from WorldBibleEmbeddingService similarity checks. Note: "contradiction" naming is
+ * historical - these fields actually represent semantic SIMILARITY (high score = more
+ * similar/related content found, not more contradictory). See WorldBibleEmbeddingService
+ * for detailed explanation.
  */
 interface SceneDraft {
+  /** Scene number (1-indexed) */
   sceneNum: number;
+  /** Scene title from outline */
   title: string;
+  /** Generated scene content */
   content: string;
+  /** Actual word count (computed programmatically, not LLM-reported) */
   wordCount: number;
+  /** ISO timestamp when draft was created */
   createdAt: string;
+  /** True if scene was generated using beats method (multiple parts) */
   beatsMethod?: boolean;
+  /** Number of parts generated when using beats method */
   partsGenerated?: number;
+  /** Explanation of related World Bible content found (for human review) */
   semanticCheckError?: string;
+  /** Similarity score (0-1) - higher means more similar to World Bible entries */
   contradictionScore?: number;
+  /** Index signature for compatibility with state.drafts Map and Qdrant storage */
   [key: string]: string | number | boolean | undefined;
 }
 
@@ -221,20 +236,29 @@ export class StorytellerOrchestrator {
       options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined
     );
 
-    // Initialize WorldBibleEmbeddingService with embedding API key
-    // Priority: 1) Dedicated embedding API key (Gemini), 2) LLM provider key as fallback
-    // Note: WorldBibleEmbeddingService prefers Gemini over OpenAI when both keys are provided
-    // This allows users to use a dedicated Gemini key for embeddings even when using OpenAI for LLM
-    const embeddingGeminiKey = options.embeddingApiKey || 
+    // Initialize WorldBibleEmbeddingService for semantic consistency checking
+    // 
+    // Embedding API Key Resolution (in priority order):
+    // 1. Dedicated embedding API key from frontend settings (always treated as Gemini key)
+    // 2. LLM provider key (only if provider is Gemini or OpenAI)
+    // 
+    // Why Gemini is preferred: Gemini embeddings are free and high-quality (768 dimensions).
+    // This allows users to use OpenAI for LLM generation while using free Gemini for embeddings.
+    // 
+    // If no embedding key is available, semantic consistency checking will be DISABLED
+    // but the service will still connect to Qdrant for other operations.
+    const geminiKeyForEmbeddings = options.embeddingApiKey || 
       (options.llmConfig.provider === LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined);
-    const embeddingOpenAiKey = !embeddingGeminiKey && options.llmConfig.provider === LLMProvider.OPENAI 
+    const openaiKeyForEmbeddings = !geminiKeyForEmbeddings && options.llmConfig.provider === LLMProvider.OPENAI 
       ? options.llmConfig.apiKey 
       : undefined;
     
-    await this.worldBibleEmbedding.connect(embeddingOpenAiKey, embeddingGeminiKey);
+    await this.worldBibleEmbedding.connect(openaiKeyForEmbeddings, geminiKeyForEmbeddings);
+    
+    // Log which embedding provider is being used for debugging
     const embeddingSource = options.embeddingApiKey ? 'dedicated Gemini key' : 
-      (embeddingGeminiKey ? 'LLM Gemini key' : (embeddingOpenAiKey ? 'LLM OpenAI key' : 'none'));
-    $log.info(`[StorytellerOrchestrator] WorldBibleEmbeddingService initialized with: ${embeddingSource}`);
+      (geminiKeyForEmbeddings ? 'LLM Gemini key' : (openaiKeyForEmbeddings ? 'LLM OpenAI key' : 'none (semantic checks disabled)'));
+    $log.info(`[StorytellerOrchestrator] WorldBibleEmbeddingService initialized with: ${embeddingSource}, provider: ${this.worldBibleEmbedding.provider}`);
 
     // Start Langfuse trace
     this.langfuse.startTrace({
@@ -994,8 +1018,9 @@ export class StorytellerOrchestrator {
     state.updatedAt = new Date().toISOString();
 
     // Check semantic consistency against World Bible entries
-    // This helps detect contradictions between new content and established facts
-    if (this.worldBibleEmbedding.connected) {
+    // This finds related content that may need human review for consistency
+    // Note: Uses semanticConsistencyEnabled to ensure embedding provider is configured
+    if (this.worldBibleEmbedding.semanticConsistencyEnabled) {
       try {
         const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(
           options.projectId,
@@ -1240,8 +1265,9 @@ export class StorytellerOrchestrator {
     state.updatedAt = new Date().toISOString();
 
     // Check semantic consistency against World Bible entries (same as draftScene)
-    // This helps detect contradictions between new content and established facts
-    if (this.worldBibleEmbedding.connected) {
+    // This finds related content that may need human review for consistency
+    // Note: Uses semanticConsistencyEnabled to ensure embedding provider is configured
+    if (this.worldBibleEmbedding.semanticConsistencyEnabled) {
       try {
         const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(
           options.projectId,
