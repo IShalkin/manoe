@@ -273,7 +273,7 @@ export class StorytellerOrchestrator {
       state.isCompleted = true;
       state.updatedAt = new Date().toISOString();
 
-      await this.publishEvent(runId, "generation_completed", {
+      await this.publishEvent(runId, "generation_complete", {
         projectId: options.projectId,
         totalScenes: state.totalScenes,
       });

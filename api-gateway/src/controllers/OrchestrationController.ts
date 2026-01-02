@@ -269,7 +269,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
 - \`scene_draft_start\` - Scene drafting started
 - \`scene_draft_complete\` - Scene draft ready
 - \`ERROR\` - Terminal error (stop listening)
-- \`generation_completed\` - All done
+- \`generation_complete\` - All done
 - \`heartbeat\` - Keep-alive (every 15s)
   `)
   @Returns(202, GenerateResponseDTO)
@@ -349,7 +349,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
 **Important:**
 - Heartbeat events sent every 15 seconds to prevent proxy timeouts
 - Check for \`ERROR\` event type to detect failures
-- \`generation_completed\` signals successful completion
+- \`generation_complete\` signals successful completion
   `)
   @Returns(200)
   @Returns(404)
@@ -365,6 +365,16 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
       return;
     }
 
+    // Support SSE reconnection via Last-Event-ID header
+    // This allows clients to resume from where they left off after a disconnect
+    const clientLastEventId = req.headers["last-event-id"] as string | undefined;
+    const startFromId = clientLastEventId || "0";
+    const isReconnect = !!clientLastEventId;
+    
+    if (isReconnect) {
+      console.log(`[OrchestrationController] SSE reconnection for runId: ${runId}, resuming from eventId: ${clientLastEventId}`);
+    }
+
     // Set SSE headers - HTTP/2 compatible (no Connection header!)
     // Connection header is forbidden in HTTP/2 and causes ERR_HTTP2_PROTOCOL_ERROR
     res.setHeader("Content-Type", "text/event-stream");
@@ -374,7 +384,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     res.flushHeaders();
 
     // Send initial connection event (no event: header so onmessage receives it)
-    res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase, reconnected: isReconnect })}\n\n`);
 
     // Handle client disconnect - use res.on("close") instead of req.on("close")
     // req.on("close") can fire prematurely in some Express/TsED configurations
@@ -392,11 +402,12 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     }, 15000); // Every 15 seconds
 
     // First, send all existing events from the stream (catch up)
+    // If reconnecting, start from the client's last event ID to avoid duplicates
     // Track the last event ID to avoid race condition when switching to live streaming
     // Using "$" would miss events published between catch-up read and live streaming start
-    let lastEventId = "0";
+    let lastEventId = startFromId;
     try {
-      const existingEvents = await this.redisStreams.getEvents(runId, "0", 1000);
+      const existingEvents = await this.redisStreams.getEvents(runId, startFromId, 1000);
       console.log(`[OrchestrationController] Sending ${existingEvents.length} existing events for runId: ${runId}`);
       const cinematicCount = existingEvents.filter(e => e.type === "agent_thought" || e.type === "agent_dialogue").length;
       console.log(`[OrchestrationController] Found ${cinematicCount} cinematic events in existing events`);
@@ -410,6 +421,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
         
         // Send as generic message (no event: header) so onmessage receives it
         // The type is included in the data payload
+        // Include SSE id: field for automatic Last-Event-ID tracking on reconnection
         const sseData = JSON.stringify({
           id: event.id,
           type: event.type,
@@ -417,7 +429,8 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           timestamp: event.timestamp,
           data: event.data,
         });
-        res.write(`data: ${sseData}\n\n`);
+        // SSE format: id field enables browser to send Last-Event-ID header on reconnect
+        res.write(`id: ${event.id}\ndata: ${sseData}\n\n`);
         sentCount++;
         
         // Track the last event ID for seamless transition to live streaming
@@ -445,6 +458,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
         }
 
         // Format as SSE (no event: header so onmessage receives it)
+        // Include SSE id: field for automatic Last-Event-ID tracking on reconnection
         const sseData = JSON.stringify({
           id: event.id,
           type: event.type,
@@ -453,10 +467,11 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
           data: event.data,
         });
 
-        res.write(`data: ${sseData}\n\n`);
+        // SSE format: id field enables browser to send Last-Event-ID header on reconnect
+        res.write(`id: ${event.id}\ndata: ${sseData}\n\n`);
 
         // Stop streaming on terminal events
-        if (event.type === "ERROR" || event.type === "generation_completed") {
+        if (event.type === "ERROR" || event.type === "generation_complete") {
           break;
         }
       }
