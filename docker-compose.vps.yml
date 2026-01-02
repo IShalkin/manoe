@@ -20,6 +20,20 @@ services:
   # ==========================================================================
   # API Gateway - TypeScript/Ts.ED
   # ==========================================================================
+  # 
+  # REQUIRED ENVIRONMENT VARIABLES (must be set in .env file):
+  #   - SUPABASE_KEY: Supabase service role key (NOT anon key)
+  #   - JWT_SECRET: Long random string for JWT signing (min 32 chars)
+  #   - QDRANT_API_KEY: Qdrant API key (if Qdrant has auth enabled)
+  #
+  # OPTIONAL ENVIRONMENT VARIABLES:
+  #   - CORS_ORIGIN: Comma-separated allowed origins (default: *)
+  #   - LOG_LEVEL: debug | info | warn | error (default: info)
+  #   - LANGFUSE_*: Langfuse observability configuration
+  #   - OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.: LLM provider keys
+  #
+  # For production deployment checklist, see api-gateway/.env.example
+  # ==========================================================================
   api-gateway:
     build:
       context: ./api-gateway
@@ -29,21 +43,39 @@ services:
     expose:
       - "3000"
     environment:
+      # Required: Server configuration
       - NODE_ENV=production
       - PORT=3000
-      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      # Required: CORS - set to your frontend domain in production
+      - CORS_ORIGIN=${CORS_ORIGIN:-https://manoe.iliashalkin.com,http://localhost:5173}
+      # Required: Redis connection (uses Docker service name)
       - REDIS_URL=redis://manoe-redis:6379
+      # Required: Qdrant vector database (uses Docker service name)
+      # IMPORTANT: Use container name, NOT localhost!
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      # Required if Qdrant has authentication enabled
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
-      - SUPABASE_URL=http://supabase-kong:8000
+      # Required: Supabase connection
+      # For self-hosted Supabase on same VPS: http://supabase-kong:8000
+      # For external Supabase: https://api.iliashalkin.com
+      - SUPABASE_URL=${SUPABASE_URL:-https://api.iliashalkin.com}
+      # Required: Supabase service role key (NOT anon key!)
       - SUPABASE_KEY=${SUPABASE_KEY:-}
+      # Required: JWT secret for user authentication
+      # SECURITY: Generate with: openssl rand -base64 32
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
+      # Optional: Logging level
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      # Langfuse configuration
+      # Optional: Langfuse observability
       - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse-web:3000}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      # Optional: LLM provider API keys
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       # nginx-proxy configuration - use subdomain to avoid conflict with frontend
       - VIRTUAL_HOST=manoe-gateway.iliashalkin.com
       - VIRTUAL_PORT=3000
