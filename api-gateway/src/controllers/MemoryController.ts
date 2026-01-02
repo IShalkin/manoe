@@ -2,6 +2,7 @@ import { Controller, Get, PathParams, QueryParams } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { SupabaseService } from "../services/SupabaseService";
+import { snakeToCamelCase } from "../utils/stringUtils";
 
 @Controller("/memory")
 @Tags("Memory")
@@ -17,8 +18,12 @@ export class MemoryController {
     @PathParams("projectId") projectId: string
   ): Promise<{ characters: unknown[]; count: number }> {
     const characters = await this.supabaseService.getCharacters(projectId);
+    // Convert snake_case DB fields to camelCase for API response
+    const camelCaseCharacters = characters.map(c => 
+      snakeToCamelCase(c as unknown as Record<string, unknown>)
+    );
     return {
-      characters,
+      characters: camelCaseCharacters,
       count: characters.length,
     };
   }
@@ -39,7 +44,11 @@ export class MemoryController {
       c.archetype?.toLowerCase().includes(query.toLowerCase())
     ).slice(0, limit);
     
-    return { results: filtered };
+    // Convert snake_case DB fields to camelCase for API response
+    const camelCaseResults = filtered.map(c => 
+      snakeToCamelCase(c as unknown as Record<string, unknown>)
+    );
+    return { results: camelCaseResults };
   }
 
   @Get("/worldbuilding/:projectId")
@@ -50,8 +59,12 @@ export class MemoryController {
     @QueryParams("type") elementType?: string
   ): Promise<{ elements: unknown[]; count: number }> {
     const elements = await this.supabaseService.getWorldbuilding(projectId, elementType);
+    // Convert snake_case DB fields to camelCase for API response
+    const camelCaseElements = elements.map(e => 
+      snakeToCamelCase(e as unknown as Record<string, unknown>)
+    );
     return {
-      elements,
+      elements: camelCaseElements,
       count: elements.length,
     };
   }
@@ -63,8 +76,12 @@ export class MemoryController {
     @PathParams("projectId") projectId: string
   ): Promise<{ scenes: unknown[]; count: number }> {
     const drafts = await this.supabaseService.getDrafts(projectId);
+    // Convert snake_case DB fields to camelCase for API response
+    const camelCaseScenes = drafts.map(d => 
+      snakeToCamelCase(d as unknown as Record<string, unknown>)
+    );
     return {
-      scenes: drafts,
+      scenes: camelCaseScenes,
       count: drafts.length,
     };
   }
@@ -83,7 +100,8 @@ export class MemoryController {
       throw new Error(`Scene ${sceneNumber} not found`);
     }
     
-    return scene;
+    // Convert snake_case DB fields to camelCase for API response
+    return snakeToCamelCase(scene as unknown as Record<string, unknown>);
   }
 
   @Get("/outline/:projectId")
@@ -98,7 +116,8 @@ export class MemoryController {
       throw new Error("Outline not found");
     }
     
-    return outline;
+    // Convert snake_case DB fields to camelCase for API response
+    return snakeToCamelCase(outline as unknown as Record<string, unknown>);
   }
 
   @Get("/critiques/:projectId")
@@ -108,8 +127,12 @@ export class MemoryController {
     @PathParams("projectId") projectId: string
   ): Promise<{ critiques: unknown[]; count: number }> {
     const critiques = await this.supabaseService.getCritiques(projectId);
+    // Convert snake_case DB fields to camelCase for API response
+    const camelCaseCritiques = critiques.map(c => 
+      snakeToCamelCase(c as unknown as Record<string, unknown>)
+    );
     return {
-      critiques,
+      critiques: camelCaseCritiques,
       count: critiques.length,
     };
   }
@@ -123,8 +146,12 @@ export class MemoryController {
     @QueryParams("limit") limit: number = 50
   ): Promise<{ logs: unknown[]; count: number }> {
     const logs = await this.supabaseService.getAuditLogs(projectId, agentName, limit);
+    // Convert snake_case DB fields to camelCase for API response
+    const camelCaseLogs = logs.map(l => 
+      snakeToCamelCase(l as unknown as Record<string, unknown>)
+    );
     return {
-      logs,
+      logs: camelCaseLogs,
       count: logs.length,
     };
   }
