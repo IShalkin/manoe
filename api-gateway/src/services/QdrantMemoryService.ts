@@ -89,10 +89,15 @@ export class QdrantMemoryService {
   @Inject()
   private metricsService!: MetricsService;
 
-  // Collection names
-  private readonly COLLECTION_CHARACTERS = "manoe_characters";
-  private readonly COLLECTION_WORLDBUILDING = "manoe_worldbuilding";
-  private readonly COLLECTION_SCENES = "manoe_scenes";
+  // Collection name prefixes (versioned with dimension suffix)
+  private readonly COLLECTION_PREFIX_CHARACTERS = "manoe_characters";
+  private readonly COLLECTION_PREFIX_WORLDBUILDING = "manoe_worldbuilding";
+  private readonly COLLECTION_PREFIX_SCENES = "manoe_scenes";
+
+  // Versioned collection names (set after embedding provider is determined)
+  private collectionCharacters: string = "";
+  private collectionWorldbuilding: string = "";
+  private collectionScenes: string = "";
 
   /**
    * Connect to Qdrant and initialize embedding provider
@@ -134,6 +139,14 @@ export class QdrantMemoryService {
       console.log("Qdrant Memory: Using local embeddings (384 dimensions)");
     }
 
+    // Set versioned collection names based on embedding dimension
+    // This prevents data loss when switching embedding providers
+    this.collectionCharacters = `${this.COLLECTION_PREFIX_CHARACTERS}_v1_${this.embeddingDimension}`;
+    this.collectionWorldbuilding = `${this.COLLECTION_PREFIX_WORLDBUILDING}_v1_${this.embeddingDimension}`;
+    this.collectionScenes = `${this.COLLECTION_PREFIX_SCENES}_v1_${this.embeddingDimension}`;
+
+    console.log(`Qdrant Memory: Using versioned collections with ${this.embeddingDimension} dimensions`);
+
     // Ensure collections exist
     await this.ensureCollections();
 
@@ -153,53 +166,27 @@ export class QdrantMemoryService {
 
   /**
    * Ensure all required collections exist with correct dimensions
-   * If a collection exists with wrong dimensions, recreate it
+   * Uses versioned collection names to prevent data loss when switching embedding providers
+   * Old collections are preserved for potential migration
    */
   private async ensureCollections(): Promise<void> {
     if (!this.client) return;
 
+    // Use versioned collection names (already set based on embedding dimension)
     const collections = [
-      this.COLLECTION_CHARACTERS,
-      this.COLLECTION_WORLDBUILDING,
-      this.COLLECTION_SCENES,
+      this.collectionCharacters,
+      this.collectionWorldbuilding,
+      this.collectionScenes,
     ];
 
     for (const collectionName of collections) {
       try {
-        const collectionInfo = await this.client.getCollection(collectionName);
-        
-        // Check if the collection has the correct dimension
-        // The vectors config can be either a single config or named vectors
-        const vectorsConfig = collectionInfo.config?.params?.vectors;
-        let existingDimension: number | undefined;
-        
-        if (vectorsConfig && typeof vectorsConfig === "object") {
-          if ("size" in vectorsConfig) {
-            // Single vector config
-            existingDimension = vectorsConfig.size as number;
-          }
-        }
-        
-        if (existingDimension && existingDimension !== this.embeddingDimension) {
-          console.log(
-            `Qdrant collection ${collectionName} has dimension ${existingDimension}, ` +
-            `but current embedding provider uses ${this.embeddingDimension}. Recreating collection...`
-          );
-          
-          // Delete and recreate the collection with correct dimensions
-          await this.client.deleteCollection(collectionName);
-          await this.client.createCollection(collectionName, {
-            vectors: {
-              size: this.embeddingDimension,
-              distance: "Cosine",
-            },
-          });
-          console.log(`Recreated Qdrant collection: ${collectionName} with ${this.embeddingDimension} dimensions`);
-        } else {
-          console.log(`Qdrant collection ${collectionName} exists with correct dimensions (${this.embeddingDimension})`);
-        }
+        // Check if versioned collection already exists
+        await this.client.getCollection(collectionName);
+        console.log(`Qdrant collection ${collectionName} exists with correct dimensions (${this.embeddingDimension})`);
       } catch (error) {
-        // Collection doesn't exist, create it
+        // Collection doesn't exist, create it with correct dimensions
+        // Note: We never delete existing collections - old versioned collections are preserved
         await this.client.createCollection(collectionName, {
           vectors: {
             size: this.embeddingDimension,
@@ -255,7 +242,7 @@ export class QdrantMemoryService {
     };
 
     try {
-      await this.client.upsert(this.COLLECTION_CHARACTERS, {
+      await this.client.upsert(this.collectionCharacters, {
         points: [
           {
             id: pointId,
@@ -267,7 +254,7 @@ export class QdrantMemoryService {
 
       this.metricsService.recordQdrantOperation({
         operation: "upsert",
-        collection: this.COLLECTION_CHARACTERS,
+        collection: this.collectionCharacters,
         durationMs: Date.now() - startTime,
         success: true,
         resultCount: 1,
@@ -277,7 +264,7 @@ export class QdrantMemoryService {
     } catch (error) {
       this.metricsService.recordQdrantOperation({
         operation: "upsert",
-        collection: this.COLLECTION_CHARACTERS,
+        collection: this.collectionCharacters,
         durationMs: Date.now() - startTime,
         success: false,
       });
@@ -299,7 +286,7 @@ export class QdrantMemoryService {
     const queryEmbedding = await this.generateEmbedding(query);
 
     try {
-      const results = await this.client.search(this.COLLECTION_CHARACTERS, {
+      const results = await this.client.search(this.collectionCharacters, {
         vector: queryEmbedding,
         limit,
         filter: {
@@ -309,7 +296,7 @@ export class QdrantMemoryService {
 
       this.metricsService.recordQdrantOperation({
         operation: "search",
-        collection: this.COLLECTION_CHARACTERS,
+        collection: this.collectionCharacters,
         durationMs: Date.now() - startTime,
         success: true,
         resultCount: results.length,
@@ -323,7 +310,7 @@ export class QdrantMemoryService {
     } catch (error) {
       this.metricsService.recordQdrantOperation({
         operation: "search",
-        collection: this.COLLECTION_CHARACTERS,
+        collection: this.collectionCharacters,
         durationMs: Date.now() - startTime,
         success: false,
       });
@@ -337,7 +324,7 @@ export class QdrantMemoryService {
   async getProjectCharacters(projectId: string): Promise<CharacterPayload[]> {
     if (!this.client) return [];
 
-    const results = await this.client.scroll(this.COLLECTION_CHARACTERS, {
+    const results = await this.client.scroll(this.collectionCharacters, {
       filter: {
         must: [{ key: "projectId", match: { value: projectId } }],
       },
@@ -370,7 +357,7 @@ export class QdrantMemoryService {
     };
 
     try {
-      await this.client.upsert(this.COLLECTION_WORLDBUILDING, {
+      await this.client.upsert(this.collectionWorldbuilding, {
         points: [
           {
             id: pointId,
@@ -382,7 +369,7 @@ export class QdrantMemoryService {
 
       this.metricsService.recordQdrantOperation({
         operation: "upsert",
-        collection: this.COLLECTION_WORLDBUILDING,
+        collection: this.collectionWorldbuilding,
         durationMs: Date.now() - startTime,
         success: true,
         resultCount: 1,
@@ -392,7 +379,7 @@ export class QdrantMemoryService {
     } catch (error) {
       this.metricsService.recordQdrantOperation({
         operation: "upsert",
-        collection: this.COLLECTION_WORLDBUILDING,
+        collection: this.collectionWorldbuilding,
         durationMs: Date.now() - startTime,
         success: false,
       });
@@ -414,7 +401,7 @@ export class QdrantMemoryService {
     const queryEmbedding = await this.generateEmbedding(query);
 
     try {
-      const results = await this.client.search(this.COLLECTION_WORLDBUILDING, {
+      const results = await this.client.search(this.collectionWorldbuilding, {
         vector: queryEmbedding,
         limit,
         filter: {
@@ -424,7 +411,7 @@ export class QdrantMemoryService {
 
       this.metricsService.recordQdrantOperation({
         operation: "search",
-        collection: this.COLLECTION_WORLDBUILDING,
+        collection: this.collectionWorldbuilding,
         durationMs: Date.now() - startTime,
         success: true,
         resultCount: results.length,
@@ -438,7 +425,7 @@ export class QdrantMemoryService {
     } catch (error) {
       this.metricsService.recordQdrantOperation({
         operation: "search",
-        collection: this.COLLECTION_WORLDBUILDING,
+        collection: this.collectionWorldbuilding,
         durationMs: Date.now() - startTime,
         success: false,
       });
@@ -469,7 +456,7 @@ export class QdrantMemoryService {
     };
 
     try {
-      await this.client.upsert(this.COLLECTION_SCENES, {
+      await this.client.upsert(this.collectionScenes, {
         points: [
           {
             id: pointId,
@@ -481,7 +468,7 @@ export class QdrantMemoryService {
 
       this.metricsService.recordQdrantOperation({
         operation: "upsert",
-        collection: this.COLLECTION_SCENES,
+        collection: this.collectionScenes,
         durationMs: Date.now() - startTime,
         success: true,
         resultCount: 1,
@@ -491,7 +478,7 @@ export class QdrantMemoryService {
     } catch (error) {
       this.metricsService.recordQdrantOperation({
         operation: "upsert",
-        collection: this.COLLECTION_SCENES,
+        collection: this.collectionScenes,
         durationMs: Date.now() - startTime,
         success: false,
       });
@@ -513,7 +500,7 @@ export class QdrantMemoryService {
     const queryEmbedding = await this.generateEmbedding(query);
 
     try {
-      const results = await this.client.search(this.COLLECTION_SCENES, {
+      const results = await this.client.search(this.collectionScenes, {
         vector: queryEmbedding,
         limit,
         filter: {
@@ -523,7 +510,7 @@ export class QdrantMemoryService {
 
       this.metricsService.recordQdrantOperation({
         operation: "search",
-        collection: this.COLLECTION_SCENES,
+        collection: this.collectionScenes,
         durationMs: Date.now() - startTime,
         success: true,
         resultCount: results.length,
@@ -537,7 +524,7 @@ export class QdrantMemoryService {
     } catch (error) {
       this.metricsService.recordQdrantOperation({
         operation: "search",
-        collection: this.COLLECTION_SCENES,
+        collection: this.collectionScenes,
         durationMs: Date.now() - startTime,
         success: false,
       });
@@ -552,9 +539,9 @@ export class QdrantMemoryService {
     if (!this.client) return;
 
     const collections = [
-      this.COLLECTION_CHARACTERS,
-      this.COLLECTION_WORLDBUILDING,
-      this.COLLECTION_SCENES,
+      this.collectionCharacters,
+      this.collectionWorldbuilding,
+      this.collectionScenes,
     ];
 
     for (const collection of collections) {

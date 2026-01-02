@@ -70,6 +70,10 @@ export class RedisStreamsService {
   // Redis URL for creating reader connections
   private redisUrl: string = "";
 
+  // Track last processed event ID per stream for approximate lag calculation
+  // Since we use XREAD instead of Consumer Groups, we track position manually
+  private lastProcessedIds: Map<string, string> = new Map();
+
   @Inject()
   private metricsService!: MetricsService;
   
@@ -273,6 +277,8 @@ export class RedisStreamsService {
             for (const [, streamEntries] of entries) {
               for (const [entryId, fields] of streamEntries) {
                 lastId = entryId;
+                // Track last processed ID for approximate lag calculation
+                this.lastProcessedIds.set(streamKey, entryId);
                 yield this.parseStreamEntry(entryId, fields);
               }
             }
@@ -511,12 +517,47 @@ export class RedisStreamsService {
       }
     }
 
+    // If no consumer groups exist (using XREAD instead of XREADGROUP),
+    // calculate approximate lag from tracked position
+    if (groups.length === 0 && streamInfo.length > 0) {
+      const lastProcessedId = this.lastProcessedIds.get(streamKey);
+      if (lastProcessedId) {
+        // Approximate lag by counting events after last processed ID
+        totalLag = await this.countEventsAfter(runId, lastProcessedId);
+      } else {
+        // No events processed yet, lag equals stream length
+        totalLag = streamInfo.length;
+      }
+    }
+
     return {
       streamKey,
       length: streamInfo.length,
       groups,
       totalLag,
     };
+  }
+
+  /**
+   * Count events in stream after a given ID
+   * Used for approximate lag calculation when not using Consumer Groups
+   * 
+   * @param runId - Unique identifier for the generation run
+   * @param afterId - Count events after this ID
+   * @returns Number of events after the given ID
+   */
+  private async countEventsAfter(runId: string, afterId: string): Promise<number> {
+    const client = this.getClient();
+    const streamKey = this.getStreamKey(runId);
+
+    try {
+      // Use XRANGE to count events after the given ID
+      const entries = await client.xrange(streamKey, `(${afterId}`, "+");
+      return entries.length;
+    } catch (error) {
+      console.error("[RedisStreamsService] Error counting events after ID:", error);
+      return 0;
+    }
   }
 
   /**
@@ -663,12 +704,22 @@ export class RedisStreamsService {
         });
 
         // Record consumer lag for each consumer group
-        for (const group of metrics.groups) {
-          const lag = group.lag ?? group.pending;
+        if (metrics.groups.length > 0) {
+          for (const group of metrics.groups) {
+            const lag = group.lag ?? group.pending;
+            this.metricsService.recordRedisStreamMetrics({
+              streamKey,
+              length: metrics.length,
+              consumerLag: lag,
+            });
+          }
+        } else {
+          // No consumer groups - record approximate lag from totalLag
+          // (calculated in getStreamLagMetrics using tracked position)
           this.metricsService.recordRedisStreamMetrics({
             streamKey,
             length: metrics.length,
-            consumerLag: lag,
+            consumerLag: metrics.totalLag,
           });
         }
 

@@ -33,6 +33,11 @@ export class ProfilerAgent extends BaseAgent {
     const { runId, state } = context;
     const phase = state.phase;
 
+    // Validate narrative context is present for CHARACTERS phase
+    if (phase === GenerationPhase.CHARACTERS) {
+      this.validateNarrativeContext(context, runId);
+    }
+
     const systemPrompt = await this.getSystemPrompt(context, options);
     const userPrompt = this.buildUserPrompt(context, options, phase);
 
@@ -120,6 +125,51 @@ Narrative context: ${variables.narrative || "No narrative yet"}`;
       prompt = prompt.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
     }
     return prompt;
+  }
+
+  /**
+   * Validate that narrative context from Architect is present
+   * Required fields: genre, themes, arc (narrativeArc)
+   * Logs warnings for missing optional fields but throws for critical ones
+   */
+  private validateNarrativeContext(context: AgentContext, runId: string): void {
+    const narrative = context.state.narrative as Record<string, unknown> | undefined;
+
+    if (!narrative) {
+      console.error(`[profiler] CRITICAL: No narrative context from Architect, runId: ${runId}`);
+      throw new Error("ProfilerAgent requires narrative context from Architect. Genesis phase must complete first.");
+    }
+
+    // Check for critical fields
+    const criticalFields = ["genre", "arc"];
+    const missingCritical: string[] = [];
+    
+    for (const field of criticalFields) {
+      if (!narrative[field]) {
+        missingCritical.push(field);
+      }
+    }
+
+    if (missingCritical.length > 0) {
+      console.error(`[profiler] Missing critical narrative fields: ${missingCritical.join(", ")}, runId: ${runId}`);
+      throw new Error(`ProfilerAgent requires narrative context with: ${missingCritical.join(", ")}. Architect output may be incomplete.`);
+    }
+
+    // Check for optional but recommended fields
+    const optionalFields = ["premise", "hook", "themes", "tone", "audience"];
+    const missingOptional: string[] = [];
+    
+    for (const field of optionalFields) {
+      if (!narrative[field]) {
+        missingOptional.push(field);
+      }
+    }
+
+    if (missingOptional.length > 0) {
+      console.warn(`[profiler] Missing optional narrative fields: ${missingOptional.join(", ")}, runId: ${runId}`);
+    }
+
+    console.log(`[profiler] Narrative context validated: genre="${narrative.genre}", arc="${narrative.arc}", runId: ${runId}`);
   }
 
   private buildUserPrompt(
