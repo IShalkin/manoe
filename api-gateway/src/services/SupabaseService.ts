@@ -33,7 +33,7 @@ export interface Character {
   created_at: string;
 }
 
-interface Outline {
+export interface Outline {
   id: string;
   project_id: string;
   structure_type: string;
@@ -45,7 +45,9 @@ export interface Draft {
   id: string;
   project_id: string;
   scene_number: number;
-  content: string;
+  narrative_content: string;
+  title?: string;
+  word_count?: number;
   sensory_details?: unknown;
   subtext_layer?: string;
   emotional_shift?: string;
@@ -54,7 +56,7 @@ export interface Draft {
   created_at: string;
 }
 
-interface AuditLog {
+export interface AuditLog {
   id: string;
   project_id: string;
   agent_name: string;
@@ -63,6 +65,31 @@ interface AuditLog {
   output_summary?: string;
   token_usage?: unknown;
   duration_ms?: number;
+  created_at: string;
+}
+
+export interface Worldbuilding {
+  id: string;
+  project_id: string;
+  element_type: string;
+  name: string;
+  description: string;
+  attributes?: unknown;
+  qdrant_id?: string;
+  created_at: string;
+}
+
+export interface Critique {
+  id: string;
+  project_id: string;
+  scene_number: number;
+  overall_score: number;
+  approved: boolean;
+  feedback_items?: unknown[];
+  strengths?: unknown;
+  weaknesses?: unknown;
+  revision_required?: boolean;
+  revision_focus?: unknown;
   created_at: string;
 }
 
@@ -419,7 +446,7 @@ export class SupabaseService {
   async getWorldbuilding(
     projectId: string,
     elementType?: string
-  ): Promise<unknown[]> {
+  ): Promise<Worldbuilding[]> {
     const startTime = Date.now();
     const client = this.getClient();
     let query = client
@@ -642,6 +669,46 @@ export class SupabaseService {
     return drafts || [];
   }
 
+  async getDraftBySceneNumber(projectId: string, sceneNumber: number): Promise<Draft | null> {
+    const startTime = Date.now();
+    const client = this.getClient();
+    const { data: draft, error } = await client
+      .from("drafts")
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("scene_number", sceneNumber)
+      .single();
+
+    if (error) {
+      if (error.code === "PGRST116") {
+        // No rows returned - not an error, just no draft found
+        this.metricsService.recordDatabaseQuery({
+          operation: "select",
+          table: "drafts",
+          durationMs: Date.now() - startTime,
+          success: true,
+        });
+        return null;
+      }
+      this.metricsService.recordDatabaseQuery({
+        operation: "select",
+        table: "drafts",
+        durationMs: Date.now() - startTime,
+        success: false,
+      });
+      throw new Error(`Failed to get draft by scene number: ${error.message}`);
+    }
+
+    this.metricsService.recordDatabaseQuery({
+      operation: "select",
+      table: "drafts",
+      durationMs: Date.now() - startTime,
+      success: true,
+    });
+
+    return draft;
+  }
+
   async saveDraft(
     projectId: string,
     draft: Partial<Draft> & Record<string, unknown>,
@@ -653,10 +720,12 @@ export class SupabaseService {
     // Normalize field names from orchestrator format to DB schema format
     // The orchestrator uses camelCase (sceneNum, content, wordCount)
     // but the DB schema uses snake_case (scene_number, narrative_content, word_count)
-    const sceneNumber = draft.scene_number ?? (draft as Record<string, unknown>).sceneNum as number | undefined;
-    const narrativeContent = draft.content ?? (draft as Record<string, unknown>).content as string | undefined;
-    const wordCount = draft.word_count ?? (draft as Record<string, unknown>).wordCount as number | undefined;
-    const title = draft.title ?? (draft as Record<string, unknown>).title as string | undefined;
+    // Support both "content" (orchestrator) and "narrative_content" (DB interface) for backwards compatibility
+    const draftRecord = draft as Record<string, unknown>;
+    const sceneNumber = draft.scene_number ?? draftRecord.sceneNum as number | undefined;
+    const narrativeContent = draft.narrative_content ?? draftRecord.content as string | undefined ?? draftRecord.narrativeContent as string | undefined;
+    const wordCount = draft.word_count ?? draftRecord.wordCount as number | undefined;
+    const title = draft.title ?? draftRecord.title as string | undefined;
     
     const insertData = {
       project_id: projectId,
@@ -734,7 +803,7 @@ export class SupabaseService {
   // Critique Operations
   // ========================================================================
 
-  async getCritiques(projectId: string): Promise<unknown[]> {
+  async getCritiques(projectId: string): Promise<Critique[]> {
     const startTime = Date.now();
     const client = this.getClient();
     const { data, error } = await client
