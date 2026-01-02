@@ -165,6 +165,72 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
       const sceneOutline = state.currentSceneOutline ?? (scenes[sceneNum - 1] as Record<string, unknown>) ?? {};
       const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
 
+      // Check if this is a Proactive Beats Method request (generating scene in parts)
+      if (sceneOutline.beatsMode === true) {
+        const partIndex = Number(sceneOutline.partIndex ?? 1);
+        const partsTotal = Number(sceneOutline.partsTotal ?? 3);
+        const partTargetWords = Number(sceneOutline.partTargetWords ?? 500);
+        const existingContent = String(sceneOutline.existingContent ?? "");
+        const isFirstPart = sceneOutline.isFirstPart === true;
+        const isFinalPart = sceneOutline.isFinalPart === true;
+        const retrievedContext = String(sceneOutline.retrievedContext ?? "");
+
+        if (isFirstPart) {
+          // First part: Start the scene fresh
+          return `Write Part 1 of ${partsTotal} for Scene ${sceneNum}: "${sceneTitle}"
+
+Scene outline:
+${JSON.stringify(sceneOutline, null, 2)}
+
+BEATS METHOD INSTRUCTION:
+You are writing Part 1 of ${partsTotal} parts for this scene.
+Write approximately ${partTargetWords} words for this first part.
+
+Requirements:
+- Begin the scene with a strong opening
+- Establish the setting and initial situation
+- DO NOT try to complete the entire scene - you are only writing the first part
+- End at a natural transition point (not a cliffhanger, just a good pause point)
+- Leave room for the story to continue in subsequent parts
+
+KEY CONSTRAINTS (MUST NOT VIOLATE):
+${constraintsBlock}
+${retrievedContext}
+${autonomousInstruction}`;
+        } else {
+          // Continuation parts (2, 3, 4...)
+          const lastWords = existingContent.trim().split(/\s+/).slice(-20).join(" ");
+          const lastChars = lastWords.length > 150 ? lastWords.slice(-150) : lastWords;
+
+          const partInstruction = isFinalPart
+            ? `This is the FINAL part. You MUST conclude the scene and end with the specified hook.`
+            : `This is Part ${partIndex} of ${partsTotal}. End at a natural transition point for the next part.`;
+
+          return `Continue Scene ${sceneNum}: "${sceneTitle}" - Part ${partIndex} of ${partsTotal}
+
+CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
+
+The scene so far ends with:
+"...${lastChars}"
+
+Write approximately ${partTargetWords} more words to continue from that exact point.
+
+${partInstruction}
+
+Requirements:
+- Start your response with NEW content only - continue naturally from where the text left off
+- DO NOT include any text that already exists in the scene
+- DO NOT repeat the ending shown above
+- Continue seamlessly maintaining the same voice, tone, and style
+${isFinalPart ? "- End with the specified hook from the scene outline" : "- Progress the scene toward its conclusion"}
+
+KEY CONSTRAINTS (MUST NOT VIOLATE):
+${constraintsBlock}
+${retrievedContext}
+${autonomousInstruction}`;
+        }
+      }
+
       // Check if this is an expansion request (scene too short, need to continue)
       if (sceneOutline.expansionMode === true) {
         const existingContent = String(sceneOutline.existingContent ?? "");
