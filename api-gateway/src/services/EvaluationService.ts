@@ -137,13 +137,19 @@ Score guidelines:
             content: prompt,
           },
         ],
-        maxTokens: 256,
+        maxTokens: 512,
         runId,
         agentName: "faithfulness_evaluator",
       });
 
       const durationMs = Date.now() - startTime;
       const result = this.parseEvaluationResponse(response.content, this.evaluationConfig.model, durationMs);
+
+      if (!result) {
+        // Record parse failure in Prometheus
+        this.metricsService.recordEvaluation("faithfulness", "writer", runId, 0, durationMs, false);
+        return null;
+      }
 
       // Record in Langfuse
       this.langfuseService.scoreFaithfulness(runId, result.score, "writer", result.reasoning);
@@ -213,13 +219,19 @@ Score guidelines:
             content: prompt,
           },
         ],
-        maxTokens: 256,
+        maxTokens: 512,
         runId,
         agentName: "relevance_evaluator",
       });
 
       const durationMs = Date.now() - startTime;
       const result = this.parseEvaluationResponse(response.content, this.evaluationConfig.model, durationMs);
+
+      if (!result) {
+        // Record parse failure in Prometheus
+        this.metricsService.recordEvaluation("relevance", "profiler", runId, 0, durationMs, false);
+        return null;
+      }
 
       // Record in Langfuse
       this.langfuseService.scoreRelevance(runId, result.score, "profiler", result.reasoning);
@@ -283,11 +295,12 @@ Evaluate how relevant this character profile is to the user's story idea. Consid
 
   /**
    * Parse LLM evaluation response
+   * Returns null if parsing fails to distinguish from actual scores
    */
-  private parseEvaluationResponse(content: string, model: string, durationMs: number): EvaluationResult {
+  private parseEvaluationResponse(content: string, model: string, durationMs: number): EvaluationResult | null {
     try {
-      // Try to extract JSON from the response
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      // Try to extract JSON from the response - use non-greedy match to get first JSON object
+      const jsonMatch = content.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
       if (!jsonMatch) {
         throw new Error("No JSON found in response");
       }
@@ -304,13 +317,8 @@ Evaluate how relevant this character profile is to the user's story idea. Consid
       };
     } catch (error) {
       console.warn(`[EvaluationService] Failed to parse evaluation response: ${content}`);
-      // Return a default score if parsing fails
-      return {
-        score: 0.5,
-        reasoning: "Failed to parse evaluation response",
-        evaluationModel: model,
-        durationMs,
-      };
+      // Return null to indicate parse failure rather than masking with arbitrary score
+      return null;
     }
   }
 }
