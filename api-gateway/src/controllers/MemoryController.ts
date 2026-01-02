@@ -2,7 +2,20 @@ import { Controller, Get, PathParams, QueryParams } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { SupabaseService } from "../services/SupabaseService";
-import { snakeToCamelCase } from "../utils/stringUtils";
+import {
+  mapCharacterToDTO,
+  mapDraftToDTO,
+  mapOutlineToDTO,
+  mapWorldbuildingToDTO,
+  mapCritiqueToDTO,
+  mapAuditLogToDTO,
+  CharacterDTO,
+  DraftDTO,
+  OutlineDTO,
+  WorldbuildingDTO,
+  CritiqueDTO,
+  AuditLogDTO,
+} from "../utils/entityMappers";
 
 @Controller("/memory")
 @Tags("Memory")
@@ -16,14 +29,11 @@ export class MemoryController {
   @Description("Retrieve all character profiles for a project")
   async getCharacters(
     @PathParams("projectId") projectId: string
-  ): Promise<{ characters: unknown[]; count: number }> {
+  ): Promise<{ characters: CharacterDTO[]; count: number }> {
     const characters = await this.supabaseService.getCharacters(projectId);
-    // Convert snake_case DB fields to camelCase for API response
-    const camelCaseCharacters = characters.map(c => 
-      snakeToCamelCase(c as unknown as Record<string, unknown>)
-    );
+    const characterDTOs = characters.map(mapCharacterToDTO);
     return {
-      characters: camelCaseCharacters,
+      characters: characterDTOs,
       count: characters.length,
     };
   }
@@ -35,20 +45,17 @@ export class MemoryController {
     @PathParams("projectId") projectId: string,
     @QueryParams("query") query: string,
     @QueryParams("limit") limit: number = 5
-  ): Promise<{ results: unknown[] }> {
+  ): Promise<{ results: CharacterDTO[] }> {
     // This would call Qdrant through the orchestrator
     // For now, return from Supabase with basic filtering
     const characters = await this.supabaseService.getCharacters(projectId);
-    const filtered = characters.filter((c: { name?: string; archetype?: string }) => 
+    const characterDTOs = characters.map(mapCharacterToDTO);
+    const filtered = characterDTOs.filter(c => 
       c.name?.toLowerCase().includes(query.toLowerCase()) ||
       c.archetype?.toLowerCase().includes(query.toLowerCase())
     ).slice(0, limit);
     
-    // Convert snake_case DB fields to camelCase for API response
-    const camelCaseResults = filtered.map(c => 
-      snakeToCamelCase(c as unknown as Record<string, unknown>)
-    );
-    return { results: camelCaseResults };
+    return { results: filtered };
   }
 
   @Get("/worldbuilding/:projectId")
@@ -57,14 +64,20 @@ export class MemoryController {
   async getWorldbuilding(
     @PathParams("projectId") projectId: string,
     @QueryParams("type") elementType?: string
-  ): Promise<{ elements: unknown[]; count: number }> {
+  ): Promise<{ elements: WorldbuildingDTO[]; count: number }> {
     const elements = await this.supabaseService.getWorldbuilding(projectId, elementType);
-    // Convert snake_case DB fields to camelCase for API response
-    const camelCaseElements = elements.map(e => 
-      snakeToCamelCase(e as unknown as Record<string, unknown>)
-    );
+    const elementDTOs = elements.map(e => mapWorldbuildingToDTO(e as {
+      id: string;
+      project_id: string;
+      element_type: string;
+      name: string;
+      description: string;
+      attributes?: unknown;
+      qdrant_id?: string;
+      created_at: string;
+    }));
     return {
-      elements: camelCaseElements,
+      elements: elementDTOs,
       count: elements.length,
     };
   }
@@ -74,14 +87,11 @@ export class MemoryController {
   @Description("Retrieve all scene drafts for a project")
   async getScenes(
     @PathParams("projectId") projectId: string
-  ): Promise<{ scenes: unknown[]; count: number }> {
+  ): Promise<{ scenes: DraftDTO[]; count: number }> {
     const drafts = await this.supabaseService.getDrafts(projectId);
-    // Convert snake_case DB fields to camelCase for API response
-    const camelCaseScenes = drafts.map(d => 
-      snakeToCamelCase(d as unknown as Record<string, unknown>)
-    );
+    const sceneDTOs = drafts.map(mapDraftToDTO);
     return {
-      scenes: camelCaseScenes,
+      scenes: sceneDTOs,
       count: drafts.length,
     };
   }
@@ -92,16 +102,16 @@ export class MemoryController {
   async getScene(
     @PathParams("projectId") projectId: string,
     @PathParams("sceneNumber") sceneNumber: number
-  ): Promise<unknown> {
+  ): Promise<DraftDTO> {
     const drafts = await this.supabaseService.getDrafts(projectId);
-    const scene = drafts.find((d: { scene_number: number }) => d.scene_number === sceneNumber);
+    const sceneDTOs = drafts.map(mapDraftToDTO);
+    const scene = sceneDTOs.find(d => d.sceneNumber === sceneNumber);
     
     if (!scene) {
       throw new Error(`Scene ${sceneNumber} not found`);
     }
     
-    // Convert snake_case DB fields to camelCase for API response
-    return snakeToCamelCase(scene as unknown as Record<string, unknown>);
+    return scene;
   }
 
   @Get("/outline/:projectId")
@@ -109,15 +119,14 @@ export class MemoryController {
   @Description("Retrieve the plot outline for a project")
   async getOutline(
     @PathParams("projectId") projectId: string
-  ): Promise<unknown> {
+  ): Promise<OutlineDTO> {
     const outline = await this.supabaseService.getOutline(projectId);
     
     if (!outline) {
       throw new Error("Outline not found");
     }
     
-    // Convert snake_case DB fields to camelCase for API response
-    return snakeToCamelCase(outline as unknown as Record<string, unknown>);
+    return mapOutlineToDTO(outline);
   }
 
   @Get("/critiques/:projectId")
@@ -125,14 +134,19 @@ export class MemoryController {
   @Description("Retrieve all critiques for a project")
   async getCritiques(
     @PathParams("projectId") projectId: string
-  ): Promise<{ critiques: unknown[]; count: number }> {
+  ): Promise<{ critiques: CritiqueDTO[]; count: number }> {
     const critiques = await this.supabaseService.getCritiques(projectId);
-    // Convert snake_case DB fields to camelCase for API response
-    const camelCaseCritiques = critiques.map(c => 
-      snakeToCamelCase(c as unknown as Record<string, unknown>)
-    );
+    const critiqueDTOs = critiques.map(c => mapCritiqueToDTO(c as {
+      id: string;
+      project_id: string;
+      scene_number: number;
+      overall_score?: number;
+      feedback?: string;
+      suggestions?: unknown[];
+      created_at: string;
+    }));
     return {
-      critiques: camelCaseCritiques,
+      critiques: critiqueDTOs,
       count: critiques.length,
     };
   }
@@ -144,14 +158,21 @@ export class MemoryController {
     @PathParams("projectId") projectId: string,
     @QueryParams("agent") agentName?: string,
     @QueryParams("limit") limit: number = 50
-  ): Promise<{ logs: unknown[]; count: number }> {
+  ): Promise<{ logs: AuditLogDTO[]; count: number }> {
     const logs = await this.supabaseService.getAuditLogs(projectId, agentName, limit);
-    // Convert snake_case DB fields to camelCase for API response
-    const camelCaseLogs = logs.map(l => 
-      snakeToCamelCase(l as unknown as Record<string, unknown>)
-    );
+    const logDTOs = logs.map(l => mapAuditLogToDTO(l as {
+      id: string;
+      project_id: string;
+      agent_name: string;
+      action: string;
+      input_summary?: string;
+      output_summary?: string;
+      token_usage?: unknown;
+      duration_ms?: number;
+      created_at: string;
+    }));
     return {
-      logs: camelCaseLogs,
+      logs: logDTOs,
       count: logs.length,
     };
   }
