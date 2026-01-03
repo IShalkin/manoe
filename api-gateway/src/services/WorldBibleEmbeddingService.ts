@@ -213,9 +213,9 @@ export class WorldBibleEmbeddingService {
     } else if (this.embeddingProvider === EmbeddingProvider.GEMINI && this.geminiClient) {
       try {
         const model = this.geminiClient.getGenerativeModel({ model: this.embeddingModel });
-        // Use the proper content format for embedContent
+        // Use the proper content format for embedContent with required role
         const result = await model.embedContent({
-          content: { parts: [{ text }] },
+          content: { role: "user", parts: [{ text }] },
         });
         return result.embedding.values;
       } catch (error) {
