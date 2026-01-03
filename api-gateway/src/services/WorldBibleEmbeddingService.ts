@@ -117,14 +117,30 @@ export class WorldBibleEmbeddingService {
 
   /**
    * Connect to Qdrant and initialize embedding provider
+   * 
+   * Note: This service is a singleton. If previously initialized without an API key
+   * (LOCAL provider), it will re-initialize when an API key is provided to enable
+   * semantic consistency checking. This allows the first generation without a key
+   * to not block subsequent generations that have a key configured.
    */
   async connect(
     openaiApiKey?: string,
     geminiApiKey?: string,
     preferLocal: boolean = false
   ): Promise<void> {
-    if (this.isConnected) {
+    // Allow re-initialization if we were previously disabled (no API key / no clients)
+    // but now have an API key available - this enables semantic consistency
+    const hasNewApiKey = !preferLocal && (geminiApiKey || openaiApiKey);
+    const hadNoClients = !this.geminiClient && !this.openaiClient;
+    const wasDisabled = this.embeddingProvider === EmbeddingProvider.LOCAL || hadNoClients;
+    const shouldReinitialize = this.isConnected && wasDisabled && hasNewApiKey;
+    
+    if (this.isConnected && !shouldReinitialize) {
       return;
+    }
+    
+    if (shouldReinitialize) {
+      console.log("WorldBibleEmbedding: Re-initializing with API key (was in LOCAL mode)");
     }
 
     const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
@@ -138,9 +154,9 @@ export class WorldBibleEmbeddingService {
     if (!preferLocal && geminiApiKey) {
       this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
       this.embeddingProvider = EmbeddingProvider.GEMINI;
-      this.embeddingDimension = 768;
-      this.embeddingModel = "embedding-001";
-      console.log("WorldBibleEmbedding: Using Gemini embedding-001 (768 dimensions)");
+      this.embeddingDimension = 768; // text-embedding-004 outputs 768 dimensions
+      this.embeddingModel = "text-embedding-004";
+      console.log("WorldBibleEmbedding: Using Gemini text-embedding-004 (768 dimensions)");
     } else if (!preferLocal && openaiApiKey) {
       this.openaiClient = new OpenAI({ apiKey: openaiApiKey });
       this.embeddingProvider = EmbeddingProvider.OPENAI;
@@ -196,9 +212,21 @@ export class WorldBibleEmbeddingService {
       });
       return response.data[0].embedding;
     } else if (this.embeddingProvider === EmbeddingProvider.GEMINI && this.geminiClient) {
-      const model = this.geminiClient.getGenerativeModel({ model: this.embeddingModel });
-      const result = await model.embedContent(text);
-      return result.embedding.values;
+      try {
+        const model = this.geminiClient.getGenerativeModel({ model: this.embeddingModel });
+        // Use the proper content format for embedContent with required role
+        const result = await model.embedContent({
+          content: { role: "user", parts: [{ text }] },
+        });
+        return result.embedding.values;
+      } catch (error) {
+        // Log detailed error for debugging
+        const errorDetails = error instanceof Error 
+          ? { message: error.message, name: error.name, stack: error.stack?.split('\n')[0] }
+          : error;
+        console.error(`WorldBibleEmbedding: Gemini embedContent failed - model: ${this.embeddingModel}, textLength: ${text.length}, error:`, errorDetails);
+        throw error;
+      }
     } else {
       throw new Error(
         "Semantic search unavailable - no embedding API configured. " +

@@ -16,7 +16,7 @@ export function GenerationPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { hasAnyApiKey, getAgentConfig, getProviderKey, embeddingApiKey } = useSettings();
+  const { hasAnyApiKey, getAgentConfig, getProviderKey, embeddingApiKey, loading: settingsLoading } = useSettings();
   const { 
     projects, 
     getProject,
@@ -55,13 +55,6 @@ export function GenerationPage() {
       }
     }
   }, [projectId, projects, getProject, runId]);
-
-  // Start generation if we have a project but no runId
-  useEffect(() => {
-    if (project && !runId && !isStarting && project.status !== 'completed') {
-      startNewGeneration();
-    }
-  }, [project, runId, isStarting]);
 
   // Map agent names to phases for phase-based regeneration
   // Phase taxonomy aligned with backend orchestrator phases
@@ -238,7 +231,7 @@ export function GenerationPage() {
     }
   }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration, embeddingApiKey]);
 
-  const startNewGeneration = async () => {
+  const startNewGeneration = useCallback(async () => {
     if (!project || isStarting) return;
     
     if (!hasAnyApiKey()) {
@@ -303,7 +296,15 @@ export function GenerationPage() {
     } finally {
       setIsStarting(false);
     }
-  };
+  }, [project, isStarting, hasAnyApiKey, getAgentConfig, getProviderKey, useBranchingMode, selectedNarrative, embeddingApiKey, startGeneration]);
+
+  // Start generation if we have a project but no runId
+  // Wait for settings to finish loading to ensure embeddingApiKey is available
+  useEffect(() => {
+    if (project && !runId && !isStarting && project.status !== 'completed' && !settingsLoading) {
+      startNewGeneration();
+    }
+  }, [project, runId, isStarting, settingsLoading, startNewGeneration]);
 
   if (!projectId) {
     return (

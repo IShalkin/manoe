@@ -98,11 +98,24 @@ describe("WorldBibleEmbeddingService", () => {
         .rejects.toThrow("Semantic search unavailable - no embedding API configured");
     });
 
-    it("should not reconnect if already connected", async () => {
-      await service.connect();
+    it("should not reconnect if already connected with same provider", async () => {
+      await service.connect("test-openai-key");
       const firstCollection = service.collection;
       await service.connect("different-key");
       expect(service.collection).toBe(firstCollection);
+    });
+
+    it("should reinitialize when previously in LOCAL mode and API key provided", async () => {
+      // First connect without API key (LOCAL mode)
+      await service.connect();
+      expect(service.connected).toBe(true);
+      const localCollection = service.collection;
+      expect(localCollection).toContain("768"); // LOCAL mode uses 768 dimensions
+      
+      // Now connect with OpenAI key - should reinitialize
+      await service.connect("test-openai-key");
+      expect(service.connected).toBe(true);
+      expect(service.collection).toContain("1536"); // OpenAI uses 1536 dimensions
     });
 
     it("should create collection if it does not exist", async () => {

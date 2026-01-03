@@ -119,12 +119,10 @@ class GenerateRequestDTO {
   generation_mode?: "full" | "branching";
 
   @Property()
-  @Groups("internal")
   @Description("Embedding API key for WorldBibleEmbeddingService (Gemini API key)")
   embeddingApiKey?: string;
 
   @Property()
-  @Groups("internal")
   @Description("Embedding API key (legacy snake_case)")
   embedding_api_key?: string;
 }
