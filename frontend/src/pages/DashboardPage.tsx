@@ -156,7 +156,7 @@ interface ProjectFormData {
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { hasAnyApiKey, getAgentConfig, getProviderKey, getResearchProviderKey, loading } = useSettings();
+  const { hasAnyApiKey, getAgentConfig, getProviderKey, getResearchProviderKey, loading, embeddingApiKey } = useSettings();
   const { 
     projects, 
     createProject, 
@@ -438,6 +438,7 @@ export function DashboardPage() {
             stance: formData.narratorStance,
           },
           research_context: researchResult || undefined,
+          ...(embeddingApiKey && { embedding_api_key: embeddingApiKey }),
         }),
       });
       
