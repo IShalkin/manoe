@@ -16,7 +16,7 @@ export function GenerationPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { hasAnyApiKey, getAgentConfig, getProviderKey, embeddingApiKey } = useSettings();
+  const { hasAnyApiKey, getAgentConfig, getProviderKey, embeddingApiKey, loading: settingsLoading } = useSettings();
   const { 
     projects, 
     getProject,
@@ -57,11 +57,12 @@ export function GenerationPage() {
   }, [projectId, projects, getProject, runId]);
 
   // Start generation if we have a project but no runId
+  // Wait for settings to finish loading to ensure embeddingApiKey is available
   useEffect(() => {
-    if (project && !runId && !isStarting && project.status !== 'completed') {
+    if (project && !runId && !isStarting && project.status !== 'completed' && !settingsLoading) {
       startNewGeneration();
     }
-  }, [project, runId, isStarting]);
+  }, [project, runId, isStarting, settingsLoading]);
 
   // Map agent names to phases for phase-based regeneration
   // Phase taxonomy aligned with backend orchestrator phases
