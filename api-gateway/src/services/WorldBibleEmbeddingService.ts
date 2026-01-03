@@ -153,9 +153,9 @@ export class WorldBibleEmbeddingService {
     if (!preferLocal && geminiApiKey) {
       this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
       this.embeddingProvider = EmbeddingProvider.GEMINI;
-      this.embeddingDimension = 768;
-      this.embeddingModel = "text-embedding-004";
-      console.log("WorldBibleEmbedding: Using Gemini text-embedding-004 (768 dimensions)");
+      this.embeddingDimension = 768; // Request 768 dims via outputDimensionality for Qdrant compatibility
+      this.embeddingModel = "gemini-embedding-001";
+      console.log("WorldBibleEmbedding: Using Gemini gemini-embedding-001 (768 dimensions)");
     } else if (!preferLocal && openaiApiKey) {
       this.openaiClient = new OpenAI({ apiKey: openaiApiKey });
       this.embeddingProvider = EmbeddingProvider.OPENAI;
@@ -211,9 +211,21 @@ export class WorldBibleEmbeddingService {
       });
       return response.data[0].embedding;
     } else if (this.embeddingProvider === EmbeddingProvider.GEMINI && this.geminiClient) {
-      const model = this.geminiClient.getGenerativeModel({ model: this.embeddingModel });
-      const result = await model.embedContent(text);
-      return result.embedding.values;
+      try {
+        const model = this.geminiClient.getGenerativeModel({ model: this.embeddingModel });
+        // Use the proper content format for embedContent
+        const result = await model.embedContent({
+          content: { parts: [{ text }] },
+        });
+        return result.embedding.values;
+      } catch (error) {
+        // Log detailed error for debugging
+        const errorDetails = error instanceof Error 
+          ? { message: error.message, name: error.name, stack: error.stack?.split('\n')[0] }
+          : error;
+        console.error(`WorldBibleEmbedding: Gemini embedContent failed - model: ${this.embeddingModel}, textLength: ${text.length}, error:`, errorDetails);
+        throw error;
+      }
     } else {
       throw new Error(
         "Semantic search unavailable - no embedding API configured. " +
