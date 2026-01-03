@@ -117,14 +117,29 @@ export class WorldBibleEmbeddingService {
 
   /**
    * Connect to Qdrant and initialize embedding provider
+   * 
+   * Note: This service is a singleton. If previously initialized without an API key
+   * (LOCAL provider), it will re-initialize when an API key is provided to enable
+   * semantic consistency checking. This allows the first generation without a key
+   * to not block subsequent generations that have a key configured.
    */
   async connect(
     openaiApiKey?: string,
     geminiApiKey?: string,
     preferLocal: boolean = false
   ): Promise<void> {
-    if (this.isConnected) {
+    // Allow re-initialization if we were previously in LOCAL mode (no API key)
+    // but now have an API key available - this enables semantic consistency
+    const hasNewApiKey = !preferLocal && (geminiApiKey || openaiApiKey);
+    const wasLocalMode = this.embeddingProvider === EmbeddingProvider.LOCAL;
+    const shouldReinitialize = this.isConnected && wasLocalMode && hasNewApiKey;
+    
+    if (this.isConnected && !shouldReinitialize) {
       return;
+    }
+    
+    if (shouldReinitialize) {
+      console.log("WorldBibleEmbedding: Re-initializing with API key (was in LOCAL mode)");
     }
 
     const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
