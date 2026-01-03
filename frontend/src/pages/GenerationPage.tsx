@@ -56,14 +56,6 @@ export function GenerationPage() {
     }
   }, [projectId, projects, getProject, runId]);
 
-  // Start generation if we have a project but no runId
-  // Wait for settings to finish loading to ensure embeddingApiKey is available
-  useEffect(() => {
-    if (project && !runId && !isStarting && project.status !== 'completed' && !settingsLoading) {
-      startNewGeneration();
-    }
-  }, [project, runId, isStarting, settingsLoading, startNewGeneration]);
-
   // Map agent names to phases for phase-based regeneration
   // Phase taxonomy aligned with backend orchestrator phases
   // Backend phases: genesis → characters → worldbuilding → outlining → motif_layer → advanced_planning → drafting → polish
@@ -305,6 +297,14 @@ export function GenerationPage() {
       setIsStarting(false);
     }
   }, [project, isStarting, hasAnyApiKey, getAgentConfig, getProviderKey, useBranchingMode, selectedNarrative, embeddingApiKey, startGeneration]);
+
+  // Start generation if we have a project but no runId
+  // Wait for settings to finish loading to ensure embeddingApiKey is available
+  useEffect(() => {
+    if (project && !runId && !isStarting && project.status !== 'completed' && !settingsLoading) {
+      startNewGeneration();
+    }
+  }, [project, runId, isStarting, settingsLoading, startNewGeneration]);
 
   if (!projectId) {
     return (
