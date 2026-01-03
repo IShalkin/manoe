@@ -153,9 +153,9 @@ export class WorldBibleEmbeddingService {
     if (!preferLocal && geminiApiKey) {
       this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
       this.embeddingProvider = EmbeddingProvider.GEMINI;
-      this.embeddingDimension = 768; // text-embedding-004 outputs 768 dimensions
-      this.embeddingModel = "text-embedding-004";
-      console.log("WorldBibleEmbedding: Using Gemini text-embedding-004 (768 dimensions)");
+      this.embeddingDimension = 768; // gemini-embedding-001 supports outputDimensionality, we request 768
+      this.embeddingModel = "gemini-embedding-001";
+      console.log("WorldBibleEmbedding: Using Gemini gemini-embedding-001 (768 dimensions)");
     } else if (!preferLocal && openaiApiKey) {
       this.openaiClient = new OpenAI({ apiKey: openaiApiKey });
       this.embeddingProvider = EmbeddingProvider.OPENAI;
