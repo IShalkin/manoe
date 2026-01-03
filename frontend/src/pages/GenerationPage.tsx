@@ -62,7 +62,7 @@ export function GenerationPage() {
     if (project && !runId && !isStarting && project.status !== 'completed' && !settingsLoading) {
       startNewGeneration();
     }
-  }, [project, runId, isStarting, settingsLoading]);
+  }, [project, runId, isStarting, settingsLoading, startNewGeneration]);
 
   // Map agent names to phases for phase-based regeneration
   // Phase taxonomy aligned with backend orchestrator phases
@@ -239,7 +239,7 @@ export function GenerationPage() {
     }
   }, [project, isRegenerating, hasAnyApiKey, getAgentConfig, getProviderKey, startGeneration, embeddingApiKey]);
 
-  const startNewGeneration = async () => {
+  const startNewGeneration = useCallback(async () => {
     if (!project || isStarting) return;
     
     if (!hasAnyApiKey()) {
@@ -304,7 +304,7 @@ export function GenerationPage() {
     } finally {
       setIsStarting(false);
     }
-  };
+  }, [project, isStarting, hasAnyApiKey, getAgentConfig, getProviderKey, useBranchingMode, selectedNarrative, embeddingApiKey, startGeneration]);
 
   if (!projectId) {
     return (

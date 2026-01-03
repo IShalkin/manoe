@@ -156,7 +156,7 @@ interface ProjectFormData {
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { hasAnyApiKey, getAgentConfig, getProviderKey, getResearchProviderKey, loading, embeddingApiKey } = useSettings();
+  const { hasAnyApiKey, getAgentConfig, getProviderKey, getResearchProviderKey, embeddingApiKey, loading } = useSettings();
   const { 
     projects, 
     createProject, 
