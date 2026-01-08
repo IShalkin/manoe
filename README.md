@@ -686,13 +686,15 @@ docker-compose up -d
 
 The docker-compose.yml includes the following services:
 
-| Service | Port | Description |
-|---------|------|-------------|
+| Service | Internal Port | Description |
+|---------|---------------|-------------|
 | **frontend** | 5173 | React + TypeScript + Vite web interface |
 | **api-gateway** | 3000 | TypeScript/Ts.ED API gateway with SSE |
 | **redis** | 6379 | Message broker for real-time SSE events |
 | **qdrant** | 6333 | Vector database for character/worldbuilding memory |
-| **langfuse-web** | 3000 | Langfuse observability UI and API |
+| **langfuse-web** | 3000 | Langfuse observability UI (separate subdomain) |
+
+> **Note:** Ports shown are internal container ports. In production, services are accessed via nginx-proxy with separate subdomains (e.g., `manoe.iliashalkin.com`, `langfuse.iliashalkin.com`).
 
 ### Environment Variables for Docker
 
