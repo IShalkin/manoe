@@ -135,6 +135,8 @@ interface SettingsContextType {
   getResearchProviderKey: (provider: ResearchProvider) => string | undefined;
   embeddingApiKey: string;
   updateEmbeddingApiKey: (apiKey: string) => void;
+  migrationWarning: string | null;
+  dismissMigrationWarning: () => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
@@ -149,6 +151,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
   const [researchProviders, setResearchProviders] = useState<ResearchProviderConfig[]>([]);
   const [embeddingApiKey, setEmbeddingApiKey] = useState<string>('');
+  const [migrationWarning, setMigrationWarning] = useState<string | null>(null);
 
   // Load settings from localStorage on mount (with decryption)
   useEffect(() => {
@@ -176,6 +179,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             if (clearedCount > 0) {
               console.warn(`[SettingsContext] ${clearedCount} API key(s) could not be decrypted and were cleared.`);
               console.warn('[SettingsContext] This may be due to encryption method upgrade. Please re-enter your API keys.');
+              setMigrationWarning(`${clearedCount} API key(s) could not be decrypted due to an encryption upgrade. Please re-enter your API keys in Settings.`);
             }
             migrated.providers = decryptedProviders;
           }
@@ -396,6 +400,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const dismissMigrationWarning = useCallback(() => {
+    setMigrationWarning(null);
+  }, []);
+
   return (
     <SettingsContext.Provider value={{
       settings,
@@ -414,6 +422,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       getResearchProviderKey,
       embeddingApiKey,
       updateEmbeddingApiKey,
+      migrationWarning,
+      dismissMigrationWarning,
     }}>
       {children}
     </SettingsContext.Provider>

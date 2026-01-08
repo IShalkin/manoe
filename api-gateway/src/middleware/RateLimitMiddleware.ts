@@ -45,6 +45,15 @@ const EXPENSIVE_PATHS = [
   "/api/generation",
 ];
 
+// Paths exempt from rate limiting (health checks, metrics)
+const EXEMPT_PATHS = [
+  "/health",
+  "/api/health",
+  "/metrics",
+  "/ready",
+  "/live",
+];
+
 const RATE_LIMIT_LUA_SCRIPT = `
   local key = KEYS[1]
   local now = tonumber(ARGV[1])
@@ -150,12 +159,22 @@ export class RateLimitMiddleware {
     return this.isExpensiveOperation(path) ? EXPENSIVE_OPERATIONS_CONFIG : DEFAULT_CONFIG;
   }
 
+  private isExemptPath(path: string): boolean {
+    return EXEMPT_PATHS.some((exemptPath) => path.startsWith(exemptPath));
+  }
+
   async use(
     @Req() req: Request,
     @Res() res: Response,
     @Next() next: NextFunction,
     @Context() ctx: Context
   ): Promise<void> {
+    // Skip rate limiting for health check endpoints
+    if (this.isExemptPath(req.path)) {
+      next();
+      return;
+    }
+
     try {
       // Wait for initial connection if still pending
       if (this.connectionPromise) {
