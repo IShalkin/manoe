@@ -1,0 +1,25 @@
+{
+  "name": "MANOE",
+  "logo": {
+    "dark": "https://github.com/IShalkin/manoe/raw/main/docs/logo.png"
+  },
+  "primaryTab": {
+    "name": "Documentation"
+  },
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "introduction",
+        "AGENTS",
+        "API",
+        "ARCHITECTURE",
+        "DEPLOYMENT"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "twitter": "https://twitter.com",
+    "github": "https://github.com/IShalkin/manoe"
+  }
+}
