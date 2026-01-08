@@ -1,5 +1,6 @@
 {
   "name": "MANOE",
+    "theme": "mint",
   "logo": {
     "dark": "https://github.com/IShalkin/manoe/raw/main/docs/logo.png"
   },
