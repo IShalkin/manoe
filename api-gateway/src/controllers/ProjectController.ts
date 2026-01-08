@@ -157,36 +157,25 @@ export class ProjectController {
   @Description("Delete a project and all associated data including vector embeddings. Fails if vector deletion fails to maintain data consistency.")
   @Returns(200)
   @Returns(500)
-  async deleteProject(@PathParams("id") id: string): Promise<{ success: boolean; warning?: string }> {
+  async deleteProject(@PathParams("id") id: string): Promise<{ success: boolean }> {
     // First, delete all Qdrant vectors for this project to prevent orphaned data
     // This must happen BEFORE Supabase deletion since we need the project to exist
     // for proper cascade deletion tracking
-    let qdrantDeletionFailed = false;
-    let qdrantError: string | undefined;
-
+    // 
+    // FAIL-FAST APPROACH: If Qdrant deletion fails, we abort the entire operation
+    // to prevent orphaned data. This follows the "fail fast" principle - it's better
+    // to fail and let the user retry than to succeed with partial deletion.
     try {
       await this.qdrantMemoryService.deleteProjectData(id);
       console.log(`[ProjectController] Deleted Qdrant vectors for project ${id}`);
     } catch (error) {
-      // Log the error but continue with Supabase deletion
-      // This is a tradeoff: we prioritize availability over strict consistency
-      // The consistency checker can detect and repair orphaned vectors later
-      qdrantDeletionFailed = true;
-      qdrantError = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[ProjectController] Failed to delete Qdrant vectors for project ${id}:`, error);
+      throw new Error(`Cannot delete project: vector cleanup failed. Please try again. ${errorMessage}`);
     }
 
     // Delete from Supabase (cascades to related tables via foreign keys)
     await this.supabaseService.deleteProject(id);
-
-    // Return success with warning if Qdrant deletion failed
-    // This allows the user to know that cleanup may be needed
-    if (qdrantDeletionFailed) {
-      return {
-        success: true,
-        warning: `Project deleted from database, but vector cleanup failed: ${qdrantError}. Orphaned vectors may exist in Qdrant. Use /health/consistency to check and repair.`,
-      };
-    }
 
     return { success: true };
   }

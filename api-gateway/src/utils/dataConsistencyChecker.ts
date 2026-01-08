@@ -210,7 +210,8 @@ export class DataConsistencyChecker {
     const supabaseWorldbuilding = await this.supabaseService.getWorldbuilding(projectId);
     
     // Get Qdrant worldbuilding count by searching with empty query
-    // Note: Limited to 100 results - may undercount for large projects
+    // WARNING: Limited to 100 results - may undercount for projects with >100 worldbuilding elements
+    // TODO: Use scroll API for accurate count (requires QdrantMemoryService changes)
     let qdrantCount = 0;
     try {
       const searchResults = await this.qdrantMemoryService.searchWorldbuilding(
@@ -241,6 +242,12 @@ export class DataConsistencyChecker {
 
   /**
    * Check scenes/drafts consistency between Supabase and Qdrant
+   * 
+   * KNOWN LIMITATIONS (same as worldbuilding):
+   * 1. Qdrant count is capped at 100 results - may undercount for large projects
+   * 2. Orphan detection is not supported (requires scroll API implementation)
+   * 
+   * TODO: Add getProjectScenes() to QdrantMemoryService using scroll API for accurate counts
    */
   private async checkScenesConsistency(
     projectId: string
@@ -248,6 +255,8 @@ export class DataConsistencyChecker {
     const supabaseDrafts = await this.supabaseService.getDrafts(projectId);
     
     // Get Qdrant scenes by searching with empty query
+    // WARNING: Limited to 100 results - may undercount for projects with >100 scenes
+    // TODO: Use scroll API for accurate count (requires QdrantMemoryService changes)
     let qdrantCount = 0;
     try {
       const searchResults = await this.qdrantMemoryService.searchScenes(
@@ -269,6 +278,7 @@ export class DataConsistencyChecker {
     return {
       supabaseCount: supabaseDrafts.length,
       qdrantCount,
+      // Orphan detection not supported - requires scroll API implementation
       orphanedVectorIds: [],
       missingEmbeddingIds,
       isConsistent: missingEmbeddingIds.length === 0,
