@@ -222,7 +222,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           setEmbeddingApiKey(embeddingKey);
           console.log('[SettingsContext] Loaded embedding API key');
         } catch (e) {
-          console.error('[SettingsContext] Failed to decrypt embedding key:', e);
+          console.error('[SettingsContext] Failed to decrypt embedding key, clearing:', e);
+          // Clear corrupted embedding key and show migration warning
+          localStorage.removeItem(EMBEDDING_KEY_STORAGE_KEY);
+          setMigrationWarning(prev => prev || 'Some API keys could not be decrypted due to an encryption upgrade. Please re-enter your API keys in Settings.');
         }
       }
       
