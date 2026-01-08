@@ -262,19 +262,34 @@ export class CacheService {
     await this.invalidate("outline", projectId);
   }
 
+  /**
+   * Get a value from cache, or fetch and cache it if not present.
+   * 
+   * This method properly handles null/undefined values by using a wrapper object
+   * to distinguish between "cached null" and "cache miss". This prevents repeated
+   * database queries for non-existent resources.
+   */
   async getOrSet<T>(
     type: string,
     id: string,
     fetchFn: () => Promise<T>,
     ttlSeconds?: number
   ): Promise<T> {
-    const cached = await this.get<T>(type, id);
+    // Use a wrapper key to store metadata about the cached value
+    const wrapperKey = `${type}:wrapped`;
+    const cached = await this.get<{ exists: boolean; value: T | null }>(wrapperKey, id);
+    
     if (cached !== null) {
-      return cached;
+      // We have a cached entry - return the value (which may be null for non-existent resources)
+      return cached.value as T;
     }
 
+    // Cache miss - fetch the data
     const data = await fetchFn();
-    await this.set(type, id, data, ttlSeconds);
+    
+    // Cache the result with a wrapper to handle null values
+    // This ensures we don't repeatedly query for non-existent resources
+    await this.set(wrapperKey, id, { exists: data !== null && data !== undefined, value: data }, ttlSeconds);
     return data;
   }
 

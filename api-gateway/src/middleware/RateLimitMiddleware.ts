@@ -12,6 +12,7 @@
 
 import { Middleware, Req, Res, Next, Context } from "@tsed/common";
 import Redis from "ioredis";
+import crypto from "crypto";
 import type { Request, Response, NextFunction } from "express";
 
 export interface RateLimitConfig {
@@ -124,23 +125,34 @@ export class RateLimitMiddleware {
     return this.client;
   }
 
+  /**
+   * Extract a rate limit identifier from the request.
+   * 
+   * SECURITY NOTE: We intentionally do NOT parse JWT payloads here because:
+   * 1. JWT signature verification requires the secret key
+   * 2. Parsing without verification allows attackers to forge tokens
+   * 3. An attacker could exhaust another user's rate limit by forging their user ID
+   * 
+   * Instead, we use a hash of the entire token as the identifier. This ensures:
+   * - Legitimate users with valid tokens get consistent rate limiting
+   * - Attackers with forged tokens get their own rate limit bucket (not affecting others)
+   * - No JWT secret needed in the rate limiter
+   */
   private extractUserId(req: Request): string {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.substring(7);
-      try {
-        const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64").toString());
-        if (payload.sub) {
-          return payload.sub;
-        }
-      } catch {
-        // Fall through to IP-based identification
-      }
+      // Use a hash of the token to identify the user without trusting the payload
+      // This prevents attackers from forging tokens to exhaust other users' rate limits
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex").substring(0, 16);
+      return `token:${tokenHash}`;
     }
 
     const apiKey = req.headers["x-api-key"];
     if (apiKey && typeof apiKey === "string") {
-      return `apikey:${apiKey.substring(0, 8)}`;
+      // Hash the API key to avoid exposing it in logs/metrics
+      const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex").substring(0, 16);
+      return `apikey:${keyHash}`;
     }
 
     const forwarded = req.headers["x-forwarded-for"];
