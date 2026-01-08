@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { UserSettings, ProviderConfig, AgentConfig, LLMProvider, AGENTS, MODELS, LLMModel, ResearchProvider, ResearchProviderConfig } from '../types';
 import { orchestratorFetch } from '../lib/api';
-import { encryptData, decryptData, isEncrypted, needsMigration, clearEncryptedData } from '../lib/crypto';
+import { encryptData, decryptData, isEncrypted, needsMigration } from '../lib/crypto';
 
 const STORAGE_KEY = 'manoe_settings';
 const MODELS_CACHE_KEY = 'manoe_models_cache';
