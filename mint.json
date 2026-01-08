@@ -3,7 +3,6 @@
   "description": "Distributed Multi-Agent Narrative Engine Documentation",
   "logo": "https://manoe-mintlify.app/logo.png",
   "favicon": "https://manoe-mintlify.app/favicon.png",
-  "modeToggle": "dark",
   "colors": {
     "primary": "#0EA5E9",
     "light": "#38BDF8",
