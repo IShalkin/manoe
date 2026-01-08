@@ -1,5 +1,15 @@
 -- Create vector_memories table for centralized tracking of Supabase <-> Qdrant relationships
 -- This provides a metadata layer for managing vector embeddings across the system
+-- Requires: update_updated_at_column() function from migration 001_create_projects_table.sql
+
+-- Ensure the update_updated_at_column function exists (idempotent)
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
 
 CREATE TABLE IF NOT EXISTS vector_memories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -86,5 +96,5 @@ CREATE TRIGGER update_vector_memories_updated_at
 -- Grant permissions to authenticated users
 GRANT SELECT, INSERT, UPDATE, DELETE ON vector_memories TO authenticated;
 
--- Grant read permissions to anon (if needed)
-GRANT SELECT ON vector_memories TO anon;
+-- Note: Removed GRANT SELECT to anon for security - vector memory metadata
+-- should not be accessible to unauthenticated users (Principle of Least Privilege)

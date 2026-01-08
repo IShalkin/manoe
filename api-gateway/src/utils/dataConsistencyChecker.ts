@@ -5,8 +5,69 @@
  * Detects orphaned vectors, missing embeddings, and data mismatches.
  */
 
-import { SupabaseService } from "../services/SupabaseService";
+import { SupabaseService, Character, Worldbuilding, Draft } from "../services/SupabaseService";
 import { QdrantMemoryService } from "../services/QdrantMemoryService";
+
+/**
+ * Type-safe conversion helpers for Qdrant storage.
+ * QdrantMemoryService.storeCharacter/storeWorldbuilding/storeScene expect Record<string, unknown>
+ * because they extract specific fields internally. These helpers provide explicit conversion
+ * while maintaining type safety at the call site.
+ */
+function characterToRecord(character: Character): Record<string, unknown> {
+  return {
+    id: character.id,
+    project_id: character.project_id,
+    name: character.name,
+    archetype: character.archetype,
+    core_motivation: character.core_motivation,
+    inner_trap: character.inner_trap,
+    psychological_wound: character.psychological_wound,
+    visual_signature: character.visual_signature,
+    qdrant_id: character.qdrant_id,
+    created_at: character.created_at,
+  };
+}
+
+function worldbuildingToRecord(element: Worldbuilding): Record<string, unknown> {
+  return {
+    id: element.id,
+    project_id: element.project_id,
+    element_type: element.element_type,
+    name: element.name,
+    description: element.description,
+    attributes: element.attributes,
+    qdrant_id: element.qdrant_id,
+    created_at: element.created_at,
+  };
+}
+
+function draftToRecord(draft: Draft): Record<string, unknown> {
+  return {
+    id: draft.id,
+    project_id: draft.project_id,
+    scene_number: draft.scene_number,
+    narrative_content: draft.narrative_content,
+    title: draft.title,
+    word_count: draft.word_count,
+    sensory_details: draft.sensory_details,
+    subtext_layer: draft.subtext_layer,
+    emotional_shift: draft.emotional_shift,
+    status: draft.status,
+    revision_count: draft.revision_count,
+    semantic_check_error: draft.semantic_check_error,
+    contradiction_score: draft.contradiction_score,
+    created_at: draft.created_at,
+  };
+}
+
+/**
+ * Type guard to check if a draft has a qdrant_id field.
+ * The Draft interface doesn't include qdrant_id, but some drafts may have it at runtime.
+ */
+function hasQdrantId(obj: Draft | Worldbuilding | Character): boolean {
+  return 'qdrant_id' in obj && obj.qdrant_id !== undefined && obj.qdrant_id !== null;
+}
 
 export interface ConsistencyReport {
   timestamp: string;
@@ -101,11 +162,11 @@ export class DataConsistencyChecker {
     const supabaseCharacters = await this.supabaseService.getCharacters(projectId);
     const qdrantCharacters = await this.qdrantMemoryService.getProjectCharacters(projectId);
 
-    const supabaseIds = new Set(supabaseCharacters.map((c) => c.id));
+    // Note: supabaseIds and supabaseQdrantIds are available for future use if needed
+    // for more sophisticated consistency checks (e.g., verifying qdrant_id references)
     const supabaseQdrantIds = new Set(
       supabaseCharacters.filter((c) => c.qdrant_id).map((c) => c.qdrant_id)
     );
-    const qdrantIds = new Set(qdrantCharacters.map((c) => c.projectId === projectId ? c.name : null).filter(Boolean));
 
     // Find orphaned vectors (in Qdrant but not referenced in Supabase)
     const orphanedVectorIds: string[] = [];
@@ -133,14 +194,23 @@ export class DataConsistencyChecker {
 
   /**
    * Check worldbuilding consistency between Supabase and Qdrant
+   * 
+   * KNOWN LIMITATION: Orphan detection is not supported for worldbuilding entities.
+   * This is because QdrantMemoryService doesn't expose a getProjectWorldbuilding() method
+   * like it does for characters. The empty-string search workaround is limited to 100 results
+   * and doesn't provide the entity identifiers needed for orphan detection.
+   * 
+   * To implement full orphan detection, either:
+   * 1. Add getProjectWorldbuilding() to QdrantMemoryService (recommended)
+   * 2. Use Qdrant's scroll API to fetch all vectors with project filter
    */
   private async checkWorldbuildingConsistency(
     projectId: string
   ): Promise<ConsistencyCheckResult> {
     const supabaseWorldbuilding = await this.supabaseService.getWorldbuilding(projectId);
     
-    // Get Qdrant worldbuilding by searching with empty query to get all
-    // Note: This is a workaround since QdrantMemoryService doesn't have getProjectWorldbuilding
+    // Get Qdrant worldbuilding count by searching with empty query
+    // Note: Limited to 100 results - may undercount for large projects
     let qdrantCount = 0;
     try {
       const searchResults = await this.qdrantMemoryService.searchWorldbuilding(
@@ -162,7 +232,8 @@ export class DataConsistencyChecker {
     return {
       supabaseCount: supabaseWorldbuilding.length,
       qdrantCount,
-      orphanedVectorIds: [], // Cannot easily detect without full Qdrant scroll
+      // Orphan detection not supported - see method documentation above
+      orphanedVectorIds: [],
       missingEmbeddingIds,
       isConsistent: missingEmbeddingIds.length === 0,
     };
@@ -190,8 +261,9 @@ export class DataConsistencyChecker {
     }
 
     // Find missing embeddings (drafts without qdrant_id)
+    // Note: Draft interface doesn't include qdrant_id, but it may exist at runtime
     const missingEmbeddingIds = supabaseDrafts
-      .filter((d) => !(d as unknown as Record<string, unknown>).qdrant_id)
+      .filter((d) => !hasQdrantId(d as Draft))
       .map((d) => d.id);
 
     return {
@@ -204,29 +276,52 @@ export class DataConsistencyChecker {
   }
 
   /**
-   * Check consistency for all projects
+   * Check consistency for all projects using pagination to handle large datasets.
+   * Processes projects in batches to avoid memory issues and timeouts.
    */
   async checkGlobalConsistency(): Promise<GlobalConsistencyReport> {
     const timestamp = new Date().toISOString();
-    const { projects } = await this.supabaseService.listProjects(1, 1000);
-
     const projectReports: ConsistencyReport[] = [];
     let consistentProjects = 0;
     let totalOrphanedVectors = 0;
     let totalMissingEmbeddings = 0;
+    let totalProjectsProcessed = 0;
 
-    for (const project of projects) {
-      try {
-        const report = await this.checkProjectConsistency(project.id);
-        projectReports.push(report);
+    // Process projects in batches using pagination
+    const BATCH_SIZE = 100;
+    let page = 1;
+    let hasMore = true;
 
-        if (report.summary.isConsistent) {
-          consistentProjects++;
+    while (hasMore) {
+      const { projects } = await this.supabaseService.listProjects(page, BATCH_SIZE);
+      
+      if (projects.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const project of projects) {
+        try {
+          const report = await this.checkProjectConsistency(project.id);
+          projectReports.push(report);
+
+          if (report.summary.isConsistent) {
+            consistentProjects++;
+          }
+          totalOrphanedVectors += report.summary.orphanedVectors;
+          totalMissingEmbeddings += report.summary.missingEmbeddings;
+          totalProjectsProcessed++;
+        } catch (error) {
+          console.error(`Failed to check consistency for project ${project.id}:`, error);
+          totalProjectsProcessed++;
         }
-        totalOrphanedVectors += report.summary.orphanedVectors;
-        totalMissingEmbeddings += report.summary.missingEmbeddings;
-      } catch (error) {
-        console.error(`Failed to check consistency for project ${project.id}:`, error);
+      }
+
+      // If we got fewer projects than the batch size, we've reached the end
+      if (projects.length < BATCH_SIZE) {
+        hasMore = false;
+      } else {
+        page++;
       }
     }
 
@@ -234,9 +329,9 @@ export class DataConsistencyChecker {
       timestamp,
       projectReports,
       globalSummary: {
-        totalProjects: projects.length,
+        totalProjects: totalProjectsProcessed,
         consistentProjects,
-        inconsistentProjects: projects.length - consistentProjects,
+        inconsistentProjects: totalProjectsProcessed - consistentProjects,
         totalOrphanedVectors,
         totalMissingEmbeddings,
       },
@@ -262,7 +357,10 @@ export class DataConsistencyChecker {
     for (const character of characters) {
       if (!character.qdrant_id) {
         try {
-          await this.qdrantMemoryService.storeCharacter(projectId, character as unknown as Record<string, unknown>);
+          await this.qdrantMemoryService.storeCharacter(
+            projectId,
+            characterToRecord(character)
+          );
           repairedCharacters++;
         } catch (error) {
           errors.push(`Failed to re-index character ${character.id}: ${error}`);
@@ -278,7 +376,7 @@ export class DataConsistencyChecker {
           await this.qdrantMemoryService.storeWorldbuilding(
             projectId,
             element.element_type,
-            element as unknown as Record<string, unknown>
+            worldbuildingToRecord(element)
           );
           repairedWorldbuilding++;
         } catch (error) {
@@ -290,13 +388,12 @@ export class DataConsistencyChecker {
     // Re-index drafts without qdrant_id
     const drafts = await this.supabaseService.getDrafts(projectId);
     for (const draft of drafts) {
-      const draftRecord = draft as unknown as Record<string, unknown>;
-      if (!draftRecord.qdrant_id) {
+      if (!hasQdrantId(draft as Draft)) {
         try {
           await this.qdrantMemoryService.storeScene(
             projectId,
             draft.scene_number,
-            draftRecord
+            draftToRecord(draft)
           );
           repairedScenes++;
         } catch (error) {

@@ -191,8 +191,9 @@ export class HealthController {
 
   @Post("/consistency/:projectId/repair")
   @Summary("Repair missing embeddings for a project")
-  @Description("Re-indexes entities that are missing Qdrant embeddings")
+  @Description("Re-indexes entities that are missing Qdrant embeddings. Requires project ownership.")
   @Returns(200)
+  @Returns(404)
   async repairProjectConsistency(
     @PathParams("projectId") projectId: string
   ): Promise<{
@@ -201,6 +202,12 @@ export class HealthController {
     repairedScenes: number;
     errors: string[];
   }> {
+    // Verify project exists and user has access (RLS handles authorization)
+    const project = await this.supabaseService.getProject(projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
     const checker = createDataConsistencyChecker(
       this.supabaseService,
       this.qdrantMemoryService

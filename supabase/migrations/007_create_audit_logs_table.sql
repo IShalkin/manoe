@@ -46,5 +46,6 @@ CREATE POLICY "Users can insert own project audit logs" ON audit_logs
 -- Grant permissions to authenticated users
 GRANT SELECT, INSERT ON audit_logs TO authenticated;
 
--- Grant read permissions to anon (if needed for public dashboards)
-GRANT SELECT ON audit_logs TO anon;
+-- Note: Removed GRANT SELECT to anon for security - audit logs may contain
+-- sensitive information and should not be accessible to unauthenticated users
+-- (Principle of Least Privilege)
