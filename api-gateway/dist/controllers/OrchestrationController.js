@@ -88,6 +88,8 @@ class GenerateRequestDTO {
     model;
     api_key;
     generation_mode;
+    embeddingApiKey;
+    embedding_api_key;
 }
 __decorate([
     (0, schema_1.Property)(),
@@ -149,6 +151,16 @@ __decorate([
     (0, schema_1.Description)("Generation mode (legacy)"),
     __metadata("design:type", String)
 ], GenerateRequestDTO.prototype, "generation_mode", void 0);
+__decorate([
+    (0, schema_1.Property)(),
+    (0, schema_1.Description)("Embedding API key for WorldBibleEmbeddingService (Gemini API key)"),
+    __metadata("design:type", String)
+], GenerateRequestDTO.prototype, "embeddingApiKey", void 0);
+__decorate([
+    (0, schema_1.Property)(),
+    (0, schema_1.Description)("Embedding API key (legacy snake_case)"),
+    __metadata("design:type", String)
+], GenerateRequestDTO.prototype, "embedding_api_key", void 0);
 /**
  * Generation Response DTO - includes both camelCase and snake_case for compatibility
  */
@@ -308,7 +320,8 @@ let OrchestrationController = class OrchestrationController {
         const model = request.llmConfig?.model || request.model || "";
         const apiKey = request.llmConfig?.apiKey || request.api_key || "";
         const mode = request.mode || request.generation_mode || "full";
-        common_1.$log.info(`[OrchestrationController] startGeneration called, projectId: ${projectId}, seedIdea: ${seedIdea?.substring(0, 50)}...`);
+        const embeddingApiKey = request.embeddingApiKey || request.embedding_api_key;
+        common_1.$log.info(`[OrchestrationController] startGeneration called, projectId: ${projectId}, seedIdea: ${seedIdea?.substring(0, 50)}..., embeddingApiKey: ${embeddingApiKey ? 'provided' : 'not provided'}`);
         const options = {
             projectId,
             seedIdea,
@@ -320,6 +333,7 @@ let OrchestrationController = class OrchestrationController {
             },
             mode,
             settings: request.settings,
+            embeddingApiKey,
         };
         try {
             common_1.$log.info(`[OrchestrationController] calling orchestrator.startGeneration, projectId: ${options.projectId}`);
@@ -348,6 +362,14 @@ let OrchestrationController = class OrchestrationController {
             res.status(404).json({ error: "Run not found" });
             return;
         }
+        // Support SSE reconnection via Last-Event-ID header
+        // This allows clients to resume from where they left off after a disconnect
+        const clientLastEventId = req.headers["last-event-id"];
+        const startFromId = clientLastEventId || "0";
+        const isReconnect = !!clientLastEventId;
+        if (isReconnect) {
+            console.log(`[OrchestrationController] SSE reconnection for runId: ${runId}, resuming from eventId: ${clientLastEventId}`);
+        }
         // Set SSE headers - HTTP/2 compatible (no Connection header!)
         // Connection header is forbidden in HTTP/2 and causes ERR_HTTP2_PROTOCOL_ERROR
         res.setHeader("Content-Type", "text/event-stream");
@@ -356,7 +378,7 @@ let OrchestrationController = class OrchestrationController {
         res.setHeader("Content-Encoding", "identity"); // Prevent compression which breaks SSE
         res.flushHeaders();
         // Send initial connection event (no event: header so onmessage receives it)
-        res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "connected", runId, status: status.phase, reconnected: isReconnect })}\n\n`);
         // Handle client disconnect - use res.on("close") instead of req.on("close")
         // req.on("close") can fire prematurely in some Express/TsED configurations
         let isConnected = true;
@@ -371,11 +393,12 @@ let OrchestrationController = class OrchestrationController {
             }
         }, 15000); // Every 15 seconds
         // First, send all existing events from the stream (catch up)
+        // If reconnecting, start from the client's last event ID to avoid duplicates
         // Track the last event ID to avoid race condition when switching to live streaming
         // Using "$" would miss events published between catch-up read and live streaming start
-        let lastEventId = "0";
+        let lastEventId = startFromId;
         try {
-            const existingEvents = await this.redisStreams.getEvents(runId, "0", 1000);
+            const existingEvents = await this.redisStreams.getEvents(runId, startFromId, 1000);
             console.log(`[OrchestrationController] Sending ${existingEvents.length} existing events for runId: ${runId}`);
             const cinematicCount = existingEvents.filter(e => e.type === "agent_thought" || e.type === "agent_dialogue").length;
             console.log(`[OrchestrationController] Found ${cinematicCount} cinematic events in existing events`);
@@ -387,6 +410,7 @@ let OrchestrationController = class OrchestrationController {
                 }
                 // Send as generic message (no event: header) so onmessage receives it
                 // The type is included in the data payload
+                // Include SSE id: field for automatic Last-Event-ID tracking on reconnection
                 const sseData = JSON.stringify({
                     id: event.id,
                     type: event.type,
@@ -394,7 +418,8 @@ let OrchestrationController = class OrchestrationController {
                     timestamp: event.timestamp,
                     data: event.data,
                 });
-                res.write(`data: ${sseData}\n\n`);
+                // SSE format: id field enables browser to send Last-Event-ID header on reconnect
+                res.write(`id: ${event.id}\ndata: ${sseData}\n\n`);
                 sentCount++;
                 // Track the last event ID for seamless transition to live streaming
                 if (event.id) {
@@ -419,6 +444,7 @@ let OrchestrationController = class OrchestrationController {
                     console.log(`[OrchestrationController] Streaming cinematic event:`, event.type, `runId: ${runId}`, event.data);
                 }
                 // Format as SSE (no event: header so onmessage receives it)
+                // Include SSE id: field for automatic Last-Event-ID tracking on reconnection
                 const sseData = JSON.stringify({
                     id: event.id,
                     type: event.type,
@@ -426,9 +452,10 @@ let OrchestrationController = class OrchestrationController {
                     timestamp: event.timestamp,
                     data: event.data,
                 });
-                res.write(`data: ${sseData}\n\n`);
+                // SSE format: id field enables browser to send Last-Event-ID header on reconnect
+                res.write(`id: ${event.id}\ndata: ${sseData}\n\n`);
                 // Stop streaming on terminal events
-                if (event.type === "ERROR" || event.type === "generation_completed") {
+                if (event.type === "ERROR" || event.type === "generation_complete") {
                     break;
                 }
             }
@@ -534,7 +561,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
 - \`scene_draft_start\` - Scene drafting started
 - \`scene_draft_complete\` - Scene draft ready
 - \`ERROR\` - Terminal error (stop listening)
-- \`generation_completed\` - All done
+- \`generation_complete\` - All done
 - \`heartbeat\` - Keep-alive (every 15s)
   `),
     (0, schema_1.Returns)(202, GenerateResponseDTO),
@@ -573,7 +600,7 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
 **Important:**
 - Heartbeat events sent every 15 seconds to prevent proxy timeouts
 - Check for \`ERROR\` event type to detect failures
-- \`generation_completed\` signals successful completion
+- \`generation_complete\` signals successful completion
   `),
     (0, schema_1.Returns)(200),
     (0, schema_1.Returns)(404),

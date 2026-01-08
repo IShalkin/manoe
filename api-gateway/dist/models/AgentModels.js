@@ -212,6 +212,11 @@ class GenerationState {
     rawFactsLog = [];
     lastArchivistScene = 0;
     /**
+     * World state tracking for continuity
+     * Updated by Archivist after each scene
+     */
+    worldState;
+    /**
      * Current scene outline being processed
      * Used to pass expansion mode context to WriterAgent
      */
@@ -297,6 +302,11 @@ __decorate([
     (0, schema_1.Property)(),
     __metadata("design:type", Number)
 ], GenerationState.prototype, "lastArchivistScene", void 0);
+__decorate([
+    (0, schema_1.Optional)(),
+    (0, schema_1.Property)(),
+    __metadata("design:type", Object)
+], GenerationState.prototype, "worldState", void 0);
 __decorate([
     (0, schema_1.Optional)(),
     (0, schema_1.Property)(),

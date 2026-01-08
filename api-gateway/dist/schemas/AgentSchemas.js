@@ -180,6 +180,82 @@ const ArchivistConstraintSchema = zod_1.z.object({
     reasoning: zod_1.z.string().optional(),
 });
 /**
+ * Normalize character status from LLM output to valid enum value
+ * Maps common variations to standard values
+ */
+const normalizeCharacterStatus = (val) => {
+    if (val === null || val === undefined)
+        return undefined;
+    if (typeof val !== "string")
+        return undefined;
+    const lower = val.toLowerCase().trim();
+    // Map to "alive"
+    if (["alive", "active", "living", "healthy", "well", "present"].includes(lower)) {
+        return "alive";
+    }
+    // Map to "dead"
+    if (["dead", "deceased", "killed", "died", "perished"].includes(lower)) {
+        return "dead";
+    }
+    // Map to "transformed"
+    if (["transformed", "changed", "mutated", "evolved", "altered"].includes(lower)) {
+        return "transformed";
+    }
+    // Default to "unknown" for unrecognized values
+    return "unknown";
+};
+/**
+ * Normalize event significance from LLM output to valid enum value
+ * Maps common variations and descriptions to standard values
+ */
+const normalizeSignificance = (val) => {
+    if (val === null || val === undefined)
+        return undefined;
+    if (typeof val !== "string")
+        return undefined;
+    const lower = val.toLowerCase().trim();
+    // Map to "major" - check for keywords indicating high importance
+    if (lower === "major") {
+        return "major";
+    }
+    // Only use includes() if the string doesn't contain conflicting keywords
+    // This prevents "slightly critical" from being classified as "major"
+    // Use word boundaries to avoid matching "minor" in "minority" etc.
+    if (!/\b(small|slight|minor)\b/.test(lower)) {
+        if (lower.includes("critical") ||
+            lower.includes("turning point") ||
+            lower.includes("pivotal") ||
+            lower.includes("key") ||
+            lower.includes("crucial") ||
+            lower.includes("significant")) {
+            return "major";
+        }
+    }
+    // Map to "minor"
+    if (lower === "minor" || lower.includes("small") || lower.includes("slight")) {
+        return "minor";
+    }
+    // Map to "background"
+    if (lower === "background" || lower.includes("flavor") || lower.includes("ambient") || lower.includes("detail")) {
+        return "background";
+    }
+    // Default to "minor" for unrecognized values (safer than major)
+    return "minor";
+};
+/**
+ * Preprocess null to undefined for optional string fields
+ */
+const nullToUndefined = (val) => {
+    if (val === null || val === undefined)
+        return undefined;
+    if (typeof val === "string")
+        return val.trim() || undefined;
+    // Coerce numbers and booleans to strings for robustness (LLMs may return varied types)
+    if (typeof val === "number" || typeof val === "boolean")
+        return String(val);
+    return undefined;
+};
+/**
  * Archivist Output schema (from ArchivistAgent)
  * Uses preprocessing to filter out invalid constraints (null values, empty strings)
  * before validation to handle LLM returning malformed data
@@ -211,6 +287,50 @@ exports.ArchivistOutputSchema = zod_1.z.object({
     }, zod_1.z.array(ArchivistConstraintSchema).optional()),
     conflicts_resolved: zod_1.z.array(zod_1.z.string()).optional(),
     discarded_facts: zod_1.z.array(zod_1.z.string()).optional(),
+    worldStateDiff: zod_1.z.object({
+        characterUpdates: zod_1.z.preprocess((val) => {
+            if (!Array.isArray(val))
+                return val;
+            // Normalize each character update's status and currentLocation
+            return val.map((item) => {
+                if (typeof item !== "object" || item === null)
+                    return item;
+                const obj = item;
+                return {
+                    ...obj,
+                    status: normalizeCharacterStatus(obj.status),
+                    currentLocation: nullToUndefined(obj.currentLocation),
+                };
+            });
+        }, zod_1.z.array(zod_1.z.object({
+            name: zod_1.z.string(),
+            status: zod_1.z.enum(["alive", "dead", "unknown", "transformed"]).optional(),
+            currentLocation: zod_1.z.string().optional(),
+            newAttributes: zod_1.z.record(zod_1.z.string()).optional(),
+        })).optional()),
+        newLocations: zod_1.z.array(zod_1.z.object({
+            name: zod_1.z.string(),
+            type: zod_1.z.string(),
+            description: zod_1.z.string().optional(),
+        })).optional(),
+        timelineEvents: zod_1.z.preprocess((val) => {
+            if (!Array.isArray(val))
+                return val;
+            // Normalize each timeline event's significance
+            return val.map((item) => {
+                if (typeof item !== "object" || item === null)
+                    return item;
+                const obj = item;
+                return {
+                    ...obj,
+                    significance: normalizeSignificance(obj.significance),
+                };
+            });
+        }, zod_1.z.array(zod_1.z.object({
+            event: zod_1.z.string(),
+            significance: zod_1.z.enum(["major", "minor", "background"]).optional(),
+        })).optional()),
+    }).optional(),
 });
 /**
  * Validation error class

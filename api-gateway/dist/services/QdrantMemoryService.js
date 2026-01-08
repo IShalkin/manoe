@@ -15,6 +15,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -26,6 +29,7 @@ const openai_1 = __importDefault(require("openai"));
 const generative_ai_1 = require("@google/generative-ai");
 const uuid_1 = require("uuid");
 const schemaNormalizers_1 = require("../utils/schemaNormalizers");
+const MetricsService_1 = require("./MetricsService");
 /**
  * Embedding provider types
  */
@@ -42,18 +46,43 @@ let QdrantMemoryService = class QdrantMemoryService {
     embeddingProvider = EmbeddingProvider.LOCAL;
     embeddingDimension = 384;
     embeddingModel = "all-MiniLM-L6-v2";
-    // Collection names
-    COLLECTION_CHARACTERS = "manoe_characters";
-    COLLECTION_WORLDBUILDING = "manoe_worldbuilding";
-    COLLECTION_SCENES = "manoe_scenes";
+    isConnected = false;
+    // Track current API keys to detect changes (fixes singleton caching issue)
+    currentGeminiKey;
+    currentOpenaiKey;
+    metricsService;
+    // Collection name prefixes (versioned with dimension suffix)
+    COLLECTION_PREFIX_CHARACTERS = "manoe_characters";
+    COLLECTION_PREFIX_WORLDBUILDING = "manoe_worldbuilding";
+    COLLECTION_PREFIX_SCENES = "manoe_scenes";
+    // Versioned collection names (set after embedding provider is determined)
+    collectionCharacters = "";
+    collectionWorldbuilding = "";
+    collectionScenes = "";
     /**
      * Connect to Qdrant and initialize embedding provider
+     *
+     * Supports re-initialization when API keys change (fixes singleton caching issue).
      *
      * @param openaiApiKey - OpenAI API key for embeddings (highest priority)
      * @param geminiApiKey - Gemini API key for embeddings (second priority)
      * @param preferLocal - If true, use local embeddings even if API keys available
      */
     async connect(openaiApiKey, geminiApiKey, preferLocal = false) {
+        // Detect if API keys have changed - need to reinitialize if so
+        const geminiKeyChanged = geminiApiKey && geminiApiKey !== this.currentGeminiKey;
+        const openaiKeyChanged = openaiApiKey && openaiApiKey !== this.currentOpenaiKey;
+        const keyChanged = geminiKeyChanged || openaiKeyChanged;
+        // Skip if already connected with same keys
+        if (this.isConnected && !keyChanged) {
+            return;
+        }
+        if (keyChanged) {
+            console.log("Qdrant Memory: API key changed, reinitializing embedding provider");
+        }
+        // Update tracked keys
+        this.currentGeminiKey = geminiApiKey;
+        this.currentOpenaiKey = openaiApiKey;
         const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
         const qdrantApiKey = process.env.QDRANT_API_KEY;
         this.client = new js_client_rest_1.QdrantClient({
@@ -72,8 +101,8 @@ let QdrantMemoryService = class QdrantMemoryService {
             this.geminiClient = new generative_ai_1.GoogleGenerativeAI(geminiApiKey);
             this.embeddingProvider = EmbeddingProvider.GEMINI;
             this.embeddingDimension = 768;
-            this.embeddingModel = "embedding-001";
-            console.log("Qdrant Memory: Using Gemini embeddings (768 dimensions)");
+            this.embeddingModel = "gemini-embedding-001";
+            console.log("Qdrant Memory: Using Gemini gemini-embedding-001 (768 dimensions)");
         }
         else {
             this.embeddingProvider = EmbeddingProvider.LOCAL;
@@ -81,8 +110,15 @@ let QdrantMemoryService = class QdrantMemoryService {
             this.embeddingModel = "all-MiniLM-L6-v2";
             console.log("Qdrant Memory: Using local embeddings (384 dimensions)");
         }
+        // Set versioned collection names based on embedding dimension
+        // This prevents data loss when switching embedding providers
+        this.collectionCharacters = `${this.COLLECTION_PREFIX_CHARACTERS}_v1_${this.embeddingDimension}`;
+        this.collectionWorldbuilding = `${this.COLLECTION_PREFIX_WORLDBUILDING}_v1_${this.embeddingDimension}`;
+        this.collectionScenes = `${this.COLLECTION_PREFIX_SCENES}_v1_${this.embeddingDimension}`;
+        console.log(`Qdrant Memory: Using versioned collections with ${this.embeddingDimension} dimensions`);
         // Ensure collections exist
         await this.ensureCollections();
+        this.isConnected = true;
         console.log(`Qdrant Memory connected to ${qdrantUrl}`);
     }
     /**
@@ -97,48 +133,27 @@ let QdrantMemoryService = class QdrantMemoryService {
     }
     /**
      * Ensure all required collections exist with correct dimensions
-     * If a collection exists with wrong dimensions, recreate it
+     * Uses versioned collection names to prevent data loss when switching embedding providers
+     * Old collections are preserved for potential migration
      */
     async ensureCollections() {
         if (!this.client)
             return;
+        // Use versioned collection names (already set based on embedding dimension)
         const collections = [
-            this.COLLECTION_CHARACTERS,
-            this.COLLECTION_WORLDBUILDING,
-            this.COLLECTION_SCENES,
+            this.collectionCharacters,
+            this.collectionWorldbuilding,
+            this.collectionScenes,
         ];
         for (const collectionName of collections) {
             try {
-                const collectionInfo = await this.client.getCollection(collectionName);
-                // Check if the collection has the correct dimension
-                // The vectors config can be either a single config or named vectors
-                const vectorsConfig = collectionInfo.config?.params?.vectors;
-                let existingDimension;
-                if (vectorsConfig && typeof vectorsConfig === "object") {
-                    if ("size" in vectorsConfig) {
-                        // Single vector config
-                        existingDimension = vectorsConfig.size;
-                    }
-                }
-                if (existingDimension && existingDimension !== this.embeddingDimension) {
-                    console.log(`Qdrant collection ${collectionName} has dimension ${existingDimension}, ` +
-                        `but current embedding provider uses ${this.embeddingDimension}. Recreating collection...`);
-                    // Delete and recreate the collection with correct dimensions
-                    await this.client.deleteCollection(collectionName);
-                    await this.client.createCollection(collectionName, {
-                        vectors: {
-                            size: this.embeddingDimension,
-                            distance: "Cosine",
-                        },
-                    });
-                    console.log(`Recreated Qdrant collection: ${collectionName} with ${this.embeddingDimension} dimensions`);
-                }
-                else {
-                    console.log(`Qdrant collection ${collectionName} exists with correct dimensions (${this.embeddingDimension})`);
-                }
+                // Check if versioned collection already exists
+                await this.client.getCollection(collectionName);
+                console.log(`Qdrant collection ${collectionName} exists with correct dimensions (${this.embeddingDimension})`);
             }
             catch (error) {
-                // Collection doesn't exist, create it
+                // Collection doesn't exist, create it with correct dimensions
+                // Note: We never delete existing collections - old versioned collections are preserved
                 await this.client.createCollection(collectionName, {
                     vectors: {
                         size: this.embeddingDimension,
@@ -161,9 +176,25 @@ let QdrantMemoryService = class QdrantMemoryService {
             return response.data[0].embedding;
         }
         else if (this.embeddingProvider === EmbeddingProvider.GEMINI && this.geminiClient) {
-            const model = this.geminiClient.getGenerativeModel({ model: "embedding-001" });
-            const result = await model.embedContent(text);
-            return result.embedding.values;
+            try {
+                // Use full model path format "models/gemini-embedding-001" for Gemini API
+                const modelPath = this.embeddingModel.startsWith("models/")
+                    ? this.embeddingModel
+                    : `models/${this.embeddingModel}`;
+                const model = this.geminiClient.getGenerativeModel({ model: modelPath });
+                // Use proper content format with role and parts
+                const result = await model.embedContent({
+                    content: { role: "user", parts: [{ text }] },
+                });
+                return result.embedding.values;
+            }
+            catch (error) {
+                const errorDetails = error instanceof Error
+                    ? { message: error.message, name: error.name, stack: error.stack?.split('\n')[0] }
+                    : error;
+                console.error(`Qdrant Memory: Gemini embedContent failed - model: ${this.embeddingModel}, textLength: ${text.length}, error:`, errorDetails);
+                throw error;
+            }
         }
         else {
             // Local embeddings - return random vector for now
@@ -177,6 +208,7 @@ let QdrantMemoryService = class QdrantMemoryService {
     async storeCharacter(projectId, character) {
         if (!this.client)
             throw new Error("Qdrant client not connected");
+        const startTime = Date.now();
         const characterName = String(character.name ?? "Unknown");
         const characterText = this.characterToText(character);
         const embedding = await this.generateEmbedding(characterText);
@@ -187,16 +219,34 @@ let QdrantMemoryService = class QdrantMemoryService {
             name: characterName,
             createdAt: new Date().toISOString(),
         };
-        await this.client.upsert(this.COLLECTION_CHARACTERS, {
-            points: [
-                {
-                    id: pointId,
-                    vector: embedding,
-                    payload: payload,
-                },
-            ],
-        });
-        return pointId;
+        try {
+            await this.client.upsert(this.collectionCharacters, {
+                points: [
+                    {
+                        id: pointId,
+                        vector: embedding,
+                        payload: payload,
+                    },
+                ],
+            });
+            this.metricsService.recordQdrantOperation({
+                operation: "upsert",
+                collection: this.collectionCharacters,
+                durationMs: Date.now() - startTime,
+                success: true,
+                resultCount: 1,
+            });
+            return pointId;
+        }
+        catch (error) {
+            this.metricsService.recordQdrantOperation({
+                operation: "upsert",
+                collection: this.collectionCharacters,
+                durationMs: Date.now() - startTime,
+                success: false,
+            });
+            throw error;
+        }
     }
     /**
      * Search for characters by semantic similarity
@@ -204,19 +254,38 @@ let QdrantMemoryService = class QdrantMemoryService {
     async searchCharacters(projectId, query, limit = 3) {
         if (!this.client)
             return [];
+        const startTime = Date.now();
         const queryEmbedding = await this.generateEmbedding(query);
-        const results = await this.client.search(this.COLLECTION_CHARACTERS, {
-            vector: queryEmbedding,
-            limit,
-            filter: {
-                must: [{ key: "projectId", match: { value: projectId } }],
-            },
-        });
-        return results.map((result) => ({
-            id: String(result.id),
-            score: result.score,
-            payload: result.payload,
-        }));
+        try {
+            const results = await this.client.search(this.collectionCharacters, {
+                vector: queryEmbedding,
+                limit,
+                filter: {
+                    must: [{ key: "projectId", match: { value: projectId } }],
+                },
+            });
+            this.metricsService.recordQdrantOperation({
+                operation: "search",
+                collection: this.collectionCharacters,
+                durationMs: Date.now() - startTime,
+                success: true,
+                resultCount: results.length,
+            });
+            return results.map((result) => ({
+                id: String(result.id),
+                score: result.score,
+                payload: result.payload,
+            }));
+        }
+        catch (error) {
+            this.metricsService.recordQdrantOperation({
+                operation: "search",
+                collection: this.collectionCharacters,
+                durationMs: Date.now() - startTime,
+                success: false,
+            });
+            throw error;
+        }
     }
     /**
      * Get all characters for a project
@@ -224,7 +293,7 @@ let QdrantMemoryService = class QdrantMemoryService {
     async getProjectCharacters(projectId) {
         if (!this.client)
             return [];
-        const results = await this.client.scroll(this.COLLECTION_CHARACTERS, {
+        const results = await this.client.scroll(this.collectionCharacters, {
             filter: {
                 must: [{ key: "projectId", match: { value: projectId } }],
             },
@@ -238,6 +307,7 @@ let QdrantMemoryService = class QdrantMemoryService {
     async storeWorldbuilding(projectId, elementType, element) {
         if (!this.client)
             throw new Error("Qdrant client not connected");
+        const startTime = Date.now();
         const elementText = this.worldbuildingToText(elementType, element);
         const embedding = await this.generateEmbedding(elementText);
         const pointId = (0, uuid_1.v4)();
@@ -247,16 +317,34 @@ let QdrantMemoryService = class QdrantMemoryService {
             element,
             createdAt: new Date().toISOString(),
         };
-        await this.client.upsert(this.COLLECTION_WORLDBUILDING, {
-            points: [
-                {
-                    id: pointId,
-                    vector: embedding,
-                    payload: payload,
-                },
-            ],
-        });
-        return pointId;
+        try {
+            await this.client.upsert(this.collectionWorldbuilding, {
+                points: [
+                    {
+                        id: pointId,
+                        vector: embedding,
+                        payload: payload,
+                    },
+                ],
+            });
+            this.metricsService.recordQdrantOperation({
+                operation: "upsert",
+                collection: this.collectionWorldbuilding,
+                durationMs: Date.now() - startTime,
+                success: true,
+                resultCount: 1,
+            });
+            return pointId;
+        }
+        catch (error) {
+            this.metricsService.recordQdrantOperation({
+                operation: "upsert",
+                collection: this.collectionWorldbuilding,
+                durationMs: Date.now() - startTime,
+                success: false,
+            });
+            throw error;
+        }
     }
     /**
      * Search for worldbuilding elements by semantic similarity
@@ -264,19 +352,38 @@ let QdrantMemoryService = class QdrantMemoryService {
     async searchWorldbuilding(projectId, query, limit = 5) {
         if (!this.client)
             return [];
+        const startTime = Date.now();
         const queryEmbedding = await this.generateEmbedding(query);
-        const results = await this.client.search(this.COLLECTION_WORLDBUILDING, {
-            vector: queryEmbedding,
-            limit,
-            filter: {
-                must: [{ key: "projectId", match: { value: projectId } }],
-            },
-        });
-        return results.map((result) => ({
-            id: String(result.id),
-            score: result.score,
-            payload: result.payload,
-        }));
+        try {
+            const results = await this.client.search(this.collectionWorldbuilding, {
+                vector: queryEmbedding,
+                limit,
+                filter: {
+                    must: [{ key: "projectId", match: { value: projectId } }],
+                },
+            });
+            this.metricsService.recordQdrantOperation({
+                operation: "search",
+                collection: this.collectionWorldbuilding,
+                durationMs: Date.now() - startTime,
+                success: true,
+                resultCount: results.length,
+            });
+            return results.map((result) => ({
+                id: String(result.id),
+                score: result.score,
+                payload: result.payload,
+            }));
+        }
+        catch (error) {
+            this.metricsService.recordQdrantOperation({
+                operation: "search",
+                collection: this.collectionWorldbuilding,
+                durationMs: Date.now() - startTime,
+                success: false,
+            });
+            throw error;
+        }
     }
     /**
      * Store a scene in Qdrant
@@ -284,6 +391,7 @@ let QdrantMemoryService = class QdrantMemoryService {
     async storeScene(projectId, sceneNumber, scene) {
         if (!this.client)
             throw new Error("Qdrant client not connected");
+        const startTime = Date.now();
         const sceneText = this.sceneToText(scene);
         const embedding = await this.generateEmbedding(sceneText);
         const pointId = (0, uuid_1.v4)();
@@ -293,16 +401,34 @@ let QdrantMemoryService = class QdrantMemoryService {
             scene,
             createdAt: new Date().toISOString(),
         };
-        await this.client.upsert(this.COLLECTION_SCENES, {
-            points: [
-                {
-                    id: pointId,
-                    vector: embedding,
-                    payload: payload,
-                },
-            ],
-        });
-        return pointId;
+        try {
+            await this.client.upsert(this.collectionScenes, {
+                points: [
+                    {
+                        id: pointId,
+                        vector: embedding,
+                        payload: payload,
+                    },
+                ],
+            });
+            this.metricsService.recordQdrantOperation({
+                operation: "upsert",
+                collection: this.collectionScenes,
+                durationMs: Date.now() - startTime,
+                success: true,
+                resultCount: 1,
+            });
+            return pointId;
+        }
+        catch (error) {
+            this.metricsService.recordQdrantOperation({
+                operation: "upsert",
+                collection: this.collectionScenes,
+                durationMs: Date.now() - startTime,
+                success: false,
+            });
+            throw error;
+        }
     }
     /**
      * Search for scenes by semantic similarity
@@ -310,19 +436,38 @@ let QdrantMemoryService = class QdrantMemoryService {
     async searchScenes(projectId, query, limit = 2) {
         if (!this.client)
             return [];
+        const startTime = Date.now();
         const queryEmbedding = await this.generateEmbedding(query);
-        const results = await this.client.search(this.COLLECTION_SCENES, {
-            vector: queryEmbedding,
-            limit,
-            filter: {
-                must: [{ key: "projectId", match: { value: projectId } }],
-            },
-        });
-        return results.map((result) => ({
-            id: String(result.id),
-            score: result.score,
-            payload: result.payload,
-        }));
+        try {
+            const results = await this.client.search(this.collectionScenes, {
+                vector: queryEmbedding,
+                limit,
+                filter: {
+                    must: [{ key: "projectId", match: { value: projectId } }],
+                },
+            });
+            this.metricsService.recordQdrantOperation({
+                operation: "search",
+                collection: this.collectionScenes,
+                durationMs: Date.now() - startTime,
+                success: true,
+                resultCount: results.length,
+            });
+            return results.map((result) => ({
+                id: String(result.id),
+                score: result.score,
+                payload: result.payload,
+            }));
+        }
+        catch (error) {
+            this.metricsService.recordQdrantOperation({
+                operation: "search",
+                collection: this.collectionScenes,
+                durationMs: Date.now() - startTime,
+                success: false,
+            });
+            throw error;
+        }
     }
     /**
      * Delete all data for a project
@@ -331,9 +476,9 @@ let QdrantMemoryService = class QdrantMemoryService {
         if (!this.client)
             return;
         const collections = [
-            this.COLLECTION_CHARACTERS,
-            this.COLLECTION_WORLDBUILDING,
-            this.COLLECTION_SCENES,
+            this.collectionCharacters,
+            this.collectionWorldbuilding,
+            this.collectionScenes,
         ];
         for (const collection of collections) {
             await this.client.delete(collection, {
@@ -414,9 +559,16 @@ let QdrantMemoryService = class QdrantMemoryService {
         this.client = null;
         this.openaiClient = null;
         this.geminiClient = null;
+        this.isConnected = false;
+        this.currentGeminiKey = undefined;
+        this.currentOpenaiKey = undefined;
     }
 };
 exports.QdrantMemoryService = QdrantMemoryService;
+__decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", MetricsService_1.MetricsService)
+], QdrantMemoryService.prototype, "metricsService", void 0);
 exports.QdrantMemoryService = QdrantMemoryService = __decorate([
     (0, di_1.Service)()
 ], QdrantMemoryService);

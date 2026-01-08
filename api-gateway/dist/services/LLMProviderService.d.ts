@@ -65,6 +65,7 @@ export declare class TokenLimitCache {
     clear(): void;
 }
 export declare class LLMProviderService {
+    private metricsService;
     /**
      * Create a chat completion using the specified provider
      *
@@ -121,7 +122,7 @@ export declare class LLMProviderService {
     private isTokenLimitError;
     /**
      * Create completion with automatic retry for transient errors
-     * Also handles token limit errors with auto-discovery and caching
+     * Also handles token limit errors and temperature unsupported errors with auto-discovery and caching
      */
     createCompletionWithRetry(options: CompletionOptions, maxRetries?: number, baseDelayMs?: number): Promise<LLMResponse>;
 }

@@ -140,6 +140,93 @@ export declare class LangfuseService {
      */
     scoreTrace(runId: string, name: string, value: number, comment?: string): void;
     /**
+     * Score faithfulness - how well the output matches the plan/intent
+     * Used to evaluate if Writer output matches Architect plan
+     *
+     * @param runId - The run/trace ID
+     * @param value - Score value (0-1), where 1 = perfectly faithful
+     * @param agentName - Name of the agent being evaluated
+     * @param comment - Optional explanation
+     */
+    scoreFaithfulness(runId: string, value: number, agentName: string, comment?: string): void;
+    /**
+     * Score answer relevance - how well the output matches user's original idea
+     * Used to evaluate if character descriptions match user's initial concept
+     *
+     * @param runId - The run/trace ID
+     * @param value - Score value (0-1), where 1 = perfectly relevant
+     * @param agentName - Name of the agent being evaluated
+     * @param comment - Optional explanation
+     */
+    scoreRelevance(runId: string, value: number, agentName: string, comment?: string): void;
+    /**
+     * Record user feedback (thumbs up/down)
+     *
+     * @param runId - The run/trace ID
+     * @param feedbackType - "thumbs_up" or "thumbs_down"
+     * @param agentName - Name of the agent being rated
+     * @param sceneNumber - Optional scene number for Writer feedback
+     * @param comment - Optional user comment
+     */
+    recordUserFeedback(runId: string, feedbackType: "thumbs_up" | "thumbs_down", agentName: string, sceneNumber?: number, comment?: string): void;
+    /**
+     * Record implicit feedback (regeneration request)
+     * Regeneration is a signal of user dissatisfaction
+     *
+     * @param runId - The run/trace ID
+     * @param agentName - Name of the agent being regenerated
+     * @param sceneNumber - Optional scene number
+     * @param reason - Optional reason for regeneration
+     */
+    recordRegenerationRequest(runId: string, agentName: string, sceneNumber?: number, reason?: string): void;
+    /**
+     * Log Zod validation error to Langfuse
+     * Tracks which fields fail validation most often
+     *
+     * @param runId - The run/trace ID
+     * @param agentName - Name of the agent that produced invalid output
+     * @param errors - Array of Zod validation errors
+     * @param rawOutput - The raw output that failed validation
+     */
+    logValidationError(runId: string, agentName: string, errors: Array<{
+        path: string;
+        message: string;
+        expected?: string;
+        received?: string;
+    }>, rawOutput?: string): void;
+    /**
+     * Log rate limit error from LLM provider
+     *
+     * @param runId - The run/trace ID
+     * @param provider - LLM provider name
+     * @param model - Model name
+     * @param retryAfterMs - Suggested retry delay in milliseconds
+     */
+    logRateLimitError(runId: string, provider: string, model: string, retryAfterMs?: number): void;
+    /**
+     * Log agent execution result for success rate tracking
+     *
+     * @param runId - The run/trace ID
+     * @param agentName - Name of the agent
+     * @param success - Whether the execution was successful
+     * @param durationMs - Execution duration in milliseconds
+     * @param errorType - Type of error if failed
+     * @param errorMessage - Error message if failed
+     */
+    logAgentExecution(runId: string, agentName: string, success: boolean, durationMs: number, errorType?: string, errorMessage?: string): void;
+    /**
+     * Log token usage and cost for a generation
+     *
+     * @param runId - The run/trace ID
+     * @param agentName - Name of the agent
+     * @param provider - LLM provider
+     * @param model - Model name
+     * @param promptTokens - Number of prompt tokens
+     * @param completionTokens - Number of completion tokens
+     * @param costUsd - Cost in USD
+     */
+    logTokenUsage(runId: string, agentName: string, provider: string, model: string, promptTokens: number, completionTokens: number, costUsd: number): void;
+    /**
      * Default label for production prompts
      * Use versioned prompts with labels for LLMOps best practices
      */

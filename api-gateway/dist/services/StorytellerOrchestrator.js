@@ -33,18 +33,62 @@ const RedisStreamsService_1 = require("./RedisStreamsService");
 const QdrantMemoryService_1 = require("./QdrantMemoryService");
 const LangfuseService_1 = require("./LangfuseService");
 const SupabaseService_1 = require("./SupabaseService");
+const MetricsService_1 = require("./MetricsService");
 const AgentFactory_1 = require("../agents/AgentFactory");
 const schemaNormalizers_1 = require("../utils/schemaNormalizers");
+const EvaluationService_1 = require("./EvaluationService");
+const WorldBibleEmbeddingService_1 = require("./WorldBibleEmbeddingService");
+/**
+ * Simple rate limiter for concurrent async operations
+ * Limits the number of concurrent promises to avoid hitting API rate limits
+ */
+function createRateLimiter(concurrency) {
+    let activeCount = 0;
+    const queue = [];
+    const next = () => {
+        if (queue.length > 0 && activeCount < concurrency) {
+            activeCount++;
+            const resolve = queue.shift();
+            resolve();
+        }
+    };
+    return (fn) => {
+        return new Promise((resolve, reject) => {
+            const run = () => {
+                fn()
+                    .then(resolve)
+                    .catch(reject)
+                    .finally(() => {
+                    activeCount--;
+                    next();
+                });
+            };
+            if (activeCount < concurrency) {
+                activeCount++;
+                run();
+            }
+            else {
+                queue.push(run);
+            }
+        });
+    };
+}
 let StorytellerOrchestrator = class StorytellerOrchestrator {
     activeRuns = new Map();
     pauseCallbacks = new Map();
     isShuttingDown = false;
+    // Shared rate limiter for all evaluation calls (max 3 concurrent)
+    // This ensures consistent rate limiting across relevance and faithfulness evaluations
+    evaluationRateLimiter = createRateLimiter(3);
     llmProvider;
     redisStreams;
     qdrantMemory;
     langfuse;
     supabase;
+    metricsService;
     agentFactory;
+    evaluationService;
+    worldBibleEmbedding;
     /**
      * Start a new generation run
      *
@@ -80,6 +124,41 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         common_1.$log.info(`[StorytellerOrchestrator] startGeneration: state initialized and stored, runId: ${runId}`);
         // Initialize Qdrant memory with API key for embeddings
         await this.qdrantMemory.connect(options.llmConfig.provider === LLMModels_1.LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined, options.llmConfig.provider === LLMModels_1.LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined);
+        // Initialize WorldBibleEmbeddingService for semantic consistency checking
+        // 
+        // Embedding API Key Resolution (in priority order):
+        // 1. Dedicated embedding API key from frontend settings (always treated as Gemini key)
+        // 2. LLM provider key (only if provider is Gemini or OpenAI)
+        // 
+        // Why Gemini is preferred: Gemini embeddings are free and high-quality (768 dimensions).
+        // This allows users to use OpenAI for LLM generation while using free Gemini for embeddings.
+        // 
+        // If no embedding key is available, semantic consistency checking will be DISABLED
+        // but the service will still connect to Qdrant for other operations.
+        let geminiApiKey;
+        let openaiApiKey;
+        let embeddingSource;
+        if (options.embeddingApiKey) {
+            // Priority 1: Use dedicated embedding API key (always Gemini)
+            geminiApiKey = options.embeddingApiKey;
+            embeddingSource = "dedicated Gemini key";
+        }
+        else if (options.llmConfig.provider === LLMModels_1.LLMProvider.GEMINI) {
+            // Priority 2: Reuse LLM Gemini key for embeddings
+            geminiApiKey = options.llmConfig.apiKey;
+            embeddingSource = "LLM Gemini key";
+        }
+        else if (options.llmConfig.provider === LLMModels_1.LLMProvider.OPENAI) {
+            // Priority 3: Use OpenAI key for embeddings (if no Gemini key available)
+            openaiApiKey = options.llmConfig.apiKey;
+            embeddingSource = "LLM OpenAI key";
+        }
+        else {
+            // No embedding key available - semantic checks will be disabled
+            embeddingSource = "none (semantic checks disabled)";
+        }
+        await this.worldBibleEmbedding.connect(openaiApiKey, geminiApiKey);
+        common_1.$log.info(`[StorytellerOrchestrator] WorldBibleEmbeddingService initialized with: ${embeddingSource}, provider: ${this.worldBibleEmbedding.provider}`);
         // Start Langfuse trace
         this.langfuse.startTrace({
             projectId: options.projectId,
@@ -146,7 +225,7 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             // Mark as completed
             state.isCompleted = true;
             state.updatedAt = new Date().toISOString();
-            await this.publishEvent(runId, "generation_completed", {
+            await this.publishEvent(runId, "generation_complete", {
                 projectId: options.projectId,
                 totalScenes: state.totalScenes,
             });
@@ -182,11 +261,37 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             state,
             projectId: options.projectId,
         };
+        const startTime = Date.now();
         common_1.$log.info(`[StorytellerOrchestrator] runGenesisPhase: calling agent.execute, runId: ${runId}, phase: ${state.phase}`);
-        const output = await agent.execute(context, options);
-        common_1.$log.info(`[StorytellerOrchestrator] runGenesisPhase: agent.execute completed, runId: ${runId}`);
-        state.narrative = output.content;
-        state.updatedAt = new Date().toISOString();
+        try {
+            const output = await agent.execute(context, options);
+            const durationMs = Date.now() - startTime;
+            common_1.$log.info(`[StorytellerOrchestrator] runGenesisPhase: agent.execute completed, runId: ${runId}`);
+            // Record successful agent execution metrics
+            this.metricsService.recordAgentExecution({
+                agentName: AgentModels_1.AgentType.ARCHITECT,
+                runId,
+                projectId: options.projectId,
+                success: true,
+                durationMs,
+            });
+            state.narrative = output.content;
+            state.updatedAt = new Date().toISOString();
+        }
+        catch (error) {
+            const durationMs = Date.now() - startTime;
+            // Record failed agent execution metrics
+            this.metricsService.recordAgentExecution({
+                agentName: AgentModels_1.AgentType.ARCHITECT,
+                runId,
+                projectId: options.projectId,
+                success: false,
+                durationMs,
+                errorType: error instanceof Error ? error.name : "unknown",
+                errorMessage: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+        }
         // CRITICAL: Add seed constraints immediately after Genesis
         // These are immutable and prevent context drift (e.g., Mara Venn → Elena Rodriguez)
         this.addSeedConstraints(state, options.seedIdea);
@@ -211,10 +316,11 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             immutable: true,
         });
         // Extract key story elements from narrative
+        // Use extractStringValue to handle both string and object formats
         if (narrative.genre) {
             state.keyConstraints.push({
                 key: "genre",
-                value: String(narrative.genre),
+                value: this.extractStringValue(narrative.genre),
                 sceneNumber: 0,
                 timestamp,
                 immutable: true,
@@ -223,7 +329,7 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         if (narrative.premise) {
             state.keyConstraints.push({
                 key: "premise",
-                value: String(narrative.premise),
+                value: this.extractStringValue(narrative.premise),
                 sceneNumber: 0,
                 timestamp,
                 immutable: true,
@@ -232,7 +338,7 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         if (narrative.tone) {
             state.keyConstraints.push({
                 key: "tone",
-                value: String(narrative.tone),
+                value: this.extractStringValue(narrative.tone),
                 sceneNumber: 0,
                 timestamp,
                 immutable: true,
@@ -241,13 +347,40 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         if (narrative.arc) {
             state.keyConstraints.push({
                 key: "narrative_arc",
-                value: String(narrative.arc),
+                value: this.extractStringValue(narrative.arc),
                 sceneNumber: 0,
                 timestamp,
                 immutable: true,
             });
         }
         common_1.$log.info(`[StorytellerOrchestrator] Added ${state.keyConstraints.length} seed constraints`);
+    }
+    /**
+     * Extract string value from a field that might be string or object
+     * Handles cases where LLM returns {name: "...", description: "..."} instead of plain string
+     * Prevents [object Object] serialization issues in constraints
+     */
+    extractStringValue(value) {
+        if (typeof value === "string") {
+            return value;
+        }
+        if (value && typeof value === "object") {
+            const obj = value;
+            // Try common field names that LLMs use
+            if (typeof obj.name === "string")
+                return obj.name;
+            if (typeof obj.theme === "string")
+                return obj.theme;
+            if (typeof obj.description === "string")
+                return obj.description;
+            if (typeof obj.type === "string")
+                return obj.type;
+            if (typeof obj.structure === "string")
+                return obj.structure;
+            // Fallback to JSON stringification for complex objects
+            return JSON.stringify(value);
+        }
+        return "";
     }
     /**
      * Characters Phase - Character creation
@@ -270,29 +403,125 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             state,
             projectId: options.projectId,
         };
+        const startTime = Date.now();
         common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: calling agent.execute, runId: ${runId}`);
-        const output = await agent.execute(context, options);
-        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: agent.execute completed, output.content type: ${typeof output.content}, isArray: ${Array.isArray(output.content)}, runId: ${runId}`);
-        state.characters = output.content;
-        state.updatedAt = new Date().toISOString();
-        // Store characters in Qdrant for semantic search
-        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: storing ${state.characters?.length || 0} characters in Qdrant, runId: ${runId}`);
+        try {
+            const output = await agent.execute(context, options);
+            const durationMs = Date.now() - startTime;
+            common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: agent.execute completed, output.content type: ${typeof output.content}, isArray: ${Array.isArray(output.content)}, runId: ${runId}`);
+            // Record successful agent execution metrics
+            this.metricsService.recordAgentExecution({
+                agentName: AgentModels_1.AgentType.PROFILER,
+                runId,
+                projectId: options.projectId,
+                success: true,
+                durationMs,
+            });
+            state.characters = output.content;
+            state.updatedAt = new Date().toISOString();
+        }
+        catch (error) {
+            const durationMs = Date.now() - startTime;
+            // Record failed agent execution metrics
+            this.metricsService.recordAgentExecution({
+                agentName: AgentModels_1.AgentType.PROFILER,
+                runId,
+                projectId: options.projectId,
+                success: false,
+                durationMs,
+                errorType: error instanceof Error ? error.name : "unknown",
+                errorMessage: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+        }
+        // Store characters in Qdrant and Supabase
+        common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: storing ${state.characters?.length || 0} characters, runId: ${runId}`);
         try {
             if (Array.isArray(state.characters)) {
                 for (const character of state.characters) {
+                    // Store in Qdrant first (returns pointId)
                     common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: storing character in Qdrant, runId: ${runId}`);
-                    await this.qdrantMemory.storeCharacter(options.projectId, character);
+                    const qdrantId = await this.qdrantMemory.storeCharacter(options.projectId, character);
+                    // Store in Supabase with qdrant_id reference and runId for Langfuse tracing
+                    try {
+                        await this.supabase.saveCharacter(options.projectId, character, qdrantId, runId);
+                    }
+                    catch (supabaseError) {
+                        common_1.$log.error(`[StorytellerOrchestrator] runCharactersPhase: Supabase storage failed (continuing anyway), runId: ${runId}`, supabaseError);
+                    }
                 }
             }
             else {
-                common_1.$log.warn(`[StorytellerOrchestrator] runCharactersPhase: state.characters is not an array, skipping Qdrant storage, runId: ${runId}`);
+                common_1.$log.warn(`[StorytellerOrchestrator] runCharactersPhase: state.characters is not an array, skipping storage, runId: ${runId}`);
             }
         }
         catch (qdrantError) {
-            common_1.$log.error(`[StorytellerOrchestrator] runCharactersPhase: Qdrant storage failed, continuing anyway, runId: ${runId}`, qdrantError);
+            common_1.$log.error(`[StorytellerOrchestrator] runCharactersPhase: Storage failed, continuing anyway, runId: ${runId}`, qdrantError);
         }
         common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: saving artifact, runId: ${runId}`);
         await this.saveArtifact(runId, options.projectId, "characters", state.characters);
+        // Phase 5: Save characters to normalized Supabase table
+        try {
+            if (Array.isArray(state.characters)) {
+                await this.supabase.upsertCharacters(options.projectId, runId, state.characters);
+                common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: saved ${state.characters.length} characters to Supabase, runId: ${runId}`);
+            }
+        }
+        catch (supabaseError) {
+            common_1.$log.error(`[StorytellerOrchestrator] runCharactersPhase: Supabase upsertCharacters failed, continuing anyway, runId: ${runId}`, supabaseError);
+        }
+        // Phase 4: Initialize world state after characters are created
+        try {
+            if (Array.isArray(state.characters)) {
+                const archivistAgent = this.agentFactory.getAgent(AgentModels_1.AgentType.ARCHIVIST);
+                state.worldState = archivistAgent.buildInitialWorldState(runId, state.characters);
+                common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: initialized world state with ${state.characters.length} characters, runId: ${runId}`);
+            }
+        }
+        catch (worldStateError) {
+            common_1.$log.error(`[StorytellerOrchestrator] runCharactersPhase: world state initialization failed, continuing anyway, runId: ${runId}`, worldStateError);
+        }
+        // LLM-as-a-Judge: Evaluate relevance of character profiles to seed idea
+        // Runs asynchronously to not block generation
+        // Uses rate limiting (max 3 concurrent) to avoid hitting LLM provider rate limits
+        if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+            try {
+                if (Array.isArray(state.characters)) {
+                    for (const character of state.characters) {
+                        const characterName = String(character.name || "Unknown");
+                        const profilerOutput = JSON.stringify(character, null, 2);
+                        // Fire and forget with rate limiting - don't await to avoid blocking generation
+                        // Uses shared class-level rate limiter (max 3 concurrent) for all evaluation calls
+                        this.evaluationRateLimiter(() => this.evaluationService.evaluateRelevance({
+                            runId,
+                            profilerOutput,
+                            seedIdea: options.seedIdea,
+                            characterName,
+                        })).catch((err) => {
+                            common_1.$log.warn(`[StorytellerOrchestrator] Relevance evaluation failed for ${characterName}: ${err.message}`);
+                        });
+                    }
+                    common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: triggered relevance evaluations for ${state.characters.length} characters (rate limited to 3 concurrent), runId: ${runId}`);
+                }
+            }
+            catch (evalError) {
+                common_1.$log.warn(`[StorytellerOrchestrator] runCharactersPhase: evaluation setup failed, continuing anyway, runId: ${runId}`, evalError);
+            }
+        }
+        // Index characters in WorldBibleEmbeddingService for semantic consistency checking
+        // Runs asynchronously to not block generation - errors are logged but don't fail the phase
+        if (this.worldBibleEmbedding.connected && Array.isArray(state.characters)) {
+            try {
+                const indexResult = await this.worldBibleEmbedding.indexCharacters(options.projectId, state.characters);
+                common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: indexed ${indexResult.indexed} characters in WorldBibleEmbedding, errors: ${indexResult.errors.length}, runId: ${runId}`);
+                if (indexResult.errors.length > 0) {
+                    common_1.$log.warn(`[StorytellerOrchestrator] runCharactersPhase: WorldBibleEmbedding indexing errors: ${indexResult.errors.join(', ')}, runId: ${runId}`);
+                }
+            }
+            catch (embeddingError) {
+                common_1.$log.warn(`[StorytellerOrchestrator] runCharactersPhase: WorldBibleEmbedding indexing failed, continuing anyway, runId: ${runId}`, embeddingError);
+            }
+        }
         common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: publishing phase complete, runId: ${runId}`);
         await this.publishPhaseComplete(runId, LLMModels_1.GenerationPhase.CHARACTERS, state.characters);
         common_1.$log.info(`[StorytellerOrchestrator] runCharactersPhase: completed, runId: ${runId}`);
@@ -313,17 +542,70 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             state,
             projectId: options.projectId,
         };
-        const output = await agent.execute(context, options);
-        state.worldbuilding = output.content;
-        state.updatedAt = new Date().toISOString();
-        // Store worldbuilding elements in Qdrant
+        const startTime = Date.now();
+        try {
+            const output = await agent.execute(context, options);
+            const durationMs = Date.now() - startTime;
+            // Record successful agent execution metrics
+            this.metricsService.recordAgentExecution({
+                agentName: AgentModels_1.AgentType.WORLDBUILDER,
+                runId,
+                projectId: options.projectId,
+                success: true,
+                durationMs,
+            });
+            state.worldbuilding = output.content;
+            state.updatedAt = new Date().toISOString();
+        }
+        catch (error) {
+            const durationMs = Date.now() - startTime;
+            // Record failed agent execution metrics
+            this.metricsService.recordAgentExecution({
+                agentName: AgentModels_1.AgentType.WORLDBUILDER,
+                runId,
+                projectId: options.projectId,
+                success: false,
+                durationMs,
+                errorType: error instanceof Error ? error.name : "unknown",
+                errorMessage: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+        }
+        // Store worldbuilding elements in Qdrant and Supabase
         const worldData = state.worldbuilding;
         for (const [elementType, element] of Object.entries(worldData)) {
             if (typeof element === "object" && element !== null) {
-                await this.qdrantMemory.storeWorldbuilding(options.projectId, elementType, element);
+                try {
+                    // Store in Qdrant first (returns pointId)
+                    const qdrantId = await this.qdrantMemory.storeWorldbuilding(options.projectId, elementType, element);
+                    // Store in Supabase with qdrant_id reference and runId for Langfuse tracing
+                    try {
+                        await this.supabase.saveWorldbuilding(options.projectId, elementType, element, qdrantId, runId);
+                    }
+                    catch (supabaseError) {
+                        common_1.$log.error(`[StorytellerOrchestrator] runWorldbuildingPhase: Supabase storage failed for ${elementType} (continuing anyway), runId: ${runId}`, supabaseError);
+                    }
+                }
+                catch (qdrantError) {
+                    common_1.$log.error(`[StorytellerOrchestrator] runWorldbuildingPhase: Qdrant storage failed for ${elementType} (continuing anyway), runId: ${runId}`, qdrantError);
+                }
             }
         }
         await this.saveArtifact(runId, options.projectId, "worldbuilding", state.worldbuilding);
+        // Index worldbuilding in WorldBibleEmbeddingService for semantic consistency checking
+        // Runs after storage to ensure data is persisted first - errors are logged but don't fail the phase
+        if (this.worldBibleEmbedding.connected && state.worldbuilding) {
+            try {
+                const indexResult = await this.worldBibleEmbedding.indexWorldbuilding(options.projectId, state.worldbuilding);
+                common_1.$log.info(`[StorytellerOrchestrator] runWorldbuildingPhase: indexed ${indexResult.indexed} worldbuilding elements in WorldBibleEmbedding, errors: ${indexResult.errors.length}, runId: ${runId}`);
+                if (indexResult.errors.length > 0) {
+                    common_1.$log.warn(`[StorytellerOrchestrator] runWorldbuildingPhase: WorldBibleEmbedding indexing errors: ${indexResult.errors.join(', ')}, runId: ${runId}`);
+                }
+            }
+            catch (embeddingError) {
+                common_1.$log.warn(`[StorytellerOrchestrator] runWorldbuildingPhase: WorldBibleEmbedding indexing failed, continuing anyway, runId: ${runId}`, embeddingError);
+            }
+        }
         await this.publishPhaseComplete(runId, LLMModels_1.GenerationPhase.WORLDBUILDING, state.worldbuilding);
     }
     /**
@@ -376,9 +658,10 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
      * Drafting Loop - Draft, Critique, Revise for each scene
      *
      * Key improvements:
-     * 1. Word count validation with expansion loop before Critic
-     * 2. Polish only runs if scene was approved (not after failed revisions)
-     * 3. Strips fake "Word count:" claims from Writer output
+     * 1. Proactive Beats Method for scenes > 1000 target words (split into 3-4 parts upfront)
+     * 2. Word count validation with expansion loop before Critic (for shorter scenes)
+     * 3. Polish only runs if scene was approved (not after failed revisions)
+     * 4. Strips fake "Word count:" claims from Writer output
      */
     async runDraftingLoop(runId, options) {
         const state = this.activeRuns.get(runId);
@@ -395,12 +678,21 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             // Use safeParseWordCount to handle string values like "1,900" and prevent NaN
             const targetWordCount = (0, schemaNormalizers_1.safeParseWordCount)(scene.wordCount, 1500);
             const minWordCount = Math.floor(targetWordCount * 0.7); // 70% threshold
-            // Draft the scene
-            await this.draftScene(runId, options, sceneNum + 1, scene);
+            // PROACTIVE BEATS METHOD: For scenes with target > 1000 words, split into parts upfront
+            // This prevents the Writer↔Critic deadlock where LLMs can't produce 1500+ words in one shot
+            const BEATS_THRESHOLD = 1000;
+            if (targetWordCount > BEATS_THRESHOLD) {
+                console.log(`[Orchestrator] Scene ${sceneNum + 1} target ${targetWordCount} words > ${BEATS_THRESHOLD}, using Proactive Beats Method`);
+                await this.draftSceneWithBeats(runId, options, sceneNum + 1, scene, targetWordCount);
+            }
+            else {
+                // Standard single-shot drafting for shorter scenes
+                await this.draftScene(runId, options, sceneNum + 1, scene);
+            }
             if (this.shouldStop(runId))
                 return;
-            // Word count expansion loop - expand if too short before calling Critic
-            // This prevents the Critic↔Writer deadlock where Writer can't produce enough words
+            // Word count expansion loop - expand if still too short before calling Critic
+            // This is a fallback safety net after beats method or single-shot drafting
             let expansionAttempts = 0;
             const maxExpansions = 3;
             while (expansionAttempts < maxExpansions) {
@@ -417,6 +709,7 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             // Critique and revision loop (max 2 iterations)
             let revisionCount = 0;
             let sceneApproved = false;
+            let approvedCritiqueScore;
             while (revisionCount < state.maxRevisions) {
                 if (this.shouldStop(runId))
                     return;
@@ -427,6 +720,11 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
                 // Check if revision needed
                 if (this.isApproved(critique)) {
                     sceneApproved = true;
+                    // Extract score from the approving critique
+                    const score = critique.score;
+                    if (typeof score === "number" && !isNaN(score)) {
+                        approvedCritiqueScore = score;
+                    }
                     break;
                 }
                 // Revise
@@ -439,13 +737,25 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
                 await this.runArchivistCheck(runId, options, sceneNum + 1);
                 state.lastArchivistScene = sceneNum + 1;
             }
-            // Polish the scene ONLY if it was approved
-            // This prevents Polish from shortening scenes that already failed quality checks
-            if (sceneApproved) {
+            // Polish the scene ONLY if it was approved AND score < 8
+            // Skip Polish if Critic gave score >= 8 (scene is already high quality)
+            // This saves time and money, and prevents Polish from degrading good content
+            // Note: >= 8 aligns with isApproved() threshold for consistency
+            const shouldSkipPolish = typeof approvedCritiqueScore === "number" && approvedCritiqueScore >= 8;
+            if (sceneApproved && !shouldSkipPolish) {
                 await this.polishScene(runId, options, sceneNum + 1);
             }
+            else if (sceneApproved && shouldSkipPolish) {
+                // CRITICAL: Emit scene_polish_complete even when skipping Polish
+                // This ensures frontend always has a canonical source of truth for each scene
+                // Without this, frontend falls back to collecting all Writer messages which causes duplication
+                console.log(`[Orchestrator] Scene ${sceneNum + 1} has high score (${approvedCritiqueScore}), skipping polish`);
+                await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "skipped_high_score");
+            }
             else {
+                // Scene not approved after max revisions - still emit final event for frontend
                 console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions, skipping polish`);
+                await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "not_approved");
             }
             // CRITICAL: Clear currentSceneOutline at the end of each scene to prevent state contamination
             // Without this, Scene 2 would use Scene 1's outline data due to stale state
@@ -461,16 +771,19 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             return;
         state.phase = LLMModels_1.GenerationPhase.DRAFTING;
         state.currentScene = sceneNum;
+        await this.publishEvent(runId, "scene_draft_start", { sceneNum });
+        const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
+        // Retrieve relevant context from Qdrant for hallucination prevention
+        // This provides the Writer with semantic memory of characters, worldbuilding, and previous scenes
+        const relevantContext = await this.getRelevantContext(options.projectId, sceneOutline);
         // CRITICAL: Set currentSceneOutline at the start of each scene
         // This ensures WriterAgent always has the correct outline for this scene
         // and prevents state contamination from previous scenes
-        state.currentSceneOutline = sceneOutline;
-        await this.publishEvent(runId, "scene_draft_start", { sceneNum });
-        const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
-        // Note: Characters are already available in state.characters from the Characters phase.
-        // WriterAgent accesses them via context.state. Qdrant semantic search is used for
-        // cross-project "eternal memory" but not needed in the hot path since all characters
-        // for this run are already in memory.
+        // Include retrieved context for hallucination prevention
+        state.currentSceneOutline = {
+            ...sceneOutline,
+            retrievedContext: relevantContext, // Add Qdrant context for Writer
+        };
         // Store scene outline in state for WriterAgent to access
         const outline = state.outline;
         if (!outline) {
@@ -495,12 +808,295 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         };
         state.drafts.set(sceneNum, draft);
         state.updatedAt = new Date().toISOString();
+        // Check semantic consistency against World Bible entries
+        // This finds related content that may need human review for consistency
+        // Note: Uses semanticConsistencyEnabled to ensure embedding provider is configured
+        if (this.worldBibleEmbedding.semanticConsistencyEnabled) {
+            try {
+                const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(options.projectId, response);
+                if (consistencyResult.hasContradiction) {
+                    draft.semanticCheckError = consistencyResult.explanation;
+                    draft.contradictionScore = consistencyResult.contradictionScore;
+                    common_1.$log.warn(`[StorytellerOrchestrator] draftScene: Semantic consistency warning for scene ${sceneNum}: ${draft.semanticCheckError}, runId: ${runId}`);
+                }
+                else {
+                    common_1.$log.info(`[StorytellerOrchestrator] draftScene: Semantic consistency check passed for scene ${sceneNum}, runId: ${runId}`);
+                }
+            }
+            catch (consistencyError) {
+                common_1.$log.warn(`[StorytellerOrchestrator] draftScene: Semantic consistency check failed, continuing anyway, runId: ${runId}`, consistencyError);
+            }
+        }
         // Extract and log raw facts
         await this.extractRawFacts(runId, sceneNum, response, AgentModels_1.AgentType.WRITER);
-        // Store scene in Qdrant
-        await this.qdrantMemory.storeScene(options.projectId, sceneNum, draft);
+        // Store scene in Qdrant and Supabase
+        try {
+            const qdrantId = await this.qdrantMemory.storeScene(options.projectId, sceneNum, draft);
+            // Store in Supabase with qdrant_id reference and runId for Langfuse tracing
+            try {
+                await this.supabase.saveDraft(options.projectId, draft, qdrantId, runId);
+            }
+            catch (supabaseError) {
+                common_1.$log.error(`[StorytellerOrchestrator] draftScene: Supabase storage failed for scene ${sceneNum} (continuing anyway), runId: ${runId}`, supabaseError);
+            }
+        }
+        catch (qdrantError) {
+            common_1.$log.error(`[StorytellerOrchestrator] draftScene: Qdrant storage failed for scene ${sceneNum} (continuing anyway), runId: ${runId}`, qdrantError);
+        }
         await this.saveArtifact(runId, options.projectId, `draft_scene_${sceneNum}`, draft);
-        await this.publishEvent(runId, "scene_draft_complete", { sceneNum, wordCount: draft.wordCount });
+        // Phase 5: Save draft to normalized Supabase table
+        try {
+            await this.supabase.upsertDraft({
+                projectId: options.projectId,
+                runId,
+                sceneNumber: sceneNum,
+                content: response,
+                wordCount: draft.wordCount,
+                status: "draft",
+                revisionCount: 0,
+                semanticCheckError: draft.semanticCheckError,
+                contradictionScore: draft.contradictionScore,
+            });
+            common_1.$log.info(`[StorytellerOrchestrator] draftScene: saved draft to Supabase, scene ${sceneNum}, runId: ${runId}`);
+        }
+        catch (supabaseError) {
+            common_1.$log.error(`[StorytellerOrchestrator] draftScene: Supabase upsertDraft failed, continuing anyway, runId: ${runId}`, supabaseError);
+        }
+        await this.publishEvent(runId, "scene_draft_complete", {
+            sceneNum,
+            wordCount: draft.wordCount,
+            semanticCheckError: draft.semanticCheckError,
+            contradictionScore: draft.contradictionScore,
+        });
+        // LLM-as-a-Judge: Evaluate faithfulness of Writer output to Architect plan
+        // Runs asynchronously to not block generation
+        // Uses shared rate limiter (max 3 concurrent) to avoid hitting LLM provider rate limits
+        if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+            try {
+                const architectPlan = JSON.stringify(sceneOutline, null, 2);
+                // Fire and forget with rate limiting - don't await to avoid blocking generation
+                // Uses shared class-level rate limiter (max 3 concurrent) for all evaluation calls
+                this.evaluationRateLimiter(() => this.evaluationService.evaluateFaithfulness({
+                    runId,
+                    writerOutput: response,
+                    architectPlan,
+                    sceneNumber: sceneNum,
+                })).catch((err) => {
+                    common_1.$log.warn(`[StorytellerOrchestrator] Faithfulness evaluation failed for scene ${sceneNum}: ${err.message}`);
+                });
+                common_1.$log.info(`[StorytellerOrchestrator] draftScene: triggered faithfulness evaluation for scene ${sceneNum} (rate limited), runId: ${runId}`);
+            }
+            catch (evalError) {
+                common_1.$log.warn(`[StorytellerOrchestrator] draftScene: evaluation setup failed, continuing anyway, runId: ${runId}`, evalError);
+            }
+        }
+    }
+    /**
+     * Draft a scene using the Proactive Beats Method
+     * Splits the scene into 3-4 parts and generates each sequentially
+     * This prevents the Writer↔Critic deadlock where LLMs can't produce 1500+ words in one shot
+     *
+     * @param targetWordCount - Total target word count for the scene
+     */
+    async draftSceneWithBeats(runId, options, sceneNum, sceneOutline, targetWordCount) {
+        const state = this.activeRuns.get(runId);
+        if (!state)
+            return;
+        state.phase = LLMModels_1.GenerationPhase.DRAFTING;
+        state.currentScene = sceneNum;
+        await this.publishEvent(runId, "scene_draft_start", { sceneNum, method: "beats" });
+        const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
+        // Calculate number of parts (3-4 based on target word count)
+        // ~500 words per part is optimal for LLM generation
+        const WORDS_PER_PART = 500;
+        const partsTotal = Math.min(4, Math.max(3, Math.ceil(targetWordCount / WORDS_PER_PART)));
+        const partTargetWords = Math.ceil(targetWordCount / partsTotal);
+        console.log(`[Orchestrator] Scene ${sceneNum} Beats Method: ${partsTotal} parts, ~${partTargetWords} words each`);
+        // Retrieve relevant context from Qdrant for hallucination prevention
+        const relevantContext = await this.getRelevantContext(options.projectId, sceneOutline);
+        let combinedContent = "";
+        const maxRetriesPerPart = 3;
+        for (let partIndex = 1; partIndex <= partsTotal; partIndex++) {
+            if (this.shouldStop(runId))
+                return;
+            await this.publishEvent(runId, "scene_beat_start", {
+                sceneNum,
+                partIndex,
+                partsTotal,
+                partTargetWords
+            });
+            let partContent = "";
+            let retryCount = 0;
+            const minPartWords = Math.floor(partTargetWords * 0.5); // 50% threshold per part
+            // Retry loop for this part
+            while (retryCount < maxRetriesPerPart) {
+                // Set currentSceneOutline with beat-specific instructions
+                state.currentSceneOutline = {
+                    ...sceneOutline,
+                    retrievedContext: relevantContext,
+                    beatsMode: true,
+                    partIndex,
+                    partsTotal,
+                    partTargetWords,
+                    existingContent: combinedContent || undefined,
+                    isFirstPart: partIndex === 1,
+                    isFinalPart: partIndex === partsTotal,
+                };
+                // Use WriterAgent through AgentFactory
+                const agent = this.agentFactory.getAgent(AgentModels_1.AgentType.WRITER);
+                const context = {
+                    runId,
+                    state,
+                    projectId: options.projectId,
+                };
+                const output = await agent.execute(context, options);
+                partContent = this.stripFakeWordCount(output.content);
+                // For parts 2+, strip overlap with existing content
+                if (partIndex > 1 && combinedContent) {
+                    const rawPartContent = partContent;
+                    const strippedContent = this.stripOverlap(combinedContent, partContent);
+                    // Handle case where stripOverlap returns empty (LLM repeated all content)
+                    if (!strippedContent || strippedContent.trim().length === 0) {
+                        console.warn(`[Orchestrator] Scene ${sceneNum} Part ${partIndex}: stripOverlap returned empty, using raw content`);
+                        partContent = rawPartContent; // Keep raw content instead of empty string
+                    }
+                    else {
+                        partContent = strippedContent;
+                    }
+                }
+                const partWordCount = partContent.split(/\s+/).length;
+                if (partWordCount >= minPartWords) {
+                    console.log(`[Orchestrator] Scene ${sceneNum} Part ${partIndex}/${partsTotal}: ${partWordCount} words (target: ${partTargetWords})`);
+                    break;
+                }
+                retryCount++;
+                console.log(`[Orchestrator] Scene ${sceneNum} Part ${partIndex} too short (${partWordCount}/${minPartWords}), retry ${retryCount}/${maxRetriesPerPart}`);
+            }
+            // FAIL-FAST: Check if we exhausted retries without meeting minimum word count
+            const finalPartWordCount = partContent.split(/\s+/).length;
+            if (retryCount >= maxRetriesPerPart && finalPartWordCount < minPartWords) {
+                await this.publishEvent(runId, "scene_beat_error", {
+                    sceneNum,
+                    partIndex,
+                    partsTotal,
+                    reason: `Failed to generate sufficient content after ${maxRetriesPerPart} attempts`,
+                    wordsGenerated: finalPartWordCount,
+                    wordsRequired: minPartWords
+                });
+                console.error(`[Orchestrator] Scene ${sceneNum} Part ${partIndex} failed after ${maxRetriesPerPart} retries (${finalPartWordCount}/${minPartWords} words)`);
+                throw new Error(`Scene ${sceneNum} beat ${partIndex} generation failed: insufficient content after ${maxRetriesPerPart} retries (got ${finalPartWordCount} words, needed ${minPartWords})`);
+            }
+            // Append part to combined content
+            if (partIndex === 1) {
+                combinedContent = partContent;
+            }
+            else {
+                combinedContent = combinedContent + "\n\n" + partContent;
+            }
+            await this.publishEvent(runId, "scene_beat_complete", {
+                sceneNum,
+                partIndex,
+                partsTotal,
+                partWordCount: partContent.split(/\s+/).length,
+                totalWordCount: combinedContent.split(/\s+/).length
+            });
+        }
+        // Create the final draft from combined content
+        const draft = {
+            sceneNum,
+            title: sceneTitle,
+            content: combinedContent,
+            wordCount: combinedContent.split(/\s+/).length,
+            createdAt: new Date().toISOString(),
+            beatsMethod: true,
+            partsGenerated: partsTotal,
+        };
+        state.drafts.set(sceneNum, draft);
+        state.updatedAt = new Date().toISOString();
+        // Check semantic consistency against World Bible entries (same as draftScene)
+        // This finds related content that may need human review for consistency
+        // Note: Uses semanticConsistencyEnabled to ensure embedding provider is configured
+        if (this.worldBibleEmbedding.semanticConsistencyEnabled) {
+            try {
+                const consistencyResult = await this.worldBibleEmbedding.checkSemanticConsistency(options.projectId, combinedContent);
+                if (consistencyResult.hasContradiction) {
+                    draft.semanticCheckError = consistencyResult.explanation;
+                    draft.contradictionScore = consistencyResult.contradictionScore;
+                    common_1.$log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency warning for scene ${sceneNum}: ${draft.semanticCheckError}, runId: ${runId}`);
+                }
+                else {
+                    common_1.$log.info(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency check passed for scene ${sceneNum}, runId: ${runId}`);
+                }
+            }
+            catch (consistencyError) {
+                common_1.$log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: Semantic consistency check failed, continuing anyway, runId: ${runId}`, consistencyError);
+            }
+        }
+        // Extract and log raw facts
+        await this.extractRawFacts(runId, sceneNum, combinedContent, AgentModels_1.AgentType.WRITER);
+        // Store scene in Qdrant and Supabase (same as draftScene)
+        try {
+            const qdrantId = await this.qdrantMemory.storeScene(options.projectId, sceneNum, draft);
+            try {
+                await this.supabase.saveDraft(options.projectId, draft, qdrantId, runId);
+            }
+            catch (supabaseError) {
+                common_1.$log.error(`[StorytellerOrchestrator] draftSceneWithBeats: Supabase storage failed for scene ${sceneNum} (continuing anyway), runId: ${runId}`, supabaseError);
+            }
+        }
+        catch (qdrantError) {
+            common_1.$log.error(`[StorytellerOrchestrator] draftSceneWithBeats: Qdrant storage failed for scene ${sceneNum} (continuing anyway), runId: ${runId}`, qdrantError);
+        }
+        await this.saveArtifact(runId, options.projectId, `draft_scene_${sceneNum}`, draft);
+        // Save draft to normalized Supabase table
+        try {
+            await this.supabase.upsertDraft({
+                projectId: options.projectId,
+                runId,
+                sceneNumber: sceneNum,
+                content: combinedContent,
+                wordCount: draft.wordCount,
+                status: "draft",
+                revisionCount: 0,
+                semanticCheckError: draft.semanticCheckError,
+                contradictionScore: draft.contradictionScore,
+            });
+            common_1.$log.info(`[StorytellerOrchestrator] draftSceneWithBeats: saved draft to Supabase, scene ${sceneNum}, runId: ${runId}`);
+        }
+        catch (supabaseError) {
+            common_1.$log.error(`[StorytellerOrchestrator] draftSceneWithBeats: Supabase upsertDraft failed, continuing anyway, runId: ${runId}`, supabaseError);
+        }
+        // Restore the original scene outline (without beats mode)
+        state.currentSceneOutline = {
+            ...sceneOutline,
+            retrievedContext: relevantContext,
+        };
+        await this.publishEvent(runId, "scene_draft_complete", {
+            sceneNum,
+            wordCount: draft.wordCount,
+            method: "beats",
+            partsGenerated: partsTotal,
+            semanticCheckError: draft.semanticCheckError,
+            contradictionScore: draft.contradictionScore,
+        });
+        // LLM-as-a-Judge evaluation (same as draftScene)
+        if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+            try {
+                const architectPlan = JSON.stringify(sceneOutline, null, 2);
+                this.evaluationRateLimiter(() => this.evaluationService.evaluateFaithfulness({
+                    runId,
+                    writerOutput: combinedContent,
+                    architectPlan,
+                    sceneNumber: sceneNum,
+                })).catch((err) => {
+                    common_1.$log.warn(`[StorytellerOrchestrator] Faithfulness evaluation failed for scene ${sceneNum}: ${err.message}`);
+                });
+                common_1.$log.info(`[StorytellerOrchestrator] draftSceneWithBeats: triggered faithfulness evaluation for scene ${sceneNum} (rate limited), runId: ${runId}`);
+            }
+            catch (evalError) {
+                common_1.$log.warn(`[StorytellerOrchestrator] draftSceneWithBeats: evaluation setup failed, continuing anyway, runId: ${runId}`, evalError);
+            }
+        }
     }
     /**
      * Critique a scene
@@ -530,6 +1126,21 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         state.critiques.get(sceneNum).push(critique);
         state.updatedAt = new Date().toISOString();
         await this.saveArtifact(runId, options.projectId, `critique_scene_${sceneNum}`, critique);
+        // Phase 5: Save critique to normalized Supabase table
+        try {
+            const revisionCount = state.revisionCount.get(sceneNum) || 0;
+            await this.supabase.saveCritique({
+                projectId: options.projectId,
+                runId,
+                sceneNumber: sceneNum,
+                critique,
+                revisionNumber: revisionCount,
+            });
+            common_1.$log.info(`[StorytellerOrchestrator] critiqueScene: saved critique to Supabase, scene ${sceneNum}, runId: ${runId}`);
+        }
+        catch (supabaseError) {
+            common_1.$log.error(`[StorytellerOrchestrator] critiqueScene: Supabase saveCritique failed, continuing anyway, runId: ${runId}`, supabaseError);
+        }
         await this.publishEvent(runId, "scene_critique_complete", { sceneNum, critique });
         return critique;
     }
@@ -609,7 +1220,16 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         continuation = this.stripFakeWordCount(continuation);
         // Append continuation to existing content
         const existingContent = String(draft.content ?? "");
-        const combinedContent = existingContent + "\n\n" + continuation;
+        // CRITICAL: Detect and strip overlap if Writer returned full text instead of just continuation
+        // This prevents text duplication when LLM ignores the "return only continuation" instruction
+        continuation = this.stripOverlap(existingContent, continuation);
+        // Handle case where stripOverlap returns empty string (all content was overlap)
+        // In this case, keep the existing content unchanged
+        if (!continuation || continuation.trim().length === 0) {
+            common_1.$log.warn(`[StorytellerOrchestrator] stripOverlap returned empty continuation, keeping existing content`);
+            continuation = "";
+        }
+        const combinedContent = existingContent + (continuation ? "\n\n" + continuation : "");
         const expanded = {
             sceneNum,
             title: draft.title,
@@ -641,6 +1261,80 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             .replace(/\[?\*?\*?Word count:?\*?\*?\s*[\d,]+\s*(?:words?)?\]?\.?/gi, "")
             .replace(/\n\s*\n\s*\n/g, "\n\n") // Clean up extra newlines
             .trim();
+    }
+    /**
+     * Strip overlap from continuation if Writer returned full text instead of just continuation
+     * This prevents text duplication when LLM ignores the "return only continuation" instruction
+     *
+     * Algorithm: Find the longest suffix of existingContent that matches a prefix of continuation,
+     * then strip that overlap from continuation.
+     */
+    stripOverlap(existingContent, continuation) {
+        if (!existingContent || !continuation) {
+            return continuation;
+        }
+        // Normalize whitespace for comparison
+        const existingNormalized = existingContent.trim();
+        const continuationNormalized = continuation.trim();
+        // Check if continuation starts with a significant portion of existing content
+        // This indicates the LLM returned the full text instead of just continuation
+        const existingWords = existingNormalized.split(/\s+/);
+        const continuationWords = continuationNormalized.split(/\s+/);
+        // If continuation is too short to contain meaningful overlap, skip detection
+        // Use absolute minimum rather than percentage of existing content
+        const MIN_WORDS_FOR_OVERLAP_DETECTION = 100;
+        if (continuationWords.length < MIN_WORDS_FOR_OVERLAP_DETECTION) {
+            return continuation;
+        }
+        // Check for large overlap (more than 30% of existing content appears at start of continuation)
+        // Use a sliding window approach to find where the overlap ends
+        const minOverlapWords = Math.floor(existingWords.length * 0.3);
+        // Try to find where existing content ends in continuation
+        // Look for the last 50 words of existing content in continuation
+        const lastNWords = Math.min(50, existingWords.length);
+        const existingEnding = existingWords.slice(-lastNWords).join(" ").toLowerCase();
+        // Search for this ending in the continuation
+        const continuationLower = continuationNormalized.toLowerCase();
+        const endingIndex = continuationLower.indexOf(existingEnding);
+        if (endingIndex !== -1) {
+            // Found the ending of existing content in continuation
+            // Strip everything up to and including this ending
+            const overlapEndPosition = endingIndex + existingEnding.length;
+            const strippedContinuation = continuationNormalized.substring(overlapEndPosition).trim();
+            // Only use stripped version if it's substantial (more than 100 chars)
+            if (strippedContinuation.length > 100) {
+                common_1.$log.info(`[StorytellerOrchestrator] Stripped ${overlapEndPosition} chars of overlap from continuation`);
+                return strippedContinuation;
+            }
+        }
+        // Alternative: Check if continuation starts with a large chunk of existing content
+        // by comparing first N words
+        const checkWords = Math.min(100, Math.floor(existingWords.length * 0.5));
+        if (checkWords > 20) {
+            const existingStart = existingWords.slice(0, checkWords).join(" ").toLowerCase();
+            const continuationStart = continuationWords.slice(0, checkWords).join(" ").toLowerCase();
+            // If more than 80% of words match, this is likely a full rewrite
+            // Split once before the filter to avoid repeated splitting inside the callback
+            const contWords = continuationStart.split(" ");
+            const matchingWords = existingStart.split(" ").filter((word, i) => {
+                return i < contWords.length && contWords[i] === word;
+            }).length;
+            if (matchingWords / checkWords > 0.8) {
+                // Find where existing content ends in continuation and strip
+                // Use the last 30 words as anchor
+                const anchorWords = existingWords.slice(-30).join(" ").toLowerCase();
+                const anchorIndex = continuationLower.indexOf(anchorWords);
+                if (anchorIndex !== -1) {
+                    const strippedContinuation = continuationNormalized.substring(anchorIndex + anchorWords.length).trim();
+                    if (strippedContinuation.length > 100) {
+                        common_1.$log.info(`[StorytellerOrchestrator] Stripped overlap using anchor method`);
+                        return strippedContinuation;
+                    }
+                }
+            }
+        }
+        // No significant overlap detected, return original
+        return continuation;
     }
     /**
      * Polish a scene (final refinement)
@@ -710,10 +1404,63 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         });
     }
     /**
-     * Validate polish output to prevent chunk loss
+     * Emit scene_polish_complete event when Polish is skipped
+     * This ensures frontend always has a canonical source of truth for each scene
+     * Without this, frontend falls back to collecting all Writer messages which causes duplication
+     */
+    async emitSceneFinal(runId, projectId, sceneNum, polishStatus) {
+        const state = this.activeRuns.get(runId);
+        if (!state)
+            return;
+        const draft = state.drafts.get(sceneNum);
+        const finalContent = typeof draft?.content === "string" ? draft.content : "";
+        const finalWordCount = typeof draft?.wordCount === "number" ? draft.wordCount : 0;
+        // Update draft status
+        const updatedDraft = {
+            sceneNum,
+            title: draft?.title ?? `Scene ${sceneNum}`,
+            content: finalContent,
+            wordCount: finalWordCount,
+            status: polishStatus,
+            createdAt: new Date().toISOString(),
+        };
+        state.drafts.set(sceneNum, updatedDraft);
+        state.updatedAt = new Date().toISOString();
+        // Save artifact for consistency with polishScene
+        await this.saveArtifact(runId, projectId, `final_scene_${sceneNum}`, updatedDraft);
+        // Emit the same event type as polishScene so frontend uses PRIORITY 1
+        await this.publishEvent(runId, "scene_polish_complete", {
+            sceneNum,
+            polishStatus,
+            finalContent,
+            wordCount: finalWordCount,
+        });
+    }
+    /**
+     * Validate polish output to prevent chunk loss and lazy polish notes
      * Returns true if polish is acceptable, false if we should fall back to pre-polish draft
      */
     validatePolishOutput(prePolishContent, polishedContent, prePolishWordCount, polishedWordCount) {
+        // CRITICAL: Detect "lazy polish" notes where LLM truncates output with meta-commentary
+        // These patterns indicate the model didn't actually polish the full text
+        const lazyPolishPatterns = [
+            /\(note:\s*(?:the\s+)?(?:full\s+)?(?:polished\s+)?(?:scene\s+)?continues/i,
+            /\(note:\s*(?:the\s+)?rest\s+(?:is\s+)?(?:the\s+)?same/i,
+            /continues\s+with\s+(?:the\s+)?(?:exact\s+)?same\s+content/i,
+            /rest\s+(?:of\s+the\s+scene\s+)?(?:is\s+)?(?:the\s+)?same/i,
+            /\[\.\.\.(?:rest|remainder|continues)/i,
+            /i\s+won'?t\s+repeat/i,
+            /maintaining\s+the\s+[\d,]+[\s-]*word\s+count/i,
+            /as\s+(?:the\s+)?original\s+draft/i,
+        ];
+        // Check the last 500 characters for lazy polish patterns (they usually appear at the end)
+        const endingToCheck = polishedContent.slice(-500);
+        for (const pattern of lazyPolishPatterns) {
+            if (pattern.test(endingToCheck)) {
+                console.log(`[Orchestrator] Polish validation failed: detected lazy polish note (pattern: ${pattern.source})`);
+                return false;
+            }
+        }
         // Reject if polished version is more than 15% shorter (lost significant content)
         const minAcceptableWordCount = Math.floor(prePolishWordCount * 0.85);
         if (polishedWordCount < minAcceptableWordCount) {
@@ -781,6 +1528,17 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
                 }
             }
         }
+        // Phase 4: Apply world state diff from Archivist output
+        if (result.worldStateDiff && state.worldState) {
+            try {
+                const archivistAgent = agent;
+                state.worldState = archivistAgent.applyWorldStateDiff(state.worldState, result.worldStateDiff, upToScene);
+                common_1.$log.info(`[StorytellerOrchestrator] runArchivistCheck: applied world state diff for scene ${upToScene}, runId: ${runId}`);
+            }
+            catch (worldStateError) {
+                common_1.$log.error(`[StorytellerOrchestrator] runArchivistCheck: world state diff application failed, continuing anyway, runId: ${runId}`, worldStateError);
+            }
+        }
         state.lastArchivistScene = upToScene;
         state.updatedAt = new Date().toISOString();
         await this.publishEvent(runId, "archivist_complete", {
@@ -789,27 +1547,99 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         });
     }
     /**
-     * Extract raw facts from generated content
+     * Extract raw facts from generated content and emit to frontend
+     * Uses canonical character names from state.characters as allowlist
      */
     async extractRawFacts(runId, sceneNum, content, source) {
         const state = this.activeRuns.get(runId);
         if (!state)
             return;
-        // Simple fact extraction - in production, use LLM for better extraction
+        console.log(`[extractRawFacts] Called for scene ${sceneNum}, content length: ${content.length}`);
+        // Build allowlist of canonical character names from state.characters
+        const canonicalNames = new Set();
+        if (state.characters && Array.isArray(state.characters)) {
+            for (const char of state.characters) {
+                const charObj = char;
+                const name = charObj.name;
+                if (name) {
+                    // Add full name and first name
+                    canonicalNames.add(name.toLowerCase());
+                    const firstName = name.split(' ')[0];
+                    if (firstName)
+                        canonicalNames.add(firstName.toLowerCase());
+                    // Add last name if present
+                    const parts = name.split(' ');
+                    if (parts.length > 1) {
+                        canonicalNames.add(parts[parts.length - 1].toLowerCase());
+                    }
+                }
+            }
+        }
+        console.log(`[extractRawFacts] Canonical names: ${Array.from(canonicalNames).join(', ')}`);
+        // Patterns that capture meaningful character actions
         const factPatterns = [
-            /(\w+) (was|is|became|had|has) (wounded|injured|killed|married|born|died)/gi,
-            /(\w+)'s (health|status|location|relationship) (changed|is|was)/gi,
+            // Character speech (most reliable - "Elena said", "Marcus whispered")
+            /([A-Z][a-z]+) (said|asked|replied|answered|whispered|shouted|muttered|spoke|exclaimed|demanded|insisted)/g,
+            // Character movement (location changes)
+            /([A-Z][a-z]+) (walked|ran|moved|entered|left|arrived|departed|stepped|approached|retreated)/g,
+            // Character discoveries/realizations
+            /([A-Z][a-z]+) (discovered|found|learned|realized|understood|noticed|recognized|remembered)/g,
+            // Character emotions/reactions
+            /([A-Z][a-z]+) (smiled|frowned|laughed|cried|sighed|nodded|shook|gasped|trembled|froze)/g,
+            // Character state changes (significant events)
+            /([A-Z][a-z]+) (died|killed|married|betrayed|escaped|collapsed|awakened|transformed|vanished)/g,
         ];
+        const newFacts = [];
+        const seenFacts = new Set(); // Deduplicate facts
         for (const pattern of factPatterns) {
             const matches = content.matchAll(pattern);
             for (const match of matches) {
+                const subject = match[1] || "";
+                const action = match[2] || "";
+                // Only accept subjects that are canonical character names
+                if (!canonicalNames.has(subject.toLowerCase())) {
+                    continue;
+                }
+                // Deduplicate by subject+action
+                const factKey = `${subject.toLowerCase()}-${action.toLowerCase()}`;
+                if (seenFacts.has(factKey))
+                    continue;
+                seenFacts.add(factKey);
+                // Determine category based on action type
+                let category = 'plot';
+                const charActions = ['smiled', 'frowned', 'laughed', 'cried', 'sighed', 'nodded', 'shook', 'gasped', 'trembled', 'froze'];
+                const worldActions = ['walked', 'ran', 'moved', 'entered', 'left', 'arrived', 'departed', 'stepped', 'approached', 'retreated'];
+                const plotActions = ['died', 'killed', 'married', 'betrayed', 'escaped', 'collapsed', 'awakened', 'transformed', 'vanished', 'discovered', 'found', 'learned', 'realized'];
+                if (charActions.includes(action.toLowerCase())) {
+                    category = 'char';
+                }
+                else if (worldActions.includes(action.toLowerCase())) {
+                    category = 'world';
+                }
+                else if (plotActions.includes(action.toLowerCase())) {
+                    category = 'plot';
+                }
                 state.rawFactsLog.push({
-                    fact: match[0],
+                    fact: `${subject} ${action}`,
                     source,
                     sceneNumber: sceneNum,
                     timestamp: new Date().toISOString(),
                 });
+                newFacts.push({
+                    subject,
+                    change: action,
+                    category,
+                });
             }
+        }
+        console.log(`[extractRawFacts] Extracted ${newFacts.length} facts from scene ${sceneNum}`);
+        // Only emit if we have meaningful facts
+        if (newFacts.length > 0) {
+            await this.publishEvent(runId, "new_developments_collected", {
+                sceneNum,
+                developments: newFacts,
+                totalFacts: state.rawFactsLog.length,
+            });
         }
     }
     /**
@@ -822,6 +1652,85 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         return constraints
             .map((c) => `- ${c.key}: ${c.value} (Scene ${c.sceneNumber})`)
             .join("\n");
+    }
+    /**
+     * Retrieve relevant context from Qdrant for hallucination prevention
+     *
+     * This method searches Qdrant for relevant characters, worldbuilding elements,
+     * and previous scenes that are semantically related to the current scene.
+     * The retrieved context helps the Writer maintain consistency with established facts.
+     *
+     * @param projectId - Project ID for filtering
+     * @param sceneOutline - Current scene outline to use as search query
+     * @returns Formatted context string for inclusion in Writer prompt
+     */
+    async getRelevantContext(projectId, sceneOutline) {
+        const contextParts = [];
+        // Build search query from scene outline
+        const sceneTitle = String(sceneOutline.title ?? "");
+        const sceneSetting = String(sceneOutline.setting ?? "");
+        const sceneCharacters = Array.isArray(sceneOutline.characters)
+            ? sceneOutline.characters.join(", ")
+            : String(sceneOutline.characters ?? "");
+        const searchQuery = `${sceneTitle} ${sceneSetting} ${sceneCharacters}`.trim();
+        if (!searchQuery) {
+            return "";
+        }
+        try {
+            // Search for relevant characters
+            const relevantCharacters = await this.qdrantMemory.searchCharacters(projectId, searchQuery, 3);
+            if (relevantCharacters.length > 0) {
+                const charContext = relevantCharacters
+                    .filter(r => r.score > 0.5) // Only include high-relevance matches
+                    .map(r => {
+                    const char = r.payload.character;
+                    return `- ${r.payload.name}: ${char.role ?? ""} ${char.coreMotivation ?? ""}`.trim();
+                })
+                    .join("\n");
+                if (charContext) {
+                    contextParts.push(`RELEVANT CHARACTERS:\n${charContext}`);
+                }
+            }
+            // Search for relevant worldbuilding elements
+            const relevantWorld = await this.qdrantMemory.searchWorldbuilding(projectId, searchQuery, 3);
+            if (relevantWorld.length > 0) {
+                const worldContext = relevantWorld
+                    .filter(r => r.score > 0.5)
+                    .map(r => {
+                    const elem = r.payload.element;
+                    return `- ${r.payload.elementType}: ${elem.name ?? ""} - ${elem.description ?? ""}`.trim();
+                })
+                    .join("\n");
+                if (worldContext) {
+                    contextParts.push(`RELEVANT WORLDBUILDING:\n${worldContext}`);
+                }
+            }
+            // Search for relevant previous scenes (for continuity)
+            const relevantScenes = await this.qdrantMemory.searchScenes(projectId, searchQuery, 2);
+            if (relevantScenes.length > 0) {
+                const sceneContext = relevantScenes
+                    .filter(r => r.score > 0.5)
+                    .map(r => {
+                    const scene = r.payload.scene;
+                    const content = String(scene.content ?? "");
+                    // Include only a summary (first 200 chars) to avoid context bloat
+                    const summary = content.length > 200 ? content.substring(0, 200) + "..." : content;
+                    return `- Scene ${r.payload.sceneNumber} "${scene.title ?? ""}": ${summary}`;
+                })
+                    .join("\n");
+                if (sceneContext) {
+                    contextParts.push(`PREVIOUS SCENES (for continuity):\n${sceneContext}`);
+                }
+            }
+        }
+        catch (error) {
+            // Log error but don't fail the generation
+            console.warn(`[Orchestrator] Failed to retrieve Qdrant context: ${error}`);
+        }
+        if (contextParts.length === 0) {
+            return "";
+        }
+        return `\n\nRELEVANT CONTEXT FROM MEMORY (use for consistency):\n${contextParts.join("\n\n")}`;
     }
     /**
      * Call an agent with LLM
@@ -947,6 +1856,16 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
      * Publish event to Redis Streams
      */
     async publishEvent(runId, eventType, data) {
+        // Only log scene events in development for debugging duplication issues
+        if (process.env.NODE_ENV !== 'production' && eventType.startsWith('scene_')) {
+            console.log(`[StorytellerOrchestrator] Publishing ${eventType}:`, {
+                runId,
+                sceneNum: data.sceneNum,
+                polishStatus: data.polishStatus,
+                hasFinalContent: !!data.finalContent,
+                wordCount: data.wordCount,
+            });
+        }
         await this.redisStreams.publishEvent(runId, eventType, data);
     }
     /**
@@ -1377,8 +2296,20 @@ __decorate([
 ], StorytellerOrchestrator.prototype, "supabase", void 0);
 __decorate([
     (0, di_1.Inject)(),
+    __metadata("design:type", MetricsService_1.MetricsService)
+], StorytellerOrchestrator.prototype, "metricsService", void 0);
+__decorate([
+    (0, di_1.Inject)(),
     __metadata("design:type", AgentFactory_1.AgentFactory)
 ], StorytellerOrchestrator.prototype, "agentFactory", void 0);
+__decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", EvaluationService_1.EvaluationService)
+], StorytellerOrchestrator.prototype, "evaluationService", void 0);
+__decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", WorldBibleEmbeddingService_1.WorldBibleEmbeddingService)
+], StorytellerOrchestrator.prototype, "worldBibleEmbedding", void 0);
 exports.StorytellerOrchestrator = StorytellerOrchestrator = __decorate([
     (0, di_1.Service)()
 ], StorytellerOrchestrator);

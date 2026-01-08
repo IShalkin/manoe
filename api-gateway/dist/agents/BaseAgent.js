@@ -50,6 +50,8 @@ class BaseAgent {
                 temperature: llmConfig.temperature ?? 0.7,
                 maxTokens: (0, LLMModels_1.getMaxTokensForPhase)(phase),
                 responseFormat: expectsObject ? { type: "json_object" } : undefined,
+                runId,
+                agentName: this.agentType,
             });
             // Track in Langfuse
             this.langfuse.trackLLMCall(runId, this.agentType, messages, response, spanId);
@@ -252,19 +254,25 @@ Please fix the JSON to resolve these validation errors. Output only the correcte
     /**
      * Emit agent message event with actual generated content
      * This sends the LLM-generated content to the frontend for display in agent cards
+     *
+     * @param runId - Run ID for the generation
+     * @param content - Content to emit (string or object with sceneNumber)
+     * @param phase - Current generation phase
+     * @param sceneNum - Optional scene number for scene-based deduplication on frontend
      */
-    async emitMessage(runId, content, phase) {
+    async emitMessage(runId, content, phase, sceneNum) {
         if (this.redisStreams) {
             // Convert content to string if it's an object
             const contentStr = typeof content === "string" ? content : JSON.stringify(content, null, 2);
             // Truncate for logging but send full content
             const logContent = contentStr.length > 200 ? contentStr.substring(0, 200) + "..." : contentStr;
-            console.log(`[${this.agentType}] Emitting message:`, logContent, `runId: ${runId}`);
+            console.log(`[${this.agentType}] Emitting message:`, logContent, `runId: ${runId}, sceneNum: ${sceneNum}`);
             try {
                 const eventId = await this.redisStreams.publishEvent(runId, "agent_message", {
                     agent: this.agentType,
                     content: contentStr,
                     phase,
+                    sceneNum, // Include sceneNum for frontend deduplication
                 });
                 console.log(`[${this.agentType}] Published message event with ID:`, eventId);
             }

@@ -19,6 +19,7 @@ export interface StreamEvent {
     id: string;
     type: string;
     runId: string;
+    eventId: string;
     timestamp: string;
     data: Record<string, unknown>;
 }
@@ -32,9 +33,31 @@ export interface StreamInfo {
     groups?: number;
     exists: boolean;
 }
+/**
+ * Consumer group information for lag monitoring
+ */
+export interface ConsumerGroupInfo {
+    name: string;
+    consumers: number;
+    pending: number;
+    lastDeliveredId: string;
+    lag?: number;
+}
+/**
+ * Stream lag metrics for monitoring
+ */
+export interface StreamLagMetrics {
+    streamKey: string;
+    length: number;
+    groups: ConsumerGroupInfo[];
+    totalLag: number;
+    oldestPendingMs?: number;
+}
 export declare class RedisStreamsService {
     private writerClient;
     private redisUrl;
+    private lastProcessedIds;
+    private metricsService;
     private get client();
     private readonly STREAM_EVENTS;
     private readonly STREAM_GLOBAL;
@@ -140,6 +163,78 @@ export declare class RedisStreamsService {
      * Sleep helper
      */
     private sleep;
+    /**
+     * Get consumer group information for a stream
+     * Used for monitoring consumer lag
+     *
+     * @param runId - Unique identifier for the generation run
+     * @returns Array of consumer group information
+     */
+    getConsumerGroups(runId: string): Promise<ConsumerGroupInfo[]>;
+    /**
+     * Get comprehensive lag metrics for a stream
+     * Used for Prometheus metrics and alerting
+     *
+     * @param runId - Unique identifier for the generation run
+     * @returns Stream lag metrics including total lag across all groups
+     */
+    getStreamLagMetrics(runId: string): Promise<StreamLagMetrics>;
+    /**
+     * Count events in stream after a given ID
+     * Used for approximate lag calculation when not using Consumer Groups
+     *
+     * @param runId - Unique identifier for the generation run
+     * @param afterId - Count events after this ID
+     * @returns Number of events after the given ID
+     */
+    private countEventsAfter;
+    /**
+     * Get lag metrics for the global events stream
+     * Used for overall system health monitoring
+     *
+     * @returns Stream lag metrics for the global stream
+     */
+    getGlobalStreamLagMetrics(): Promise<StreamLagMetrics>;
+    /**
+     * Get all active stream keys for monitoring
+     * Scans for all manoe:events:* streams
+     *
+     * @returns Array of stream keys
+     */
+    getActiveStreamKeys(): Promise<string[]>;
+    /**
+     * Get lag metrics for all active streams
+     * Used for comprehensive monitoring dashboard
+     *
+     * @returns Map of stream key to lag metrics
+     */
+    getAllStreamLagMetrics(): Promise<Map<string, StreamLagMetrics>>;
+    /**
+     * Check if any stream has lag above threshold
+     * Used for alerting
+     *
+     * @param threshold - Maximum acceptable lag (default: 1000)
+     * @returns Array of streams exceeding the threshold
+     */
+    checkLagThreshold(threshold?: number): Promise<Array<{
+        streamKey: string;
+        lag: number;
+    }>>;
+    /**
+     * Collect and record consumer lag metrics for all active streams
+     * This method should be called periodically (e.g., every 30 seconds) to update Prometheus metrics
+     *
+     * @returns Number of streams processed
+     */
+    collectAndRecordLagMetrics(): Promise<number>;
+    /**
+     * Start periodic lag metrics collection
+     * Collects and records lag metrics every intervalMs milliseconds
+     *
+     * @param intervalMs - Collection interval in milliseconds (default: 30000 = 30 seconds)
+     * @returns Interval ID for stopping the collection
+     */
+    startLagMetricsCollection(intervalMs?: number): NodeJS.Timeout;
     /**
      * Disconnect from Redis (writer client)
      * Note: Reader connections are cleaned up automatically when their generators end

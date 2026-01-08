@@ -62,4 +62,26 @@ export declare function normalizeOutline(raw: unknown): Record<string, unknown>;
  * @returns Normalized critique object
  */
 export declare function normalizeCritique(raw: unknown): Record<string, unknown>;
+/**
+ * Normalize a worldbuilding element for storage
+ * Extracts name and description from various field formats
+ * Used by SupabaseService.saveWorldbuilding
+ *
+ * @param elementType - Type of worldbuilding element
+ * @param element - Raw element object
+ * @returns Normalized element with guaranteed name and description
+ */
+export declare function normalizeWorldbuildingElement(elementType: string, element: Record<string, unknown>): {
+    name: string;
+    description: string;
+    attributes: Record<string, unknown>;
+};
+/**
+ * Normalize character data from LLM output to Supabase storage format
+ * Maps LLM field names to database column names
+ */
+/**
+ * Normalize character data from LLM output to Supabase storage format
+ */
+export declare function normalizeCharacterForStorage(character: Record<string, unknown>): Record<string, unknown>;
 //# sourceMappingURL=schemaNormalizers.d.ts.map

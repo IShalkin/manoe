@@ -60,6 +60,10 @@ class CriticAgent extends BaseAgent_1.BaseAgent {
         if (critique.wordCountCompliance === false) {
             return true;
         }
+        // Scope adherence is a hard requirement - scene must stay within outline bounds
+        if (critique.scopeAdherence === false) {
+            return true;
+        }
         // Score below 7 always needs revision
         if (score !== null && score < 7) {
             return true;
@@ -143,9 +147,14 @@ Key Constraints: ${variables.keyConstraints || "No constraints established yet."
             // Calculate actual word count (don't trust LLM's self-reported count)
             const actualWordCount = String(draft.content || "").split(/\s+/).filter(w => w.length > 0).length;
             const wordCountRatio = actualWordCount / Number(targetWordCount);
+            // Get scene outline for scope checking
+            const sceneHook = sceneOutline.hook ?? sceneOutline.endHook ?? "";
             return `Critique Scene ${sceneNum}:
 
 ${draft.content}
+
+SCENE OUTLINE (for scope checking):
+${JSON.stringify(sceneOutline, null, 2)}
 
 WORD COUNT CHECK (CRITICAL):
 - Target word count: ${targetWordCount} words
@@ -162,17 +171,23 @@ Evaluate:
 6. Sensory details
 7. Constraint adherence
 8. Word count compliance (MUST be at least 70% of target)
+9. SCOPE ADHERENCE (CRITICAL):
+   - Does the scene cover ONLY what's in the outline?
+   - Does it avoid depicting events from later scenes?
+   - Does it end on the specified hook: "${sceneHook}"?
+   - No premature escalation or resolution of future conflicts?
 
 KEY CONSTRAINTS TO CHECK:
 ${constraintsBlock}
 
 Output JSON with:
-- approved: boolean (true ONLY if no major issues AND word count >= 70% of target)
-- score: number (1-10, max 6 if word count is below 70%)
+- approved: boolean (true ONLY if no major issues AND word count >= 70% of target AND scope is correct)
+- score: number (1-10, max 6 if word count is below 70%, max 7 if scope issues)
 - wordCountCompliance: boolean (true if actual >= 70% of target)
+- scopeAdherence: boolean (true if scene stays within outline bounds and ends on hook)
 - strengths: string[]
-- issues: string[] (MUST include "Scene too short" if word count < 70%)
-- revisionRequests: string[] (MUST include "Expand scene to at least ${Math.round(Number(targetWordCount) * 0.7)} words" if too short)`;
+- issues: string[] (MUST include "Scene too short" if word count < 70%, "Scope violation" if scene goes beyond outline)
+- revisionRequests: string[] (MUST include "Expand scene to at least ${Math.round(Number(targetWordCount) * 0.7)} words" if too short, specific scope fixes if needed)`;
         }
         if (phase === LLMModels_1.GenerationPhase.REVISION) {
             // Critic may be consulted during revision, but Writer is primary

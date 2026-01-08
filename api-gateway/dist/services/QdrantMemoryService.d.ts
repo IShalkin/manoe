@@ -69,11 +69,20 @@ export declare class QdrantMemoryService {
     private embeddingProvider;
     private embeddingDimension;
     private embeddingModel;
-    private readonly COLLECTION_CHARACTERS;
-    private readonly COLLECTION_WORLDBUILDING;
-    private readonly COLLECTION_SCENES;
+    private isConnected;
+    private currentGeminiKey?;
+    private currentOpenaiKey?;
+    private metricsService;
+    private readonly COLLECTION_PREFIX_CHARACTERS;
+    private readonly COLLECTION_PREFIX_WORLDBUILDING;
+    private readonly COLLECTION_PREFIX_SCENES;
+    private collectionCharacters;
+    private collectionWorldbuilding;
+    private collectionScenes;
     /**
      * Connect to Qdrant and initialize embedding provider
+     *
+     * Supports re-initialization when API keys change (fixes singleton caching issue).
      *
      * @param openaiApiKey - OpenAI API key for embeddings (highest priority)
      * @param geminiApiKey - Gemini API key for embeddings (second priority)
@@ -86,7 +95,8 @@ export declare class QdrantMemoryService {
     get providerInfo(): EmbeddingProviderInfo;
     /**
      * Ensure all required collections exist with correct dimensions
-     * If a collection exists with wrong dimensions, recreate it
+     * Uses versioned collection names to prevent data loss when switching embedding providers
+     * Old collections are preserved for potential migration
      */
     private ensureCollections;
     /**

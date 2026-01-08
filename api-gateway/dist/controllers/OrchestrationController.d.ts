@@ -41,6 +41,8 @@ declare class GenerateRequestDTO {
     model?: string;
     api_key?: string;
     generation_mode?: "full" | "branching";
+    embeddingApiKey?: string;
+    embedding_api_key?: string;
 }
 /**
  * Generation Response DTO - includes both camelCase and snake_case for compatibility

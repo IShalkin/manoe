@@ -58,14 +58,14 @@ export declare const NarrativeSchema: z.ZodObject<{
     audience: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodObject<{}, "passthrough", z.ZodTypeAny, z.objectOutputType<{}, z.ZodTypeAny, "passthrough">, z.objectInputType<{}, z.ZodTypeAny, "passthrough">>]>>;
     genre: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodObject<{}, "passthrough", z.ZodTypeAny, z.objectOutputType<{}, z.ZodTypeAny, "passthrough">, z.objectInputType<{}, z.ZodTypeAny, "passthrough">>]>>;
 }, "strip", z.ZodTypeAny, {
+    premise: string;
+    hook: string;
     themes: (string | z.objectOutputType<{
         name: z.ZodOptional<z.ZodString>;
         theme: z.ZodOptional<z.ZodString>;
         description: z.ZodOptional<z.ZodString>;
         exploration: z.ZodOptional<z.ZodString>;
     }, z.ZodTypeAny, "passthrough">)[] | z.objectOutputType<{}, z.ZodTypeAny, "passthrough">;
-    premise: string;
-    hook: string;
     arc: string | z.objectOutputType<{
         structure: z.ZodOptional<z.ZodString>;
         type: z.ZodOptional<z.ZodString>;
@@ -78,14 +78,14 @@ export declare const NarrativeSchema: z.ZodObject<{
     audience?: string | z.objectOutputType<{}, z.ZodTypeAny, "passthrough"> | undefined;
     genre?: string | z.objectOutputType<{}, z.ZodTypeAny, "passthrough"> | undefined;
 }, {
+    premise: string;
+    hook: string;
     themes: (string | z.objectInputType<{
         name: z.ZodOptional<z.ZodString>;
         theme: z.ZodOptional<z.ZodString>;
         description: z.ZodOptional<z.ZodString>;
         exploration: z.ZodOptional<z.ZodString>;
     }, z.ZodTypeAny, "passthrough">)[] | z.objectInputType<{}, z.ZodTypeAny, "passthrough">;
-    premise: string;
-    hook: string;
     arc: string | z.objectInputType<{
         structure: z.ZodOptional<z.ZodString>;
         type: z.ZodOptional<z.ZodString>;
@@ -423,19 +423,19 @@ export declare const CritiqueSchema: z.ZodObject<{
     issues: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     revisionRequests: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
 }, "strip", z.ZodTypeAny, {
-    approved?: boolean | undefined;
-    strengths?: string[] | undefined;
+    score?: number | undefined;
+    issues?: string[] | undefined;
     revision_needed?: boolean | undefined;
     revisionRequests?: string[] | undefined;
-    issues?: string[] | undefined;
-    score?: number | undefined;
+    approved?: boolean | undefined;
+    strengths?: string[] | undefined;
 }, {
-    approved?: boolean | undefined;
-    strengths?: string[] | undefined;
+    score?: number | undefined;
+    issues?: string[] | undefined;
     revision_needed?: boolean | undefined;
     revisionRequests?: string[] | undefined;
-    issues?: string[] | undefined;
-    score?: number | undefined;
+    approved?: boolean | undefined;
+    strengths?: string[] | undefined;
 }>;
 /**
  * Originality Report schema (from OriginalityAgent)
@@ -484,36 +484,135 @@ export declare const ArchivistOutputSchema: z.ZodObject<{
         sceneNumber: z.ZodNumber;
         reasoning: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
+        value: string;
         sceneNumber: number;
         key: string;
-        value: string;
         reasoning?: string | undefined;
     }, {
+        value: string;
         sceneNumber: number;
         key: string;
-        value: string;
         reasoning?: string | undefined;
     }>, "many">>, {
+        value: string;
         sceneNumber: number;
         key: string;
-        value: string;
         reasoning?: string | undefined;
     }[] | undefined, unknown>;
     conflicts_resolved: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     discarded_facts: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    worldStateDiff: z.ZodOptional<z.ZodObject<{
+        characterUpdates: z.ZodEffects<z.ZodOptional<z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            status: z.ZodOptional<z.ZodEnum<["alive", "dead", "unknown", "transformed"]>>;
+            currentLocation: z.ZodOptional<z.ZodString>;
+            newAttributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        }, "strip", z.ZodTypeAny, {
+            name: string;
+            status?: "unknown" | "alive" | "dead" | "transformed" | undefined;
+            currentLocation?: string | undefined;
+            newAttributes?: Record<string, string> | undefined;
+        }, {
+            name: string;
+            status?: "unknown" | "alive" | "dead" | "transformed" | undefined;
+            currentLocation?: string | undefined;
+            newAttributes?: Record<string, string> | undefined;
+        }>, "many">>, {
+            name: string;
+            status?: "unknown" | "alive" | "dead" | "transformed" | undefined;
+            currentLocation?: string | undefined;
+            newAttributes?: Record<string, string> | undefined;
+        }[] | undefined, unknown>;
+        newLocations: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            type: z.ZodString;
+            description: z.ZodOptional<z.ZodString>;
+        }, "strip", z.ZodTypeAny, {
+            type: string;
+            name: string;
+            description?: string | undefined;
+        }, {
+            type: string;
+            name: string;
+            description?: string | undefined;
+        }>, "many">>;
+        timelineEvents: z.ZodEffects<z.ZodOptional<z.ZodArray<z.ZodObject<{
+            event: z.ZodString;
+            significance: z.ZodOptional<z.ZodEnum<["major", "minor", "background"]>>;
+        }, "strip", z.ZodTypeAny, {
+            event: string;
+            significance?: "minor" | "major" | "background" | undefined;
+        }, {
+            event: string;
+            significance?: "minor" | "major" | "background" | undefined;
+        }>, "many">>, {
+            event: string;
+            significance?: "minor" | "major" | "background" | undefined;
+        }[] | undefined, unknown>;
+    }, "strip", z.ZodTypeAny, {
+        characterUpdates?: {
+            name: string;
+            status?: "unknown" | "alive" | "dead" | "transformed" | undefined;
+            currentLocation?: string | undefined;
+            newAttributes?: Record<string, string> | undefined;
+        }[] | undefined;
+        newLocations?: {
+            type: string;
+            name: string;
+            description?: string | undefined;
+        }[] | undefined;
+        timelineEvents?: {
+            event: string;
+            significance?: "minor" | "major" | "background" | undefined;
+        }[] | undefined;
+    }, {
+        characterUpdates?: unknown;
+        newLocations?: {
+            type: string;
+            name: string;
+            description?: string | undefined;
+        }[] | undefined;
+        timelineEvents?: unknown;
+    }>>;
 }, "strip", z.ZodTypeAny, {
     constraints?: {
+        value: string;
         sceneNumber: number;
         key: string;
-        value: string;
         reasoning?: string | undefined;
     }[] | undefined;
     conflicts_resolved?: string[] | undefined;
     discarded_facts?: string[] | undefined;
+    worldStateDiff?: {
+        characterUpdates?: {
+            name: string;
+            status?: "unknown" | "alive" | "dead" | "transformed" | undefined;
+            currentLocation?: string | undefined;
+            newAttributes?: Record<string, string> | undefined;
+        }[] | undefined;
+        newLocations?: {
+            type: string;
+            name: string;
+            description?: string | undefined;
+        }[] | undefined;
+        timelineEvents?: {
+            event: string;
+            significance?: "minor" | "major" | "background" | undefined;
+        }[] | undefined;
+    } | undefined;
 }, {
     constraints?: unknown;
     conflicts_resolved?: string[] | undefined;
     discarded_facts?: string[] | undefined;
+    worldStateDiff?: {
+        characterUpdates?: unknown;
+        newLocations?: {
+            type: string;
+            name: string;
+            description?: string | undefined;
+        }[] | undefined;
+        timelineEvents?: unknown;
+    } | undefined;
 }>;
 /**
  * Validation error class

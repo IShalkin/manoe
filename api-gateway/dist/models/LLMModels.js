@@ -129,6 +129,8 @@ class CompletionOptions {
     temperature = 0.7;
     maxTokens;
     responseFormat;
+    runId;
+    agentName;
 }
 exports.CompletionOptions = CompletionOptions;
 __decorate([
@@ -166,6 +168,16 @@ __decorate([
     (0, schema_1.Property)(),
     __metadata("design:type", Object)
 ], CompletionOptions.prototype, "responseFormat", void 0);
+__decorate([
+    (0, schema_1.Optional)(),
+    (0, schema_1.Property)(),
+    __metadata("design:type", String)
+], CompletionOptions.prototype, "runId", void 0);
+__decorate([
+    (0, schema_1.Optional)(),
+    (0, schema_1.Property)(),
+    __metadata("design:type", String)
+], CompletionOptions.prototype, "agentName", void 0);
 /**
  * Generation phase enum matching Python orchestrator
  */
