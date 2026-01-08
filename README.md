@@ -6,7 +6,6 @@ A scalable, event-driven platform designed to automate the creation of exception
 
 - **Frontend**: https://manoe.iliashalkin.com
 - **API Gateway (ts.ed)**: https://manoe-gateway.iliashalkin.com
-- **Orchestrator API**: https://manoe-orchestrator.iliashalkin.com
 - **Langfuse Dashboard**: https://langfuse.iliashalkin.com
 
 ## System Architecture
@@ -95,7 +94,7 @@ sequenceDiagram
     rect rgb(240, 248, 255)
         Note over U,GW: 1. Request Initiation
         U->>FE: Click Generate
-        FE->>GW: POST /orchestration/generate
+        FE->>GW: POST /orchestrate/generate
         GW->>O: startGeneration(options)
         O-->>GW: runId
         GW-->>FE: 202 Accepted + runId
@@ -103,7 +102,7 @@ sequenceDiagram
 
     rect rgb(255, 250, 240)
         Note over FE,R: 2. SSE Connection
-        FE->>GW: GET /orchestration/stream/{runId}
+        FE->>GW: GET /orchestrate/stream/{runId}
         GW->>R: Subscribe to run:{runId}
     end
 
@@ -679,7 +678,7 @@ cp .env.example .env
 docker-compose up -d
 
 # Access the frontend at http://localhost:5173
-# Access the orchestrator API at http://localhost:8001
+# Access the API gateway at http://localhost:3000
 ```
 
 ### Docker Services
