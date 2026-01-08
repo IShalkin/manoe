@@ -8,6 +8,7 @@
  * - Narrative possibility caching
  * - Cache invalidation on data updates
  * - Distributed caching via Redis
+ * - Graceful degradation: cache failures don't break the application
  */
 
 import { Service } from "@tsed/di";
@@ -22,12 +23,22 @@ export interface CacheStats {
   hits: number;
   misses: number;
   hitRate: number;
+  errors: number;
+}
+
+export class CacheError extends Error {
+  constructor(message: string, public readonly cause?: Error) {
+    super(message);
+    this.name = "CacheError";
+  }
 }
 
 @Service()
 export class CacheService {
   private client: Redis | null = null;
-  private stats = { hits: 0, misses: 0 };
+  private isConnected = false;
+  private connectionPromise: Promise<void> | null = null;
+  private stats = { hits: 0, misses: 0, errors: 0 };
 
   private readonly DEFAULT_TTL = 300;
   private readonly KEY_PREFIX = "manoe:cache:";
@@ -41,27 +52,52 @@ export class CacheService {
   };
 
   constructor() {
-    this.connect();
+    this.connectionPromise = this.connect();
   }
 
-  private connect(): void {
+  private async connect(): Promise<void> {
     const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
     this.client = new Redis(redisUrl);
 
-    this.client.on("error", (err) => {
-      console.error("[CacheService] Redis connection error:", err);
-    });
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        this.isConnected = false;
+        console.warn("[CacheService] Redis connection timeout - caching disabled");
+        resolve();
+      }, 5000);
 
-    this.client.on("connect", () => {
-      console.log("[CacheService] Redis connected");
+      this.client!.on("error", (err) => {
+        console.error("[CacheService] Redis connection error:", err);
+        this.isConnected = false;
+      });
+
+      this.client!.on("connect", () => {
+        clearTimeout(timeout);
+        this.isConnected = true;
+        console.log("[CacheService] Redis connected");
+        resolve();
+      });
+
+      this.client!.on("close", () => {
+        this.isConnected = false;
+        console.warn("[CacheService] Redis connection closed");
+      });
+
+      this.client!.on("reconnecting", () => {
+        console.log("[CacheService] Redis reconnecting...");
+      });
     });
   }
 
-  private getClient(): Redis {
-    if (!this.client) {
-      throw new Error("Redis cache client not initialized");
+  private getClient(): Redis | null {
+    if (!this.client || !this.isConnected) {
+      return null;
     }
     return this.client;
+  }
+
+  isHealthy(): boolean {
+    return this.isConnected;
   }
 
   private buildKey(type: string, id: string): string {
@@ -71,6 +107,11 @@ export class CacheService {
   async get<T>(type: string, id: string): Promise<T | null> {
     try {
       const client = this.getClient();
+      if (!client) {
+        this.stats.misses++;
+        return null;
+      }
+
       const key = this.buildKey(type, id);
       const data = await client.get(key);
 
@@ -83,6 +124,7 @@ export class CacheService {
       return null;
     } catch (error) {
       console.error("[CacheService] Error getting cache:", error);
+      this.stats.errors++;
       this.stats.misses++;
       return null;
     }
@@ -96,28 +138,36 @@ export class CacheService {
   ): Promise<void> {
     try {
       const client = this.getClient();
+      if (!client) return;
+
       const key = this.buildKey(type, id);
       const ttl = ttlSeconds ?? this.TTL_CONFIG[type as keyof typeof this.TTL_CONFIG] ?? this.DEFAULT_TTL;
 
       await client.setex(key, ttl, JSON.stringify(data));
     } catch (error) {
       console.error("[CacheService] Error setting cache:", error);
+      this.stats.errors++;
     }
   }
 
   async invalidate(type: string, id: string): Promise<void> {
     try {
       const client = this.getClient();
+      if (!client) return;
+
       const key = this.buildKey(type, id);
       await client.del(key);
     } catch (error) {
       console.error("[CacheService] Error invalidating cache:", error);
+      this.stats.errors++;
     }
   }
 
   async invalidatePattern(pattern: string): Promise<number> {
     try {
       const client = this.getClient();
+      if (!client) return 0;
+
       const fullPattern = `${this.KEY_PREFIX}${pattern}`;
       let cursor = "0";
       let deletedCount = 0;
@@ -141,6 +191,7 @@ export class CacheService {
       return deletedCount;
     } catch (error) {
       console.error("[CacheService] Error invalidating pattern:", error);
+      this.stats.errors++;
       return 0;
     }
   }
@@ -233,16 +284,21 @@ export class CacheService {
       hits: this.stats.hits,
       misses: this.stats.misses,
       hitRate: total > 0 ? this.stats.hits / total : 0,
+      errors: this.stats.errors,
     };
   }
 
   resetStats(): void {
-    this.stats = { hits: 0, misses: 0 };
+    this.stats = { hits: 0, misses: 0, errors: 0 };
   }
 
   async healthCheck(): Promise<{ status: string; latencyMs: number }> {
     try {
       const client = this.getClient();
+      if (!client) {
+        return { status: "unhealthy", latencyMs: -1 };
+      }
+
       const start = Date.now();
       await client.ping();
       const latencyMs = Date.now() - start;
