@@ -1,0 +1,32 @@
+{
+  "name": "MANOE",
+  "description": "Distributed Multi-Agent Narrative Engine Documentation",
+  "logo": "https://manoe-mintlify.app/logo.png",
+  "favicon": "https://manoe-mintlify.app/favicon.png",
+  "modeToggle": "dark",
+  "colors": {
+    "primary": "#0EA5E9",
+    "light": "#38BDF8",
+    "dark": "#0284C7"
+  },
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "index"
+      ]
+    },
+    {
+      "group": "Documentation",
+      "pages": [
+        "docs/agents",
+        "docs/api",
+        "docs/architecture",
+        "docs/deployment"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/IShalkin/manoe"
+  }
+}
