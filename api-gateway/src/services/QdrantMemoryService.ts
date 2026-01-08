@@ -209,7 +209,7 @@ export class QdrantMemoryService {
       });
       return response.data[0].embedding;
     } else if (this.embeddingProvider === EmbeddingProvider.GEMINI && this.geminiClient) {
-      const model = this.geminiClient.getGenerativeModel({ model: "embedding-001" });
+      const model = this.geminiClient.getGenerativeModel({ model: this.embeddingModel });
       const result = await model.embedContent(text);
       return result.embedding.values;
     } else {
