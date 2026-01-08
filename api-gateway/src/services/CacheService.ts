@@ -275,21 +275,24 @@ export class CacheService {
     fetchFn: () => Promise<T>,
     ttlSeconds?: number
   ): Promise<T> {
-    // Use a wrapper key to store metadata about the cached value
-    const wrapperKey = `${type}:wrapped`;
-    const cached = await this.get<{ exists: boolean; value: T | null }>(wrapperKey, id);
-    
-    if (cached !== null) {
-      // We have a cached entry - return the value (which may be null for non-existent resources)
-      return cached.value as T;
+    const client = this.getClient();
+    if (!client) {
+      return await fetchFn();
     }
 
-    // Cache miss - fetch the data
+    const key = this.buildKey(type, id);
+    const cachedRaw = await client.get(key);
+
+    if (cachedRaw !== null) {
+      if (cachedRaw === "__NULL__") return null as T;
+      return JSON.parse(cachedRaw) as T;
+    }
+
     const data = await fetchFn();
-    
-    // Cache the result with a wrapper to handle null values
-    // This ensures we don't repeatedly query for non-existent resources
-    await this.set(wrapperKey, id, { exists: data !== null && data !== undefined, value: data }, ttlSeconds);
+
+    const ttl = ttlSeconds ?? this.TTL_CONFIG[type as keyof typeof this.TTL_CONFIG] ?? this.DEFAULT_TTL;
+    await client.setex(key, ttl, data === null || data === undefined ? "__NULL__" : JSON.stringify(data));
+
     return data;
   }
 
