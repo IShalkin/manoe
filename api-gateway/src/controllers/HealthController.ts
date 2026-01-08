@@ -202,10 +202,17 @@ export class HealthController {
     repairedScenes: number;
     errors: string[];
   }> {
-    // Verify project exists and user has access (RLS handles authorization)
+    // SECURITY: Authorization is handled by Supabase RLS (Row Level Security).
+    // The getProject() call uses the authenticated user's JWT token, and RLS policies
+    // ensure users can only access their own projects. If the user doesn't own the
+    // project, getProject() returns null (RLS filters it out).
+    //
+    // TODO: For defense-in-depth, consider adding explicit user ownership verification
+    // at the application layer. This would require passing user context through the
+    // request (e.g., via middleware that extracts user_id from the JWT).
     const project = await this.supabaseService.getProject(projectId);
     if (!project) {
-      throw new Error("Project not found");
+      throw new Error("Project not found or access denied");
     }
 
     const checker = createDataConsistencyChecker(
