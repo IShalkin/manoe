@@ -39,6 +39,9 @@ import { FeedbackController } from "./controllers/FeedbackController";
 import { StorytellerOrchestrator } from "./services/StorytellerOrchestrator";
 import { RedisStreamsService } from "./services/RedisStreamsService";
 
+// Import middleware
+import { RateLimitMiddleware } from "./middleware/RateLimitMiddleware";
+
 const rootDir = __dirname;
 
 @Configuration({
@@ -155,6 +158,9 @@ All endpoints require a valid API key passed via the \`x-api-key\` header or Bea
     bodyParser.urlencoded({ extended: true }),
   ],
   exclude: ["**/*.spec.ts"],
+  componentsScan: [
+    `${rootDir}/middleware/**/*.ts`,
+  ],
 })
 export class Server {
   @Inject()
