@@ -1,31 +1,48 @@
 {
   "name": "MANOE",
-  "description": "Distributed Multi-Agent Narrative Engine Documentation",
-  "logo": "https://manoe-mintlify.app/logo.png",
-  "favicon": "https://manoe-mintlify.app/favicon.png",
+  "logo": "https://github.com/IShalkin/manoe/raw/main/docs/logo.png",
+  "favicon": "https://github.com/IShalkin/manoe/raw/main/docs/favicon.ico",
   "colors": {
-    "primary": "#0EA5E9",
-    "light": "#38BDF8",
-    "dark": "#0284C7"
+    "primary": "#00D4FF",
+    "light": "#00D4FF",
+    "dark": "#00073A",
+    "anchors": {
+      "from": "#00D4FF",
+      "to": "#00D4FF"
+    }
   },
+  "topbarLinks": [
+    {
+      "name": "Support",
+      "url": "https://github.com/IShalkin/manoe"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "Documentation",
+      "icon": "book-open",
+      "url": "docs"
+    },
+    {
+      "name": "Community",
+      "icon": "slack",
+      "url": "https://github.com/IShalkin/manoe"
+    }
+  ],
   "navigation": [
     {
       "group": "Getting Started",
       "pages": [
-        "index"
-      ]
-    },
-    {
-      "group": "Documentation",
-      "pages": [
-        "docs/agents",
-        "docs/api",
-        "docs/architecture",
-        "docs/deployment"
+        "introduction",
+        "AGENTS",
+        "API",
+        "ARCHITECTURE",
+        "DEPLOYMENT"
       ]
     }
   ],
   "footerSocials": {
+    "twitter": "https://twitter.com",
     "github": "https://github.com/IShalkin/manoe"
   }
 }
