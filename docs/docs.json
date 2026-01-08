@@ -1,33 +1,5 @@
 {
   "name": "MANOE",
   "theme": "mint",
-  "logo": "https://github.com/IShalkin/manoe/raw/main/docs/logo.png",
-  "colors": {
-    "primary": "#00D4FF",
-    "light": "#00D4FF",
-    "dark": "#00D4FF",
-    "anchors": {
-      "from": "#00D4FF",
-      "to": "#00D4FF"
-    }
-  },
-  "primaryTab": {
-    "name": "Documentation"
-  },
-  "navigation": [
-    {
-      "group": "Getting Started",
-      "pages": [
-        "introduction",
-        "AGENTS",
-        "API",
-        "ARCHITECTURE",
-        "DEPLOYMENT"
-      ]
-    }
-  ],
-  "footerSocials": {
-    "twitter": "https://twitter.com",
-    "github": "https://github.com/IShalkin/manoe"
-  }
+  "logo": "https://github.com/IShalkin/manoe/raw/main/docs/logo.png"
 }
