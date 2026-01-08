@@ -39,6 +39,9 @@ import { FeedbackController } from "./controllers/FeedbackController";
 import { StorytellerOrchestrator } from "./services/StorytellerOrchestrator";
 import { RedisStreamsService } from "./services/RedisStreamsService";
 
+// Import middleware
+import { RateLimitMiddleware } from "./middleware/RateLimitMiddleware";
+
 const rootDir = __dirname;
 
 @Configuration({
@@ -144,7 +147,7 @@ All endpoints require a valid API key passed via the \`x-api-key\` header or Bea
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
       allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "x-api-key"],
-      exposedHeaders: ["Content-Length", "X-Request-Id"],
+      exposedHeaders: ["Content-Length", "X-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
       preflightContinue: false,
       optionsSuccessStatus: 204,
     }),
@@ -153,8 +156,12 @@ All endpoints require a valid API key passed via the \`x-api-key\` header or Bea
     methodOverride(),
     bodyParser.json(),
     bodyParser.urlencoded({ extended: true }),
+    RateLimitMiddleware,
   ],
   exclude: ["**/*.spec.ts"],
+  componentsScan: [
+    `${rootDir}/middleware/**/*.ts`,
+  ],
 })
 export class Server {
   @Inject()

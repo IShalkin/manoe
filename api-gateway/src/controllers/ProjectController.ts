@@ -4,6 +4,7 @@ import { Inject } from "@tsed/di";
 import { JobQueueService } from "../services/JobQueueService";
 import { SupabaseService } from "../services/SupabaseService";
 import { QdrantMemoryService } from "../services/QdrantMemoryService";
+import { CacheService } from "../services/CacheService";
 import { StoryProjectDTO, ProjectResponseDTO, NarrativePossibilityDTO } from "../models/ProjectModels";
 
 @Controller("/project")
@@ -18,6 +19,9 @@ export class ProjectController {
 
   @Inject()
   private qdrantMemoryService: QdrantMemoryService;
+
+  @Inject()
+  private cacheService: CacheService;
 
   @Post("/init")
   @Summary("Initialize a new narrative project")
@@ -61,11 +65,18 @@ export class ProjectController {
   @Description("Retrieve project status and details")
   @Returns(200, ProjectResponseDTO)
   async getProject(@PathParams("id") id: string): Promise<ProjectResponseDTO> {
-    const project = await this.supabaseService.getProject(id);
-    
-    if (!project) {
-      throw new Error("Project not found");
-    }
+    // Use cache with getOrSet pattern for read operations
+    const project = await this.cacheService.getOrSet(
+      "project",
+      id,
+      async () => {
+        const dbProject = await this.supabaseService.getProject(id);
+        if (!dbProject) {
+          throw new Error("Project not found");
+        }
+        return dbProject;
+      }
+    );
 
     return {
       id: project.id,
@@ -83,7 +94,12 @@ export class ProjectController {
     @Description("Retrieve the generated narrative possibility for a project")
     @Returns(200, NarrativePossibilityDTO)
     async getNarrativePossibility(@PathParams("id") id: string): Promise<NarrativePossibilityDTO | null> {
-      return await this.supabaseService.getNarrativePossibility(id) as NarrativePossibilityDTO | null;
+      // Use cache with getOrSet pattern for read operations
+      return await this.cacheService.getOrSet(
+        "narrative",
+        id,
+        async () => await this.supabaseService.getNarrativePossibility(id) as NarrativePossibilityDTO | null
+      );
     }
 
   @Post("/:id/approve")
@@ -115,6 +131,9 @@ export class ProjectController {
 
     // Update project status
     await this.supabaseService.updateProjectStatus(id, nextPhase);
+
+    // Invalidate cache after status update
+    await this.cacheService.invalidate("project", id);
 
     // Enqueue next phase job
     await this.jobQueueService.enqueueJob({
@@ -176,6 +195,9 @@ export class ProjectController {
 
     // Delete from Supabase (cascades to related tables via foreign keys)
     await this.supabaseService.deleteProject(id);
+
+    // Invalidate all caches for this project
+    await this.cacheService.invalidateProject(id);
 
     return { success: true };
   }

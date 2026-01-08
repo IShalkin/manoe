@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { UserSettings, ProviderConfig, AgentConfig, LLMProvider, AGENTS, MODELS, LLMModel, ResearchProvider, ResearchProviderConfig } from '../types';
 import { orchestratorFetch } from '../lib/api';
-import { encryptData, decryptData, isEncrypted } from '../lib/crypto';
+import { encryptData, decryptData, isEncrypted, needsMigration } from '../lib/crypto';
 
 const STORAGE_KEY = 'manoe_settings';
 const MODELS_CACHE_KEY = 'manoe_models_cache';
@@ -135,6 +135,8 @@ interface SettingsContextType {
   getResearchProviderKey: (provider: ResearchProvider) => string | undefined;
   embeddingApiKey: string;
   updateEmbeddingApiKey: (apiKey: string) => void;
+  migrationWarning: string | null;
+  dismissMigrationWarning: () => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
@@ -149,10 +151,17 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
   const [researchProviders, setResearchProviders] = useState<ResearchProviderConfig[]>([]);
   const [embeddingApiKey, setEmbeddingApiKey] = useState<string>('');
+  const [migrationWarning, setMigrationWarning] = useState<string | null>(null);
 
   // Load settings from localStorage on mount (with decryption)
   useEffect(() => {
     const loadSettings = async () => {
+      // Check if crypto migration is needed (old fingerprint-based encryption)
+      if (needsMigration()) {
+        console.warn('[SettingsContext] Crypto migration needed - old encryption method detected');
+        console.warn('[SettingsContext] Users may need to re-enter API keys if decryption fails');
+      }
+
       const stored = localStorage.getItem(STORAGE_KEY);
       console.log('[SettingsContext] Loading settings from localStorage:', stored ? 'found' : 'empty');
       if (stored) {
@@ -162,7 +171,17 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           
           // Decrypt API keys if they are encrypted
           if (migrated.providers && migrated.providers.length > 0) {
-            migrated.providers = await decryptApiKeys(migrated.providers);
+            const decryptedProviders = await decryptApiKeys(migrated.providers);
+            // Check if any keys were cleared due to decryption failure
+            const clearedCount = decryptedProviders.filter(
+              (p, i) => migrated.providers[i]?.apiKey && !p.apiKey
+            ).length;
+            if (clearedCount > 0) {
+              console.warn(`[SettingsContext] ${clearedCount} API key(s) could not be decrypted and were cleared.`);
+              console.warn('[SettingsContext] This may be due to encryption method upgrade. Please re-enter your API keys.');
+              setMigrationWarning(`${clearedCount} API key(s) could not be decrypted due to an encryption upgrade. Please re-enter your API keys in Settings.`);
+            }
+            migrated.providers = decryptedProviders;
           }
           
           setSettings(migrated);
@@ -381,6 +400,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const dismissMigrationWarning = useCallback(() => {
+    setMigrationWarning(null);
+  }, []);
+
   return (
     <SettingsContext.Provider value={{
       settings,
@@ -399,6 +422,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       getResearchProviderKey,
       embeddingApiKey,
       updateEmbeddingApiKey,
+      migrationWarning,
+      dismissMigrationWarning,
     }}>
       {children}
     </SettingsContext.Provider>

@@ -4,26 +4,34 @@
  * Provides encryption for sensitive data stored in localStorage using SubtleCrypto.
  * This helps protect API keys from XSS attacks by encrypting them before storage.
  * 
- * Note: This is defense-in-depth. The encryption key is derived from a device-specific
- * fingerprint, making it harder (but not impossible) for XSS attacks to extract keys.
- * For maximum security, consider server-side key proxying.
+ * Uses a stable encryption key stored in localStorage. This key is generated once
+ * on first use and persists across browser updates, screen changes, etc.
+ * 
+ * Note: This is defense-in-depth. For maximum security, consider server-side key proxying.
  */
 
 const ENCRYPTION_ALGORITHM = 'AES-GCM';
 const KEY_LENGTH = 256;
 const IV_LENGTH = 12;
 const SALT_LENGTH = 16;
+const STABLE_KEY_STORAGE = 'manoe_encryption_key';
+const CRYPTO_VERSION = 2;
+const CRYPTO_VERSION_STORAGE = 'manoe_crypto_version';
 
-async function getDeviceFingerprint(): Promise<string> {
-  const components = [
-    navigator.userAgent,
-    navigator.language,
-    screen.width.toString(),
-    screen.height.toString(),
-    new Date().getTimezoneOffset().toString(),
-    navigator.hardwareConcurrency?.toString() || '0',
-  ];
-  return components.join('|');
+async function getStableEncryptionKey(): Promise<string> {
+  let storedKey = localStorage.getItem(STABLE_KEY_STORAGE);
+  
+  if (!storedKey) {
+    const randomBytes = crypto.getRandomValues(new Uint8Array(32));
+    storedKey = Array.from(randomBytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    localStorage.setItem(STABLE_KEY_STORAGE, storedKey);
+    localStorage.setItem(CRYPTO_VERSION_STORAGE, CRYPTO_VERSION.toString());
+    console.log('[crypto] Generated new stable encryption key');
+  }
+  
+  return storedKey;
 }
 
 async function deriveKey(fingerprint: string, salt: Uint8Array): Promise<CryptoKey> {
@@ -70,10 +78,10 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
 
 export async function encryptData(plaintext: string): Promise<string> {
   try {
-    const fingerprint = await getDeviceFingerprint();
+    const stableKey = await getStableEncryptionKey();
     const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-    const key = await deriveKey(fingerprint, salt);
+    const key = await deriveKey(stableKey, salt);
 
     const encoder = new TextEncoder();
     const encrypted = await crypto.subtle.encrypt(
@@ -96,14 +104,14 @@ export async function encryptData(plaintext: string): Promise<string> {
 
 export async function decryptData(ciphertext: string): Promise<string> {
   try {
-    const fingerprint = await getDeviceFingerprint();
+    const stableKey = await getStableEncryptionKey();
     const combined = new Uint8Array(base64ToArrayBuffer(ciphertext));
 
     const salt = combined.slice(0, SALT_LENGTH);
     const iv = combined.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
     const encrypted = combined.slice(SALT_LENGTH + IV_LENGTH);
 
-    const key = await deriveKey(fingerprint, salt);
+    const key = await deriveKey(stableKey, salt);
 
     const decrypted = await crypto.subtle.decrypt(
       { name: ENCRYPTION_ALGORITHM, iv },
@@ -147,4 +155,27 @@ export async function secureRetrieve(key: string): Promise<string | null> {
   }
 
   return stored;
+}
+
+export function clearEncryptedData(): void {
+  const keysToRemove = [
+    'manoe_settings',
+    'manoe_research_keys',
+    'manoe_embedding_key',
+    STABLE_KEY_STORAGE,
+    CRYPTO_VERSION_STORAGE,
+  ];
+  
+  keysToRemove.forEach(key => localStorage.removeItem(key));
+  console.log('[crypto] Cleared all encrypted data. Please re-enter your API keys.');
+}
+
+export function getCryptoVersion(): number {
+  const stored = localStorage.getItem(CRYPTO_VERSION_STORAGE);
+  return stored ? parseInt(stored, 10) : 1;
+}
+
+export function needsMigration(): boolean {
+  const currentVersion = getCryptoVersion();
+  return currentVersion < CRYPTO_VERSION;
 }

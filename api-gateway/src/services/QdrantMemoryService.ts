@@ -52,6 +52,7 @@ export interface CharacterPayload {
   character: Record<string, unknown>;
   name: string;
   createdAt: string;
+  qdrantPointId?: string;
   [key: string]: unknown;
 }
 
@@ -63,6 +64,7 @@ export interface WorldbuildingPayload {
   elementType: string;
   element: Record<string, unknown>;
   createdAt: string;
+  qdrantPointId?: string;
   [key: string]: unknown;
 }
 
@@ -74,6 +76,7 @@ export interface ScenePayload {
   sceneNumber: number;
   scene: Record<string, unknown>;
   createdAt: string;
+  qdrantPointId?: string;
   [key: string]: unknown;
 }
 
@@ -359,19 +362,102 @@ export class QdrantMemoryService {
   }
 
   /**
-   * Get all characters for a project
+   * Get all characters for a project using scroll API
+   * Returns characters with their Qdrant point IDs for accurate matching
    */
   async getProjectCharacters(projectId: string): Promise<CharacterPayload[]> {
     if (!this.client) return [];
 
-    const results = await this.client.scroll(this.collectionCharacters, {
-      filter: {
-        must: [{ key: "projectId", match: { value: projectId } }],
-      },
-      limit: 100,
-    });
+    const allCharacters: CharacterPayload[] = [];
+    let offset: string | number | undefined = undefined;
 
-    return results.points.map((point) => point.payload as CharacterPayload);
+    do {
+      const results = await this.client.scroll(this.collectionCharacters, {
+        filter: {
+          must: [{ key: "projectId", match: { value: projectId } }],
+        },
+        limit: 100,
+        offset,
+        with_payload: true,
+      });
+
+      for (const point of results.points) {
+        const payload = point.payload as CharacterPayload;
+        payload.qdrantPointId = String(point.id);
+        allCharacters.push(payload);
+      }
+
+      const nextOffset = results.next_page_offset;
+      offset = typeof nextOffset === "string" || typeof nextOffset === "number" ? nextOffset : undefined;
+    } while (offset !== undefined);
+
+    return allCharacters;
+  }
+
+  /**
+   * Get all worldbuilding elements for a project using scroll API
+   * Returns worldbuilding with their Qdrant point IDs for accurate matching
+   */
+  async getProjectWorldbuilding(projectId: string): Promise<WorldbuildingPayload[]> {
+    if (!this.client) return [];
+
+    const allWorldbuilding: WorldbuildingPayload[] = [];
+    let offset: string | number | undefined = undefined;
+
+    do {
+      const results = await this.client.scroll(this.collectionWorldbuilding, {
+        filter: {
+          must: [{ key: "projectId", match: { value: projectId } }],
+        },
+        limit: 100,
+        offset,
+        with_payload: true,
+      });
+
+      for (const point of results.points) {
+        const payload = point.payload as WorldbuildingPayload;
+        payload.qdrantPointId = String(point.id);
+        allWorldbuilding.push(payload);
+      }
+
+      const nextOffset = results.next_page_offset;
+      offset = typeof nextOffset === "string" || typeof nextOffset === "number" ? nextOffset : undefined;
+    } while (offset !== undefined);
+
+    return allWorldbuilding;
+  }
+
+  /**
+   * Get all scenes for a project using scroll API
+   * Returns scenes with their Qdrant point IDs for accurate matching
+   */
+  async getProjectScenes(projectId: string): Promise<ScenePayload[]> {
+    if (!this.client) return [];
+
+    const allScenes: ScenePayload[] = [];
+    let offset: string | number | undefined = undefined;
+
+    do {
+      const results = await this.client.scroll(this.collectionScenes, {
+        filter: {
+          must: [{ key: "projectId", match: { value: projectId } }],
+        },
+        limit: 100,
+        offset,
+        with_payload: true,
+      });
+
+      for (const point of results.points) {
+        const payload = point.payload as ScenePayload;
+        payload.qdrantPointId = String(point.id);
+        allScenes.push(payload);
+      }
+
+      const nextOffset = results.next_page_offset;
+      offset = typeof nextOffset === "string" || typeof nextOffset === "number" ? nextOffset : undefined;
+    } while (offset !== undefined);
+
+    return allScenes;
   }
 
   /**
