@@ -155,6 +155,11 @@ export class DataConsistencyChecker {
 
   /**
    * Check characters consistency between Supabase and Qdrant
+   * 
+   * KNOWN LIMITATION: Orphan detection uses name-based matching because
+   * QdrantMemoryService.getProjectCharacters() doesn't return Qdrant point IDs.
+   * This is fragile if character names are duplicated or changed.
+   * TODO: Modify getProjectCharacters() to return point IDs for proper ID-based matching.
    */
   private async checkCharactersConsistency(
     projectId: string
@@ -162,13 +167,8 @@ export class DataConsistencyChecker {
     const supabaseCharacters = await this.supabaseService.getCharacters(projectId);
     const qdrantCharacters = await this.qdrantMemoryService.getProjectCharacters(projectId);
 
-    // Note: supabaseIds and supabaseQdrantIds are available for future use if needed
-    // for more sophisticated consistency checks (e.g., verifying qdrant_id references)
-    const supabaseQdrantIds = new Set(
-      supabaseCharacters.filter((c) => c.qdrant_id).map((c) => c.qdrant_id)
-    );
-
     // Find orphaned vectors (in Qdrant but not referenced in Supabase)
+    // Note: Uses name-based matching as a workaround - see method documentation
     const orphanedVectorIds: string[] = [];
     for (const qdrantChar of qdrantCharacters) {
       const charName = qdrantChar.name;
@@ -278,10 +278,14 @@ export class DataConsistencyChecker {
   /**
    * Check consistency for all projects using pagination to handle large datasets.
    * Processes projects in batches to avoid memory issues and timeouts.
+   * 
+   * Note: Only inconsistent project reports are included in the response to reduce
+   * memory usage. For large datasets, consider using a background job instead.
    */
   async checkGlobalConsistency(): Promise<GlobalConsistencyReport> {
     const timestamp = new Date().toISOString();
-    const projectReports: ConsistencyReport[] = [];
+    // Only keep reports for inconsistent projects to reduce memory usage
+    const inconsistentProjectReports: ConsistencyReport[] = [];
     let consistentProjects = 0;
     let totalOrphanedVectors = 0;
     let totalMissingEmbeddings = 0;
@@ -303,10 +307,12 @@ export class DataConsistencyChecker {
       for (const project of projects) {
         try {
           const report = await this.checkProjectConsistency(project.id);
-          projectReports.push(report);
 
           if (report.summary.isConsistent) {
             consistentProjects++;
+          } else {
+            // Only store reports for inconsistent projects
+            inconsistentProjectReports.push(report);
           }
           totalOrphanedVectors += report.summary.orphanedVectors;
           totalMissingEmbeddings += report.summary.missingEmbeddings;
@@ -327,7 +333,7 @@ export class DataConsistencyChecker {
 
     return {
       timestamp,
-      projectReports,
+      projectReports: inconsistentProjectReports,
       globalSummary: {
         totalProjects: totalProjectsProcessed,
         consistentProjects,
