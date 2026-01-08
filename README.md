@@ -689,7 +689,7 @@ The docker-compose.yml includes the following services:
 | Service | Port | Description |
 |---------|------|-------------|
 | **frontend** | 5173 | React + TypeScript + Vite web interface |
-| **orchestrator** | 8001 | Python FastAPI AI orchestrator with SSE |
+| **api-gateway** | 3000 | TypeScript/Ts.ED API gateway with SSE |
 | **redis** | 6379 | Message broker for real-time SSE events |
 | **qdrant** | 6333 | Vector database for character/worldbuilding memory |
 | **langfuse-web** | 3000 | Langfuse observability UI and API |
@@ -711,26 +711,16 @@ VITE_SUPABASE_URL=your-supabase-url
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 ```
 
-### Model Tiers (December 2025)
-
-| Tier | Model | Release | Best For | Verdict |
-|------|-------|---------|----------|---------|
-| **S+ Logic** | Gemini 3 Pro | Nov 2025 | Complex plot logic | New king of AI. Google finally surpassed everyone. Deep Think integrated into core. Builds dynamic world model of your plot. |
-| **S+ Prose** | Claude Opus 4.5 | Nov 2025 | Living prose, RP | Most human-like AI. Talented writer. Best for RP and literature. Many prefer it for style over technically stronger models. |
-| **S+ Uncensored** | Dolphin Mistral 24B Venice | Apr 2025 | Dark plots, roleplay | Best uncensored model for creativity. No moralizing. Perfect for dark plots and political intrigue. |
-| **A+ Context** | Llama 4 Maverick (Venice) | May 2025 | 256k context | 256k context with Venice jailbreak. 3x fewer refusals. Technically smarter than Dolphin. |
-| **A** | GPT-5.2 | Dec 2025 | Fast logic | Improved routing (decides when to think deep vs fast). Less moralistic than 5.0. |
-
 ### Supported LLM Providers
 
-| Provider | Top Models | Best For |
-|----------|------------|----------|
-| **OpenAI** | GPT-5.2, GPT-5, O3, GPT-4o | Reasoning, general purpose |
-| **Google Gemini** | Gemini 3 Pro, Gemini 3 Flash, Gemini 2.0 Flash | Long context (2M tokens), complex logic |
-| **Anthropic Claude** | Claude Opus 4.5, Claude Sonnet 4, Claude 3.5 Sonnet | Creative writing, prose quality |
-| **Venice AI** | Dolphin Mistral 24B, Llama 4 Maverick, Qwen 3 235B | Uncensored content, dark themes |
-| **DeepSeek** | DeepSeek V3, DeepSeek R1 | Cost-effective reasoning |
-| **OpenRouter** | Access to all above via single API | Cost optimization, model variety |
+MANOE supports multiple LLM providers with BYOK (Bring Your Own Key):
+
+| Provider | Models | Best For |
+|----------|--------|----------|
+| **OpenAI** | GPT-4o, GPT-4o-mini, o1, o3 | Reasoning, general purpose |
+| **Google Gemini** | Gemini 2.0 Flash, Gemini 1.5 Pro | Long context, complex logic |
+| **Anthropic Claude** | Claude 3.5 Sonnet, Claude 3 Haiku | Creative writing, prose quality |
+| **OpenRouter** | Access to multiple providers via single API | Cost optimization, model variety |
 
 ### Moral Compass Framework
 
@@ -797,22 +787,18 @@ The following tables are used for persistence:
 
 ## API Endpoints
 
-### Orchestrator API (Port 8001)
+### API Gateway Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/generate` | POST | Start multi-agent generation |
-| `/runs/{run_id}/events` | GET | SSE stream for real-time events |
-| `/runs/{run_id}/messages` | GET | Get all agent messages for a run |
-| `/runs/{run_id}/state` | GET | Get run state for recovery after interruption |
-| `/runs/{run_id}/cancel` | POST | Cancel a running generation |
-| `/runs/{run_id}/pause` | POST | Pause a running generation |
-| `/runs/{run_id}/resume` | POST | Resume a paused generation |
-| `/research` | POST | Conduct market research (Perplexity or OpenAI Deep Research) |
-| `/research/history` | GET | Get user's research history |
-| `/research/{research_id}` | GET | Get specific research result |
-| `/research/similar` | POST | Search for similar existing research |
+| `/api/health` | GET | Health check |
+| `/orchestrate/generate` | POST | Start multi-agent generation |
+| `/orchestrate/stream/{run_id}` | GET | SSE stream for real-time events |
+| `/orchestrate/runs/{run_id}/events` | GET | SSE stream (legacy route) |
+| `/orchestrate/runs/{run_id}/state` | GET | Get run state for recovery |
+| `/orchestrate/runs/{run_id}/cancel` | POST | Cancel a running generation |
+| `/api/research` | POST | Conduct market research |
+| `/api/research/history` | GET | Get user's research history |
 
 ### Generate Request Body
 
@@ -842,14 +828,18 @@ The following tables are used for persistence:
 - `VITE_SUPABASE_ANON_KEY` - Supabase anonymous key
 - `VITE_ORCHESTRATOR_URL` - Orchestrator API URL
 
-### Orchestrator
+### API Gateway
 - `REDIS_URL` - Redis connection URL
 - `SUPABASE_URL` - Supabase project URL
 - `SUPABASE_KEY` - Supabase service key (required for artifact persistence)
 - `QDRANT_URL` - Qdrant server URL (required for memory context features)
+- `QDRANT_API_KEY` - Qdrant API key (if authentication enabled)
 - `LANGFUSE_PUBLIC_KEY` - Langfuse public key (enables tracing)
 - `LANGFUSE_SECRET_KEY` - Langfuse secret key (enables tracing)
 - `LANGFUSE_HOST` - Langfuse host URL (default: http://langfuse-web:3000 for self-hosted)
+- `OPENAI_API_KEY` - OpenAI API key (optional, for embeddings and generation)
+- `ANTHROPIC_API_KEY` - Anthropic API key (optional)
+- `GEMINI_API_KEY` - Google Gemini API key (optional)
 
 ## Development Setup
 

@@ -30,7 +30,7 @@ MANOE (Multi-Agent Narrative Orchestration Engine) is a distributed system desig
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      AI Orchestrator (Python/AutoGen)                        │
+│                   StorytellerOrchestrator (TypeScript/Ts.ED)                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
 │  │  Architect  │  │   Profiler  │  │  Strategist │  │Writer/Critic│        │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘        │
@@ -69,41 +69,53 @@ The API Gateway serves as the entry point for all client requests. Built with Ts
 - `SupabaseService` - Database operations
 - `AuthService` - JWT authentication
 
-### 2. AI Orchestrator (Python/AutoGen)
+### 2. StorytellerOrchestrator (TypeScript/Ts.ED)
 
-The orchestrator manages the multi-agent conversation using Microsoft AutoGen framework.
+The orchestrator manages the multi-agent generation workflow. All agents are implemented in TypeScript within the api-gateway service.
 
 **Agent Roles:**
 
 #### Architect Agent
-- **Trigger:** `POST /api/project/init`
+- **Phase:** Genesis, Outlining
 - **Input:** Seed idea, moral compass configuration
-- **Output:** Narrative possibility JSON
-- **Prompt Focus:** Genesis phase, ethical framework application
+- **Output:** Narrative possibility JSON, scene outline
+- **Prompt Focus:** Genesis phase, ethical framework application, mythic structure
 
 #### Profiler Agent
-- **Trigger:** Redis event `project.structure_approved`
+- **Phase:** Characters
 - **Input:** Narrative possibility, target audience
 - **Output:** Character profiles with psychological depth
 - **Prompt Focus:** Archetypal mapping, psychological wounds
 
-#### Strategist Agent
-- **Trigger:** Redis event `characters.generated`
+#### Worldbuilder Agent
+- **Phase:** Worldbuilding
 - **Input:** Characters, narrative structure
-- **Output:** Scene-by-scene outline
-- **Prompt Focus:** Mythic structure, conflict layering
+- **Output:** World elements (geography, cultures, rules)
+- **Prompt Focus:** Setting details, atmosphere, world rules
+
+#### Strategist Agent
+- **Phase:** Advanced Planning
+- **Input:** Outline, characters, worldbuilding
+- **Output:** Detailed scene plans
+- **Prompt Focus:** Conflict layering, emotional beats
 
 #### Writer Agent
-- **Trigger:** Redis event `outline.approved`
-- **Input:** Outline, character profiles, worldbuilding
-- **Output:** Draft scenes
+- **Phase:** Drafting, Revision
+- **Input:** Outline, character profiles, worldbuilding, Qdrant context
+- **Output:** Draft scenes with embeddings
 - **Prompt Focus:** Show don't tell, sensory details, subtext
 
 #### Critic Agent
-- **Trigger:** Writer output
+- **Phase:** Critique
 - **Input:** Draft scenes, quality criteria
-- **Output:** Feedback or approval
+- **Output:** Score (1-10) and feedback
 - **Prompt Focus:** Artistic critique, pacing, originality
+
+#### Archivist Agent
+- **Phase:** Runs every 3 scenes
+- **Input:** Raw facts from recent scenes
+- **Output:** Updated Key Constraints
+- **Prompt Focus:** Continuity tracking, world state updates
 
 ### 3. Redis (Message Broker)
 
@@ -222,33 +234,36 @@ CREATE TABLE audit_logs (
 
 ## Data Flow
 
-### Project Initialization Flow
-
-```
-1. Client → POST /api/project/init
-2. API Gateway validates request
-3. API Gateway creates project in Supabase
-4. API Gateway publishes job to Redis queue
-5. Orchestrator consumes job
-6. Architect Agent processes seed idea
-7. Architect Agent generates narrative possibility
-8. Orchestrator stores result in Supabase
-9. Orchestrator publishes completion event
-10. API Gateway notifies client via WebSocket
-```
-
 ### Generation Flow
 
 ```
-1. Client → POST /api/generate/characters
-2. API Gateway validates project state
-3. API Gateway publishes generation job
-4. Orchestrator consumes job
-5. Profiler Agent generates characters
-6. Orchestrator stores characters in Supabase
-7. Orchestrator stores embeddings in Qdrant
-8. Orchestrator publishes completion event
-9. Client receives notification
+1. Client → POST /orchestrate/generate
+2. API Gateway validates request and creates project in Supabase
+3. StorytellerOrchestrator starts generation run
+4. Orchestrator publishes generation_started event to Redis Streams
+5. Client connects to SSE endpoint /orchestrate/stream/{runId}
+6. For each phase:
+   a. Orchestrator executes appropriate agent
+   b. Agent calls LLM via LLMProviderService
+   c. Results stored in Supabase (run_artifacts table)
+   d. Embeddings stored in Qdrant (characters, worldbuilding, scenes)
+   e. Events published to Redis Streams → SSE to client
+7. On completion, generation_complete event sent
+```
+
+### SSE Event Flow
+
+```
+1. Client connects to /orchestrate/stream/{runId}
+2. API Gateway subscribes to Redis Streams for run:{runId}
+3. Events streamed to client in real-time:
+   - generation_started
+   - phase_start
+   - agent_start
+   - agent_complete
+   - new_developments_collected (Archivist)
+   - generation_complete
+4. Heartbeat sent every 15 seconds to keep connection alive
 ```
 
 ### Critique Loop Flow
