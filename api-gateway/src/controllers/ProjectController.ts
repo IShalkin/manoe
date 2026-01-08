@@ -3,6 +3,7 @@ import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { JobQueueService } from "../services/JobQueueService";
 import { SupabaseService } from "../services/SupabaseService";
+import { QdrantMemoryService } from "../services/QdrantMemoryService";
 import { StoryProjectDTO, ProjectResponseDTO, NarrativePossibilityDTO } from "../models/ProjectModels";
 
 @Controller("/project")
@@ -14,6 +15,9 @@ export class ProjectController {
 
   @Inject()
   private supabaseService: SupabaseService;
+
+  @Inject()
+  private qdrantMemoryService: QdrantMemoryService;
 
   @Post("/init")
   @Summary("Initialize a new narrative project")
@@ -150,9 +154,22 @@ export class ProjectController {
 
   @Delete("/:id")
   @Summary("Delete a project")
-  @Description("Delete a project and all associated data")
+  @Description("Delete a project and all associated data including vector embeddings")
   @Returns(200)
   async deleteProject(@PathParams("id") id: string): Promise<{ success: boolean }> {
+    // First, delete all Qdrant vectors for this project to prevent orphaned data
+    // This must happen BEFORE Supabase deletion since we need the project to exist
+    // for proper cascade deletion tracking
+    try {
+      await this.qdrantMemoryService.deleteProjectData(id);
+      console.log(`[ProjectController] Deleted Qdrant vectors for project ${id}`);
+    } catch (error) {
+      // Log but don't fail - Qdrant deletion is best-effort
+      // The project should still be deleted from Supabase
+      console.error(`[ProjectController] Failed to delete Qdrant vectors for project ${id}:`, error);
+    }
+
+    // Then delete from Supabase (cascades to related tables via foreign keys)
     await this.supabaseService.deleteProject(id);
     return { success: true };
   }
