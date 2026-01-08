@@ -1,9 +1,11 @@
-import { Controller, Get } from "@tsed/common";
+import { Controller, Get, PathParams, Post } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { JobQueueService } from "../services/JobQueueService";
 import { SupabaseService } from "../services/SupabaseService";
+import { QdrantMemoryService } from "../services/QdrantMemoryService";
 import { getEnvHealthStatus } from "../utils/envValidation";
+import { createDataConsistencyChecker, ConsistencyReport, GlobalConsistencyReport } from "../utils/dataConsistencyChecker";
 
 interface HealthStatus {
   status: "healthy" | "degraded" | "unhealthy";
@@ -37,6 +39,9 @@ export class HealthController {
 
   @Inject()
   private supabaseService: SupabaseService;
+
+  @Inject()
+  private qdrantMemoryService: QdrantMemoryService;
 
   @Get("/")
   @Summary("Basic health check")
@@ -156,5 +161,64 @@ export class HealthController {
     return {
       status: "unknown",
     };
+  }
+
+  @Get("/consistency/:projectId")
+  @Summary("Check data consistency for a project")
+  @Description("Verifies consistency between Supabase and Qdrant data for a specific project")
+  @Returns(200)
+  async checkProjectConsistency(
+    @PathParams("projectId") projectId: string
+  ): Promise<ConsistencyReport> {
+    const checker = createDataConsistencyChecker(
+      this.supabaseService,
+      this.qdrantMemoryService
+    );
+    return checker.checkProjectConsistency(projectId);
+  }
+
+  @Get("/consistency")
+  @Summary("Check global data consistency")
+  @Description("Verifies consistency between Supabase and Qdrant data for all projects")
+  @Returns(200)
+  async checkGlobalConsistency(): Promise<GlobalConsistencyReport> {
+    const checker = createDataConsistencyChecker(
+      this.supabaseService,
+      this.qdrantMemoryService
+    );
+    return checker.checkGlobalConsistency();
+  }
+
+  @Post("/consistency/:projectId/repair")
+  @Summary("Repair missing embeddings for a project")
+  @Description("Re-indexes entities that are missing Qdrant embeddings. Requires project ownership.")
+  @Returns(200)
+  @Returns(404)
+  async repairProjectConsistency(
+    @PathParams("projectId") projectId: string
+  ): Promise<{
+    repairedCharacters: number;
+    repairedWorldbuilding: number;
+    repairedScenes: number;
+    errors: string[];
+  }> {
+    // SECURITY: Authorization is handled by Supabase RLS (Row Level Security).
+    // The getProject() call uses the authenticated user's JWT token, and RLS policies
+    // ensure users can only access their own projects. If the user doesn't own the
+    // project, getProject() returns null (RLS filters it out).
+    //
+    // TODO: For defense-in-depth, consider adding explicit user ownership verification
+    // at the application layer. This would require passing user context through the
+    // request (e.g., via middleware that extracts user_id from the JWT).
+    const project = await this.supabaseService.getProject(projectId);
+    if (!project) {
+      throw new Error("Project not found or access denied");
+    }
+
+    const checker = createDataConsistencyChecker(
+      this.supabaseService,
+      this.qdrantMemoryService
+    );
+    return checker.repairMissingEmbeddings(projectId);
   }
 }

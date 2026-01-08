@@ -3,6 +3,7 @@ import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { JobQueueService } from "../services/JobQueueService";
 import { SupabaseService } from "../services/SupabaseService";
+import { QdrantMemoryService } from "../services/QdrantMemoryService";
 import { StoryProjectDTO, ProjectResponseDTO, NarrativePossibilityDTO } from "../models/ProjectModels";
 
 @Controller("/project")
@@ -14,6 +15,9 @@ export class ProjectController {
 
   @Inject()
   private supabaseService: SupabaseService;
+
+  @Inject()
+  private qdrantMemoryService: QdrantMemoryService;
 
   @Post("/init")
   @Summary("Initialize a new narrative project")
@@ -150,10 +154,29 @@ export class ProjectController {
 
   @Delete("/:id")
   @Summary("Delete a project")
-  @Description("Delete a project and all associated data")
+  @Description("Delete a project and all associated data including vector embeddings. Fails if vector deletion fails to maintain data consistency.")
   @Returns(200)
+  @Returns(500)
   async deleteProject(@PathParams("id") id: string): Promise<{ success: boolean }> {
+    // First, delete all Qdrant vectors for this project to prevent orphaned data
+    // This must happen BEFORE Supabase deletion since we need the project to exist
+    // for proper cascade deletion tracking
+    // 
+    // FAIL-FAST APPROACH: If Qdrant deletion fails, we abort the entire operation
+    // to prevent orphaned data. This follows the "fail fast" principle - it's better
+    // to fail and let the user retry than to succeed with partial deletion.
+    try {
+      await this.qdrantMemoryService.deleteProjectData(id);
+      console.log(`[ProjectController] Deleted Qdrant vectors for project ${id}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[ProjectController] Failed to delete Qdrant vectors for project ${id}:`, error);
+      throw new Error(`Cannot delete project: vector cleanup failed. Please try again. ${errorMessage}`);
+    }
+
+    // Delete from Supabase (cascades to related tables via foreign keys)
     await this.supabaseService.deleteProject(id);
+
     return { success: true };
   }
 
