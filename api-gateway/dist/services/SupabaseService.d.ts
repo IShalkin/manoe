@@ -9,7 +9,7 @@ interface Project {
     created_at: string;
     updated_at: string;
 }
-interface Character {
+export interface Character {
     id: string;
     project_id: string;
     name: string;
@@ -21,26 +21,30 @@ interface Character {
     qdrant_id?: string;
     created_at: string;
 }
-interface Outline {
+export interface Outline {
     id: string;
     project_id: string;
     structure_type: string;
     scenes: unknown[];
     created_at: string;
 }
-interface Draft {
+export interface Draft {
     id: string;
     project_id: string;
     scene_number: number;
-    content: string;
+    narrative_content: string;
+    title?: string;
+    word_count?: number;
     sensory_details?: unknown;
     subtext_layer?: string;
     emotional_shift?: string;
     status: string;
     revision_count: number;
+    semantic_check_error?: string;
+    contradiction_score?: number;
     created_at: string;
 }
-interface AuditLog {
+export interface AuditLog {
     id: string;
     project_id: string;
     agent_name: string;
@@ -49,6 +53,29 @@ interface AuditLog {
     output_summary?: string;
     token_usage?: unknown;
     duration_ms?: number;
+    created_at: string;
+}
+export interface Worldbuilding {
+    id: string;
+    project_id: string;
+    element_type: string;
+    name: string;
+    description: string;
+    attributes?: unknown;
+    qdrant_id?: string;
+    created_at: string;
+}
+export interface Critique {
+    id: string;
+    project_id: string;
+    scene_number: number;
+    overall_score: number;
+    approved: boolean;
+    feedback_items?: unknown[];
+    strengths?: unknown;
+    weaknesses?: unknown;
+    revision_required?: boolean;
+    revision_focus?: unknown;
     created_at: string;
 }
 export interface ResearchHistoryItem {
@@ -69,6 +96,8 @@ export interface ResearchHistoryItem {
 }
 export declare class SupabaseService {
     private client;
+    private langfuse;
+    private metricsService;
     constructor();
     private connect;
     private getClient;
@@ -84,13 +113,46 @@ export declare class SupabaseService {
     getNarrativePossibility(projectId: string): Promise<unknown | null>;
     saveNarrativePossibility(projectId: string, narrative: unknown): Promise<void>;
     getCharacters(projectId: string): Promise<Character[]>;
-    saveCharacter(projectId: string, character: Partial<Character>): Promise<Character>;
-    getWorldbuilding(projectId: string, elementType?: string): Promise<unknown[]>;
+    saveCharacter(projectId: string, character: Partial<Character>, qdrantId?: string, runId?: string): Promise<Character>;
+    getWorldbuilding(projectId: string, elementType?: string): Promise<Worldbuilding[]>;
+    saveWorldbuilding(projectId: string, elementType: string, element: Record<string, unknown>, qdrantId?: string, runId?: string): Promise<unknown>;
     getOutline(projectId: string): Promise<Outline | null>;
     saveOutline(projectId: string, outline: Partial<Outline>): Promise<void>;
     getDrafts(projectId: string): Promise<Draft[]>;
-    saveDraft(projectId: string, draft: Partial<Draft>): Promise<Draft>;
-    getCritiques(projectId: string): Promise<unknown[]>;
+    getDraftBySceneNumber(projectId: string, sceneNumber: number): Promise<Draft | null>;
+    saveDraft(projectId: string, draft: Partial<Draft> & Record<string, unknown>, qdrantId?: string, runId?: string): Promise<Draft>;
+    getCritiques(projectId: string): Promise<Critique[]>;
+    /**
+     * Save a critique for a scene
+     * Phase 5.1: Integrate write-path for critiques table
+     */
+    saveCritique(params: {
+        projectId: string;
+        runId: string;
+        sceneNumber: number;
+        critique: Record<string, unknown>;
+        revisionNumber: number;
+    }): Promise<void>;
+    /**
+     * Upsert characters for a project
+     * Phase 5.1: Integrate write-path for characters table
+     */
+    upsertCharacters(projectId: string, runId: string, characters: Record<string, unknown>[]): Promise<void>;
+    /**
+     * Upsert a draft for a scene
+     * Phase 5.1: Integrate write-path for drafts table
+     */
+    upsertDraft(params: {
+        projectId: string;
+        runId: string;
+        sceneNumber: number;
+        content: string;
+        wordCount: number;
+        status: string;
+        revisionCount: number;
+        semanticCheckError?: string;
+        contradictionScore?: number;
+    }): Promise<void>;
     getAuditLogs(projectId: string, agentName?: string, limit?: number): Promise<AuditLog[]>;
     saveAuditLog(log: Partial<AuditLog>): Promise<void>;
     /**
@@ -136,6 +198,12 @@ export declare class SupabaseService {
      * Delete a run state snapshot after successful restoration or completion
      */
     deleteRunStateSnapshot(runId: string): Promise<void>;
+    reindexProject(projectId: string): Promise<{
+        characters: number;
+        worldbuilding: number;
+        drafts: number;
+        errors: string[];
+    }>;
 }
 export {};
 //# sourceMappingURL=SupabaseService.d.ts.map

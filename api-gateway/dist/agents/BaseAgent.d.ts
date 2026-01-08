@@ -78,8 +78,13 @@ export declare abstract class BaseAgent {
     /**
      * Emit agent message event with actual generated content
      * This sends the LLM-generated content to the frontend for display in agent cards
+     *
+     * @param runId - Run ID for the generation
+     * @param content - Content to emit (string or object with sceneNumber)
+     * @param phase - Current generation phase
+     * @param sceneNum - Optional scene number for scene-based deduplication on frontend
      */
-    protected emitMessage(runId: string, content: string | Record<string, unknown>, phase: GenerationPhase): Promise<void>;
+    protected emitMessage(runId: string, content: string | Record<string, unknown>, phase: GenerationPhase, sceneNum?: number): Promise<void>;
     /**
      * Abstract method to be implemented by each agent
      */

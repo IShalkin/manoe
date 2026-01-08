@@ -16,6 +16,12 @@ export declare class ProfilerAgent extends BaseAgent {
     private getSystemPrompt;
     private getFallbackPrompt;
     private compileFallbackPrompt;
+    /**
+     * Validate that narrative context from Architect is present
+     * Required fields: genre, themes, arc (narrativeArc)
+     * Logs warnings for missing optional fields but throws for critical ones
+     */
+    private validateNarrativeContext;
     private buildUserPrompt;
 }
 //# sourceMappingURL=ProfilerAgent.d.ts.map

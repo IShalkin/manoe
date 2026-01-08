@@ -83,8 +83,13 @@ export class QdrantMemoryService {
   private openaiClient: OpenAI | null = null;
   private geminiClient: GoogleGenerativeAI | null = null;
   private embeddingProvider: EmbeddingProvider = EmbeddingProvider.LOCAL;
-  private embeddingDimension: number = 384;
-  private embeddingModel: string = "all-MiniLM-L6-v2";
+  private embeddingDimension: number = 3072; // Default to 3072 for collection naming consistency
+  private embeddingModel: string = "none";
+  private isConnected: boolean = false;
+
+  // Track current API keys to detect changes (fixes singleton caching issue)
+  private currentGeminiKey?: string;
+  private currentOpenaiKey?: string;
 
   @Inject()
   private metricsService!: MetricsService;
@@ -102,6 +107,8 @@ export class QdrantMemoryService {
   /**
    * Connect to Qdrant and initialize embedding provider
    * 
+   * Supports re-initialization when API keys change (fixes singleton caching issue).
+   * 
    * @param openaiApiKey - OpenAI API key for embeddings (highest priority)
    * @param geminiApiKey - Gemini API key for embeddings (second priority)
    * @param preferLocal - If true, use local embeddings even if API keys available
@@ -111,6 +118,25 @@ export class QdrantMemoryService {
     geminiApiKey?: string,
     preferLocal: boolean = false
   ): Promise<void> {
+    // Detect if API keys have changed - need to reinitialize if so
+    // Compare without truthy check to detect both additions AND removals of keys
+    const geminiKeyChanged = geminiApiKey !== this.currentGeminiKey;
+    const openaiKeyChanged = openaiApiKey !== this.currentOpenaiKey;
+    const keyChanged = geminiKeyChanged || openaiKeyChanged;
+
+    // Skip if already connected with same keys
+    if (this.isConnected && !keyChanged) {
+      return;
+    }
+
+    if (keyChanged) {
+      console.log("Qdrant Memory: API key changed, reinitializing embedding provider");
+    }
+
+    // Update tracked keys
+    this.currentGeminiKey = geminiApiKey;
+    this.currentOpenaiKey = openaiApiKey;
+
     const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
     const qdrantApiKey = process.env.QDRANT_API_KEY;
 
@@ -129,14 +155,14 @@ export class QdrantMemoryService {
     } else if (!preferLocal && geminiApiKey) {
       this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
       this.embeddingProvider = EmbeddingProvider.GEMINI;
-      this.embeddingDimension = 768;
-      this.embeddingModel = "embedding-001";
-      console.log("Qdrant Memory: Using Gemini embeddings (768 dimensions)");
+      this.embeddingDimension = 3072; // gemini-embedding-001 outputs 3072 dimensions
+      this.embeddingModel = "gemini-embedding-001";
+      console.log("Qdrant Memory: Using Gemini gemini-embedding-001 (3072 dimensions)");
     } else {
       this.embeddingProvider = EmbeddingProvider.LOCAL;
-      this.embeddingDimension = 384;
-      this.embeddingModel = "all-MiniLM-L6-v2";
-      console.log("Qdrant Memory: Using local embeddings (384 dimensions)");
+      this.embeddingDimension = 3072; // Use 3072 for collection naming consistency with Gemini
+      this.embeddingModel = "none";
+      console.log("Qdrant Memory: Using local embeddings (3072 dimensions for consistency)");
     }
 
     // Set versioned collection names based on embedding dimension
@@ -150,6 +176,7 @@ export class QdrantMemoryService {
     // Ensure collections exist
     await this.ensureCollections();
 
+    this.isConnected = true;
     console.log(`Qdrant Memory connected to ${qdrantUrl}`);
   }
 
@@ -209,9 +236,22 @@ export class QdrantMemoryService {
       });
       return response.data[0].embedding;
     } else if (this.embeddingProvider === EmbeddingProvider.GEMINI && this.geminiClient) {
-      const model = this.geminiClient.getGenerativeModel({ model: this.embeddingModel });
-      const result = await model.embedContent(text);
-      return result.embedding.values;
+      try {
+        // Use full model path format "models/gemini-embedding-001" for Gemini API
+        const modelPath = this.embeddingModel.startsWith("models/")
+          ? this.embeddingModel
+          : `models/${this.embeddingModel}`;
+        const model = this.geminiClient.getGenerativeModel({ model: modelPath });
+        // Use simple text format for embedContent (embedding models support string input)
+        const result = await model.embedContent(text);
+        return result.embedding.values;
+      } catch (error) {
+        const errorDetails = error instanceof Error
+          ? { message: error.message, name: error.name, stack: error.stack?.split('\n')[0] }
+          : error;
+        console.error(`Qdrant Memory: Gemini embedContent failed - model: ${this.embeddingModel}, textLength: ${text.length}, error:`, errorDetails);
+        throw error;
+      }
     } else {
       // Local embeddings - return random vector for now
       // In production, use a local embedding model like fastembed
@@ -618,5 +658,8 @@ export class QdrantMemoryService {
     this.client = null;
     this.openaiClient = null;
     this.geminiClient = null;
+    this.isConnected = false;
+    this.currentGeminiKey = undefined;
+    this.currentOpenaiKey = undefined;
   }
 }

@@ -19,6 +19,10 @@ class ProfilerAgent extends BaseAgent_1.BaseAgent {
     async execute(context, options) {
         const { runId, state } = context;
         const phase = state.phase;
+        // Validate narrative context is present for CHARACTERS phase
+        if (phase === LLMModels_1.GenerationPhase.CHARACTERS) {
+            this.validateNarrativeContext(context, runId);
+        }
         const systemPrompt = await this.getSystemPrompt(context, options);
         const userPrompt = this.buildUserPrompt(context, options, phase);
         // Emit thought for Cinematic UI
@@ -85,6 +89,42 @@ Narrative context: ${variables.narrative || "No narrative yet"}`;
             prompt = prompt.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
         }
         return prompt;
+    }
+    /**
+     * Validate that narrative context from Architect is present
+     * Required fields: genre, themes, arc (narrativeArc)
+     * Logs warnings for missing optional fields but throws for critical ones
+     */
+    validateNarrativeContext(context, runId) {
+        const narrative = context.state.narrative;
+        if (!narrative) {
+            console.error(`[profiler] CRITICAL: No narrative context from Architect, runId: ${runId}`);
+            throw new Error("ProfilerAgent requires narrative context from Architect. Genesis phase must complete first.");
+        }
+        // Check for critical fields
+        const criticalFields = ["genre", "arc"];
+        const missingCritical = [];
+        for (const field of criticalFields) {
+            if (!narrative[field]) {
+                missingCritical.push(field);
+            }
+        }
+        if (missingCritical.length > 0) {
+            console.error(`[profiler] Missing critical narrative fields: ${missingCritical.join(", ")}, runId: ${runId}`);
+            throw new Error(`ProfilerAgent requires narrative context with: ${missingCritical.join(", ")}. Architect output may be incomplete.`);
+        }
+        // Check for optional but recommended fields
+        const optionalFields = ["premise", "hook", "themes", "tone", "audience"];
+        const missingOptional = [];
+        for (const field of optionalFields) {
+            if (!narrative[field]) {
+                missingOptional.push(field);
+            }
+        }
+        if (missingOptional.length > 0) {
+            console.warn(`[profiler] Missing optional narrative fields: ${missingOptional.join(", ")}, runId: ${runId}`);
+        }
+        console.log(`[profiler] Narrative context validated: genre="${narrative.genre}", arc="${narrative.arc}", runId: ${runId}`);
     }
     buildUserPrompt(context, options, phase) {
         if (phase === LLMModels_1.GenerationPhase.CHARACTERS) {

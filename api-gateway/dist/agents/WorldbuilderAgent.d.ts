@@ -17,5 +17,10 @@ export declare class WorldbuilderAgent extends BaseAgent {
     private getFallbackPrompt;
     private compileFallbackPrompt;
     private buildUserPrompt;
+    /**
+     * Extract string value from a field that might be string or object
+     * Handles cases where LLM returns {name: "...", description: "..."} instead of plain string
+     */
+    private extractStringValue;
 }
 //# sourceMappingURL=WorldbuilderAgent.d.ts.map

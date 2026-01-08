@@ -59,6 +59,12 @@ const method_override_1 = __importDefault(require("method-override"));
 const dotenv = __importStar(require("dotenv"));
 // Load environment variables
 dotenv.config();
+// Import utility for env validation
+const envValidation_1 = require("./utils/envValidation");
+// Validate environment variables at startup
+// Note: For secure logging of sensitive data (JWT tokens, API keys),
+// use secureLogger from ./utils/secureLogging instead of console.*
+(0, envValidation_1.validateAndLogEnvironment)();
 // Import controllers
 const ProjectController_1 = require("./controllers/ProjectController");
 const GenerationController_1 = require("./controllers/GenerationController");
@@ -70,12 +76,16 @@ const StateController_1 = require("./controllers/StateController");
 const TracesController_1 = require("./controllers/TracesController");
 const ResearchController_1 = require("./controllers/ResearchController");
 const DynamicModelsController_1 = require("./controllers/DynamicModelsController");
+const MetricsController_1 = require("./controllers/MetricsController");
+const FeedbackController_1 = require("./controllers/FeedbackController");
 // Import services for state recovery
 const StorytellerOrchestrator_1 = require("./services/StorytellerOrchestrator");
+const RedisStreamsService_1 = require("./services/RedisStreamsService");
 const rootDir = __dirname;
 let Server = class Server {
     app;
     orchestrator;
+    redisStreams;
     settings;
     $beforeRoutesInit() {
         // CORS is now handled entirely by the cors() middleware in the middlewares array
@@ -99,6 +109,9 @@ let Server = class Server {
             console.error("Server: Failed to restore interrupted runs:", error);
             // Don't fail startup if recovery fails - just log the error
         }
+        // Start periodic Redis lag metrics collection (every 30 seconds)
+        console.log("Server: Starting Redis lag metrics collection...");
+        this.redisStreams.startLagMetricsCollection(30000);
         // Register graceful shutdown handler
         this.registerShutdownHandler();
     }
@@ -135,6 +148,10 @@ __decorate([
     __metadata("design:type", StorytellerOrchestrator_1.StorytellerOrchestrator)
 ], Server.prototype, "orchestrator", void 0);
 __decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", RedisStreamsService_1.RedisStreamsService)
+], Server.prototype, "redisStreams", void 0);
+__decorate([
     (0, di_1.Configuration)(),
     __metadata("design:type", Object)
 ], Server.prototype, "settings", void 0);
@@ -151,6 +168,8 @@ exports.Server = Server = __decorate([
                 MemoryController_1.MemoryController,
                 ModelsController_1.ModelsController,
                 HealthController_1.HealthController,
+                MetricsController_1.MetricsController,
+                FeedbackController_1.FeedbackController,
             ],
             "/orchestrate": [
                 OrchestrationController_1.OrchestrationController,

@@ -98,8 +98,8 @@ export class WorldBibleEmbeddingService {
   private openaiClient: OpenAI | null = null;
   private geminiClient: GoogleGenerativeAI | null = null;
   private embeddingProvider: EmbeddingProvider = EmbeddingProvider.GEMINI;
-  private embeddingDimension: number = 768;
-  private embeddingModel: string = "embedding-001"; // Gemini's newest unified embedding model
+  private embeddingDimension: number = 3072; // gemini-embedding-001 outputs 3072 dimensions
+  private embeddingModel: string = "gemini-embedding-001"; // Gemini's newest unified embedding model
   private isConnected: boolean = false;
 
   @Inject()
@@ -115,33 +115,52 @@ export class WorldBibleEmbeddingService {
    */
   private readonly DEFAULT_SIMILARITY_THRESHOLD = 0.7;
 
+  // Track the current API key to detect changes (for re-initialization)
+  private currentGeminiKey?: string;
+  private currentOpenaiKey?: string;
+
   /**
    * Connect to Qdrant and initialize embedding provider
    * 
-   * Note: This service is a singleton. If previously initialized without an API key
-   * (LOCAL provider), it will re-initialize when an API key is provided to enable
-   * semantic consistency checking. This allows the first generation without a key
-   * to not block subsequent generations that have a key configured.
+   * Note: This service is a singleton. It will re-initialize when:
+   * 1. Previously in LOCAL mode and now has an API key
+   * 2. The API key has changed from the previous connection
+   * This allows switching API keys without restarting the server.
    */
   async connect(
     openaiApiKey?: string,
     geminiApiKey?: string,
     preferLocal: boolean = false
   ): Promise<void> {
-    // Allow re-initialization if we were previously disabled (no API key / no clients)
-    // but now have an API key available - this enables semantic consistency
+    // Check if API key changed - always re-initialize with new key
+    // Compare without truthy check to detect both additions AND removals of keys
+    const geminiKeyChanged = geminiApiKey !== this.currentGeminiKey;
+    const openaiKeyChanged = openaiApiKey !== this.currentOpenaiKey;
+    const keyChanged = geminiKeyChanged || openaiKeyChanged;
+    
+    // Allow re-initialization if:
+    // 1. We were previously disabled (no API key / LOCAL mode) and now have a key
+    // 2. The API key has changed
     const hasNewApiKey = !preferLocal && (geminiApiKey || openaiApiKey);
     const hadNoClients = !this.geminiClient && !this.openaiClient;
     const wasDisabled = this.embeddingProvider === EmbeddingProvider.LOCAL || hadNoClients;
-    const shouldReinitialize = this.isConnected && wasDisabled && hasNewApiKey;
+    const shouldReinitialize = this.isConnected && (wasDisabled || keyChanged) && hasNewApiKey;
     
     if (this.isConnected && !shouldReinitialize) {
       return;
     }
     
     if (shouldReinitialize) {
-      console.log("WorldBibleEmbedding: Re-initializing with API key (was in LOCAL mode)");
+      if (keyChanged) {
+        console.log("WorldBibleEmbedding: Re-initializing with NEW API key");
+      } else {
+        console.log("WorldBibleEmbedding: Re-initializing with API key (was in LOCAL mode)");
+      }
     }
+    
+    // Store current keys for change detection
+    this.currentGeminiKey = geminiApiKey;
+    this.currentOpenaiKey = openaiApiKey;
 
     const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
     const qdrantApiKey = process.env.QDRANT_API_KEY;
@@ -154,9 +173,9 @@ export class WorldBibleEmbeddingService {
     if (!preferLocal && geminiApiKey) {
       this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
       this.embeddingProvider = EmbeddingProvider.GEMINI;
-      this.embeddingDimension = 768; // embedding-001 supports up to 3072, using 768 for backward compatibility
-      this.embeddingModel = "embedding-001";
-      console.log("WorldBibleEmbedding: Using Gemini embedding-001 (768 dimensions)");
+      this.embeddingDimension = 3072; // gemini-embedding-001 outputs 3072 dimensions
+      this.embeddingModel = "gemini-embedding-001";
+      console.log("WorldBibleEmbedding: Using Gemini gemini-embedding-001 (3072 dimensions)");
     } else if (!preferLocal && openaiApiKey) {
       this.openaiClient = new OpenAI({ apiKey: openaiApiKey });
       this.embeddingProvider = EmbeddingProvider.OPENAI;
@@ -165,7 +184,7 @@ export class WorldBibleEmbeddingService {
       console.log("WorldBibleEmbedding: Using OpenAI embeddings (1536 dimensions)");
     } else {
       this.embeddingProvider = EmbeddingProvider.LOCAL;
-      this.embeddingDimension = 768;
+      this.embeddingDimension = 3072; // Keep consistent dimension for collection naming
       this.embeddingModel = "none";
       console.warn(
         "WorldBibleEmbedding: No embedding API key configured. " +
@@ -213,11 +232,14 @@ export class WorldBibleEmbeddingService {
       return response.data[0].embedding;
     } else if (this.embeddingProvider === EmbeddingProvider.GEMINI && this.geminiClient) {
       try {
-        const model = this.geminiClient.getGenerativeModel({ model: this.embeddingModel });
-        // Use the proper content format for embedContent with required role
-        const result = await model.embedContent({
-          content: { role: "user", parts: [{ text }] },
-        });
+        // For embedding models, use the full model path format "models/embedding-001"
+        // The getGenerativeModel method works for both generative and embedding models
+        const modelPath = this.embeddingModel.startsWith("models/") 
+          ? this.embeddingModel 
+          : `models/${this.embeddingModel}`;
+        const model = this.geminiClient.getGenerativeModel({ model: modelPath });
+        // Use simple text content for embedContent
+        const result = await model.embedContent(text);
         return result.embedding.values;
       } catch (error) {
         // Log detailed error for debugging

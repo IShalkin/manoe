@@ -36,5 +36,10 @@ export declare class WriterAgent extends BaseAgent {
      * Returns true if the output contains interactive assistant patterns
      */
     detectPersonaBreak(content: string): boolean;
+    /**
+     * Build canonical names block from character profiles
+     * Used to prevent "name amnesia" where LLM introduces new character names during revision
+     */
+    private buildCanonicalNamesBlock;
 }
 //# sourceMappingURL=WriterAgent.d.ts.map

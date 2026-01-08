@@ -38,7 +38,8 @@ class WriterAgent extends BaseAgent_1.BaseAgent {
             // Apply guardrails
             await this.applyGuardrails(response, state.keyConstraints, runId);
             // Emit the actual generated content for the frontend to display
-            await this.emitMessage(runId, { content: response, sceneNumber: state.currentScene }, phase);
+            // Pass sceneNum as fourth parameter for frontend deduplication
+            await this.emitMessage(runId, { content: response, sceneNumber: state.currentScene }, phase, state.currentScene);
             // Emit completion thought
             if (phase === LLMModels_1.GenerationPhase.DRAFTING) {
                 await this.emitThought(runId, "Draft complete. Awaiting Critic's feedback.", "neutral", AgentModels_1.AgentType.CRITIC);
@@ -119,43 +120,126 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
             const scenes = outline?.scenes || [];
             const sceneOutline = state.currentSceneOutline ?? scenes[sceneNum - 1] ?? {};
             const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
+            // Check if this is a Proactive Beats Method request (generating scene in parts)
+            if (sceneOutline.beatsMode === true) {
+                const partIndex = Number(sceneOutline.partIndex ?? 1);
+                const partsTotal = Number(sceneOutline.partsTotal ?? 3);
+                const partTargetWords = Number(sceneOutline.partTargetWords ?? 500);
+                // FAIL-FAST: Validate beats mode parameters to catch NaN issues early
+                if (isNaN(partIndex) || isNaN(partsTotal) || isNaN(partTargetWords)) {
+                    throw new Error(`Invalid beats mode parameters: partIndex=${partIndex}, partsTotal=${partsTotal}, partTargetWords=${partTargetWords}`);
+                }
+                const existingContent = String(sceneOutline.existingContent ?? "");
+                const isFirstPart = sceneOutline.isFirstPart === true;
+                const isFinalPart = sceneOutline.isFinalPart === true;
+                const retrievedContext = String(sceneOutline.retrievedContext ?? "");
+                if (isFirstPart) {
+                    // First part: Start the scene fresh
+                    return `Write Part 1 of ${partsTotal} for Scene ${sceneNum}: "${sceneTitle}"
+
+Scene outline:
+${JSON.stringify(sceneOutline, null, 2)}
+
+BEATS METHOD INSTRUCTION:
+You are writing Part 1 of ${partsTotal} parts for this scene.
+Write approximately ${partTargetWords} words for this first part.
+
+Requirements:
+- Begin the scene with a strong opening
+- Establish the setting and initial situation
+- DO NOT try to complete the entire scene - you are only writing the first part
+- End at a natural transition point (not a cliffhanger, just a good pause point)
+- Leave room for the story to continue in subsequent parts
+
+KEY CONSTRAINTS (MUST NOT VIOLATE):
+${constraintsBlock}
+${retrievedContext}
+${autonomousInstruction}`;
+                }
+                else {
+                    // Continuation parts (2, 3, 4...)
+                    // Use 50 words of context (not 20) to maintain narrative voice and tone consistency
+                    const lastWords = existingContent.trim().split(/\s+/).slice(-50).join(" ");
+                    const lastChars = lastWords.length > 300 ? lastWords.slice(-300) : lastWords;
+                    const partInstruction = isFinalPart
+                        ? `This is the FINAL part. You MUST conclude the scene and end with the specified hook.`
+                        : `This is Part ${partIndex} of ${partsTotal}. End at a natural transition point for the next part.`;
+                    return `Continue Scene ${sceneNum}: "${sceneTitle}" - Part ${partIndex} of ${partsTotal}
+
+CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
+
+The scene so far ends with:
+"...${lastChars}"
+
+Write approximately ${partTargetWords} more words to continue from that exact point.
+
+${partInstruction}
+
+Requirements:
+- Start your response with NEW content only - continue naturally from where the text left off
+- DO NOT include any text that already exists in the scene
+- DO NOT repeat the ending shown above
+- Continue seamlessly maintaining the same voice, tone, and style
+${isFinalPart ? "- End with the specified hook from the scene outline" : "- Progress the scene toward its conclusion"}
+
+KEY CONSTRAINTS (MUST NOT VIOLATE):
+${constraintsBlock}
+${retrievedContext}
+${autonomousInstruction}`;
+                }
+            }
             // Check if this is an expansion request (scene too short, need to continue)
             if (sceneOutline.expansionMode === true) {
                 const existingContent = String(sceneOutline.existingContent ?? "");
                 const additionalWordsNeeded = Number(sceneOutline.additionalWordsNeeded ?? 500);
+                // Get the last ~100 characters, breaking at word boundary to avoid mid-word/mid-character cuts
+                // This prevents UTF-8 issues with multi-byte characters (emojis, special chars)
+                const lastWords = existingContent.trim().split(/\s+/).slice(-15).join(" ");
+                const lastChars = lastWords.length > 100 ? lastWords.slice(-100) : lastWords;
                 return `Continue Scene ${sceneNum}: "${sceneTitle}"
 
-The scene so far (DO NOT REWRITE - continue from where it ends):
----
-${existingContent}
----
+CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
 
-Continue the scene from where it left off. Write approximately ${additionalWordsNeeded} more words.
+The scene ends with:
+"...${lastChars}"
+
+Write approximately ${additionalWordsNeeded} more words to continue from that exact point.
 
 Requirements:
-- Continue seamlessly from the last paragraph
-- Maintain the same voice, tone, and style
+- Start your response with NEW content only - continue naturally from where the text left off
+- If the ending above is mid-sentence, complete that sentence first, then continue
+- DO NOT include any text that already exists in the scene
+- DO NOT repeat the ending shown above
+- Continue seamlessly maintaining the same voice, tone, and style
 - Progress the scene toward its conclusion
-- DO NOT repeat or summarize what was already written
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
 ${autonomousInstruction}`;
             }
+            // Include retrieved context from Qdrant for hallucination prevention
+            const retrievedContext = String(sceneOutline.retrievedContext ?? "");
             return `Write Scene ${sceneNum}: "${sceneTitle}"
 
 Scene outline:
 ${JSON.stringify(sceneOutline, null, 2)}
 
+SCOPE CONTROL (CRITICAL):
+- Cover ONLY what's in this scene outline - do not advance the plot beyond what's specified
+- FORBIDDEN: Depicting events, revelations, or conflicts from later scenes
+- FORBIDDEN: Resolving tensions that should carry into future scenes
+- End condition: The last paragraph MUST land on the specified hook - do not go past it
+
 Requirements:
 - Follow the emotional beat and conflict specified
 - Maintain character voices and consistency
 - Include sensory details and atmosphere
-- End with the specified hook
+- End with the specified hook (not before, not after)
 - Target word count: ${sceneOutline.wordCount ?? 1500} words
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
+${retrievedContext}
 ${autonomousInstruction}`;
         }
         if (phase === LLMModels_1.GenerationPhase.REVISION) {
@@ -166,7 +250,24 @@ ${autonomousInstruction}`;
             if (!draft) {
                 throw new Error(`No draft found for scene ${sceneNum}`);
             }
+            // Get scene outline for context (goals, hook, characters)
+            const outline = state.outline;
+            const scenes = outline?.scenes || [];
+            const sceneOutline = state.currentSceneOutline ?? scenes[sceneNum - 1] ?? {};
+            // Include retrieved context from Qdrant for hallucination prevention
+            const retrievedContext = String(sceneOutline.retrievedContext ?? "");
+            // Build canonical character names block to prevent name amnesia
+            const characterNames = this.buildCanonicalNamesBlock(state.characters);
             return `Revise Scene ${sceneNum} based on critique feedback.
+
+CANONICAL NAMES (DO NOT INTRODUCE NEW NAMED CHARACTERS):
+${characterNames}
+
+CHARACTER PROFILES:
+${JSON.stringify(state.characters || [], null, 2)}
+
+SCENE OUTLINE (goals, hook, characters):
+${JSON.stringify(sceneOutline, null, 2)}
 
 Original draft:
 ${draft.content}
@@ -177,6 +278,12 @@ Revision requests: ${JSON.stringify(latestCritique.revisionRequests || [])}
 
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
+${retrievedContext}
+
+CRITICAL: When revising, you MUST:
+- Use ONLY the canonical character names listed above
+- Do NOT introduce new named characters not in the character profiles
+- Maintain consistency with established facts and character traits
 ${autonomousInstruction}`;
         }
         if (phase === LLMModels_1.GenerationPhase.POLISH) {
@@ -197,7 +304,12 @@ Polish for:
 - Consistency in voice
 - Final proofreading
 
-IMPORTANT: Preserve all story beats and maintain word count. Do NOT shorten or summarize. The polished version must be at least ${currentWordCount} words.
+CRITICAL REQUIREMENTS:
+- You MUST output the FULL polished text of the entire scene
+- Do NOT truncate or leave notes like "rest is the same" or "continues with same content"
+- Do NOT shorten or summarize - the polished version must be at least ${currentWordCount} words
+- Output EVERY SINGLE WORD of the polished scene from beginning to end
+- Preserve all story beats and plot points
 ${autonomousInstruction}`;
         }
         throw new Error(`WriterAgent not configured for phase: ${phase}`);
@@ -218,6 +330,30 @@ ${autonomousInstruction}`;
             /\?{2,}/, // Multiple question marks
         ];
         return personaBreakPatterns.some(pattern => pattern.test(content));
+    }
+    /**
+     * Build canonical names block from character profiles
+     * Used to prevent "name amnesia" where LLM introduces new character names during revision
+     */
+    buildCanonicalNamesBlock(characters) {
+        if (!characters || !Array.isArray(characters)) {
+            return "No characters established yet.";
+        }
+        const names = [];
+        for (const char of characters) {
+            if (typeof char === "object" && char !== null) {
+                const charObj = char;
+                // Extract name from various possible fields
+                const name = charObj.name || charObj.fullName || charObj.characterName;
+                if (typeof name === "string" && name.trim()) {
+                    names.push(name.trim());
+                }
+            }
+        }
+        if (names.length === 0) {
+            return "No named characters established yet.";
+        }
+        return names.map(name => `- ${name}`).join("\n");
     }
 }
 exports.WriterAgent = WriterAgent;

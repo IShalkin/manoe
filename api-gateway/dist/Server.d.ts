@@ -4,9 +4,11 @@ import "@tsed/platform-express";
 import "@tsed/socketio";
 import "@tsed/swagger";
 import { StorytellerOrchestrator } from "./services/StorytellerOrchestrator";
+import { RedisStreamsService } from "./services/RedisStreamsService";
 export declare class Server {
     protected app: PlatformApplication;
     protected orchestrator: StorytellerOrchestrator;
+    protected redisStreams: RedisStreamsService;
     protected settings: Configuration;
     $beforeRoutesInit(): void;
     $afterRoutesInit(): Promise<void>;

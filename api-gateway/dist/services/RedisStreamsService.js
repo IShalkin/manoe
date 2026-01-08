@@ -29,11 +29,16 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RedisStreamsService = void 0;
 const di_1 = require("@tsed/di");
 const ioredis_1 = __importDefault(require("ioredis"));
+const MetricsService_1 = require("./MetricsService");
 let RedisStreamsService = class RedisStreamsService {
     // Dedicated writer client - never blocked by XREAD
     writerClient = null;
     // Redis URL for creating reader connections
     redisUrl = "";
+    // Track last processed event ID per stream for approximate lag calculation
+    // Since we use XREAD instead of Consumer Groups, we track position manually
+    lastProcessedIds = new Map();
+    metricsService;
     // Legacy alias for backward compatibility
     get client() {
         return this.writerClient;
@@ -99,9 +104,13 @@ let RedisStreamsService = class RedisStreamsService {
     async publishEvent(runId, eventType, data, maxlen = 1000) {
         const client = this.getClient();
         const streamKey = this.getStreamKey(runId);
+        // Generate unique eventId for deduplication on frontend
+        // Format: timestamp-random to ensure uniqueness even for events in same millisecond
+        const eventId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         const event = {
             type: eventType,
             runId: runId,
+            eventId: eventId,
             timestamp: new Date().toISOString(),
             data: JSON.stringify(data),
         };
@@ -109,6 +118,18 @@ let RedisStreamsService = class RedisStreamsService {
         const entryId = await client.xadd(streamKey, "MAXLEN", "~", maxlen.toString(), "*", ...Object.entries(event).flat());
         // Also add to global stream for monitoring
         await client.xadd(this.STREAM_GLOBAL, "MAXLEN", "~", (maxlen * 10).toString(), "*", ...Object.entries(event).flat());
+        // Record Redis stream metrics after publishing
+        try {
+            const streamInfo = await this.getStreamInfo(runId);
+            this.metricsService.recordRedisStreamMetrics({
+                streamKey,
+                length: streamInfo.length,
+            });
+        }
+        catch (metricsError) {
+            // Don't fail the publish if metrics recording fails
+            console.warn("[RedisStreamsService] Failed to record stream metrics:", metricsError);
+        }
         return entryId ?? "";
     }
     /**
@@ -156,6 +177,8 @@ let RedisStreamsService = class RedisStreamsService {
                         for (const [, streamEntries] of entries) {
                             for (const [entryId, fields] of streamEntries) {
                                 lastId = entryId;
+                                // Track last processed ID for approximate lag calculation
+                                this.lastProcessedIds.set(streamKey, entryId);
                                 yield this.parseStreamEntry(entryId, fields);
                             }
                         }
@@ -166,6 +189,7 @@ let RedisStreamsService = class RedisStreamsService {
                             id: "heartbeat",
                             type: "heartbeat",
                             runId: runId,
+                            eventId: `heartbeat-${Date.now()}`, // Unique eventId for heartbeat
                             timestamp: new Date().toISOString(),
                             data: {},
                         };
@@ -180,6 +204,7 @@ let RedisStreamsService = class RedisStreamsService {
                         id: "error",
                         type: "error",
                         runId: runId,
+                        eventId: `error-${Date.now()}`, // Unique eventId for error
                         timestamp: new Date().toISOString(),
                         data: { error: String(error) },
                     };
@@ -305,6 +330,7 @@ let RedisStreamsService = class RedisStreamsService {
             id,
             type: fieldMap.type ?? "unknown",
             runId: fieldMap.runId ?? "",
+            eventId: fieldMap.eventId ?? id, // Fall back to stream entry ID if eventId not present
             timestamp: fieldMap.timestamp ?? new Date().toISOString(),
             data: fieldMap.data ? JSON.parse(fieldMap.data) : {},
         };
@@ -325,6 +351,269 @@ let RedisStreamsService = class RedisStreamsService {
     sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
+    // ==================== LAG MONITORING ====================
+    /**
+     * Get consumer group information for a stream
+     * Used for monitoring consumer lag
+     *
+     * @param runId - Unique identifier for the generation run
+     * @returns Array of consumer group information
+     */
+    async getConsumerGroups(runId) {
+        const client = this.getClient();
+        const streamKey = this.getStreamKey(runId);
+        try {
+            const groups = await client.xinfo("GROUPS", streamKey);
+            return groups.map((group) => {
+                const groupObj = this.parseXInfoResponse(group);
+                return {
+                    name: String(groupObj.name || ""),
+                    consumers: typeof groupObj.consumers === "number" ? groupObj.consumers : 0,
+                    pending: typeof groupObj.pending === "number" ? groupObj.pending : 0,
+                    lastDeliveredId: String(groupObj["last-delivered-id"] || "0-0"),
+                    lag: typeof groupObj.lag === "number" ? groupObj.lag : undefined,
+                };
+            });
+        }
+        catch (error) {
+            // Stream doesn't exist or has no groups
+            return [];
+        }
+    }
+    /**
+     * Get comprehensive lag metrics for a stream
+     * Used for Prometheus metrics and alerting
+     *
+     * @param runId - Unique identifier for the generation run
+     * @returns Stream lag metrics including total lag across all groups
+     */
+    async getStreamLagMetrics(runId) {
+        const streamKey = this.getStreamKey(runId);
+        const streamInfo = await this.getStreamInfo(runId);
+        const groups = await this.getConsumerGroups(runId);
+        // Calculate total lag across all consumer groups
+        let totalLag = 0;
+        for (const group of groups) {
+            if (group.lag !== undefined) {
+                totalLag += group.lag;
+            }
+            else {
+                // Estimate lag from pending count if lag not available
+                totalLag += group.pending;
+            }
+        }
+        // If no consumer groups exist (using XREAD instead of XREADGROUP),
+        // calculate approximate lag from tracked position
+        if (groups.length === 0 && streamInfo.length > 0) {
+            const lastProcessedId = this.lastProcessedIds.get(streamKey);
+            if (lastProcessedId) {
+                // Approximate lag by counting events after last processed ID
+                totalLag = await this.countEventsAfter(runId, lastProcessedId);
+            }
+            else {
+                // No events processed yet, lag equals stream length
+                totalLag = streamInfo.length;
+            }
+        }
+        return {
+            streamKey,
+            length: streamInfo.length,
+            groups,
+            totalLag,
+        };
+    }
+    /**
+     * Count events in stream after a given ID
+     * Used for approximate lag calculation when not using Consumer Groups
+     *
+     * @param runId - Unique identifier for the generation run
+     * @param afterId - Count events after this ID
+     * @returns Number of events after the given ID
+     */
+    async countEventsAfter(runId, afterId) {
+        const client = this.getClient();
+        const streamKey = this.getStreamKey(runId);
+        // Cap at 5000 to prevent memory issues if consumer is far behind
+        // This gives approximate lag which is sufficient for metrics
+        const MAX_LAG_COUNT = 5000;
+        try {
+            // Use XRANGE with COUNT limit to avoid loading too many entries into memory
+            const entries = await client.xrange(streamKey, `(${afterId}`, "+", "COUNT", MAX_LAG_COUNT.toString());
+            // If we hit the limit, return the limit as approximate lag
+            // (actual lag may be higher but this is sufficient for alerting)
+            return entries.length;
+        }
+        catch (error) {
+            console.error("[RedisStreamsService] Error counting events after ID:", error);
+            return 0;
+        }
+    }
+    /**
+     * Get lag metrics for the global events stream
+     * Used for overall system health monitoring
+     *
+     * @returns Stream lag metrics for the global stream
+     */
+    async getGlobalStreamLagMetrics() {
+        const client = this.getClient();
+        const streamKey = this.STREAM_GLOBAL;
+        try {
+            const info = await client.xinfo("STREAM", streamKey);
+            const infoObj = this.parseXInfoResponse(info);
+            let groups = [];
+            try {
+                const groupsRaw = await client.xinfo("GROUPS", streamKey);
+                groups = groupsRaw.map((group) => {
+                    const groupObj = this.parseXInfoResponse(group);
+                    return {
+                        name: String(groupObj.name || ""),
+                        consumers: typeof groupObj.consumers === "number" ? groupObj.consumers : 0,
+                        pending: typeof groupObj.pending === "number" ? groupObj.pending : 0,
+                        lastDeliveredId: String(groupObj["last-delivered-id"] || "0-0"),
+                        lag: typeof groupObj.lag === "number" ? groupObj.lag : undefined,
+                    };
+                });
+            }
+            catch {
+                // No groups exist
+            }
+            let totalLag = 0;
+            for (const group of groups) {
+                totalLag += group.lag ?? group.pending;
+            }
+            return {
+                streamKey,
+                length: typeof infoObj.length === "number" ? infoObj.length : 0,
+                groups,
+                totalLag,
+            };
+        }
+        catch (error) {
+            return {
+                streamKey,
+                length: 0,
+                groups: [],
+                totalLag: 0,
+            };
+        }
+    }
+    /**
+     * Get all active stream keys for monitoring
+     * Scans for all manoe:events:* streams
+     *
+     * @returns Array of stream keys
+     */
+    async getActiveStreamKeys() {
+        const client = this.getClient();
+        const pattern = "manoe:events:*";
+        const keys = [];
+        let cursor = "0";
+        do {
+            const [nextCursor, foundKeys] = await client.scan(cursor, "MATCH", pattern, "COUNT", "100");
+            cursor = nextCursor;
+            keys.push(...foundKeys);
+        } while (cursor !== "0");
+        return keys;
+    }
+    /**
+     * Get lag metrics for all active streams
+     * Used for comprehensive monitoring dashboard
+     *
+     * @returns Map of stream key to lag metrics
+     */
+    async getAllStreamLagMetrics() {
+        const metrics = new Map();
+        const keys = await this.getActiveStreamKeys();
+        for (const key of keys) {
+            // Extract runId from key (manoe:events:{runId})
+            const runId = key.replace("manoe:events:", "");
+            if (runId && runId !== "global") {
+                const lagMetrics = await this.getStreamLagMetrics(runId);
+                metrics.set(key, lagMetrics);
+            }
+        }
+        // Add global stream metrics
+        const globalMetrics = await this.getGlobalStreamLagMetrics();
+        metrics.set(this.STREAM_GLOBAL, globalMetrics);
+        return metrics;
+    }
+    /**
+     * Check if any stream has lag above threshold
+     * Used for alerting
+     *
+     * @param threshold - Maximum acceptable lag (default: 1000)
+     * @returns Array of streams exceeding the threshold
+     */
+    async checkLagThreshold(threshold = 1000) {
+        const allMetrics = await this.getAllStreamLagMetrics();
+        const exceeding = [];
+        for (const [streamKey, metrics] of allMetrics) {
+            if (metrics.totalLag > threshold) {
+                exceeding.push({ streamKey, lag: metrics.totalLag });
+            }
+        }
+        return exceeding;
+    }
+    /**
+     * Collect and record consumer lag metrics for all active streams
+     * This method should be called periodically (e.g., every 30 seconds) to update Prometheus metrics
+     *
+     * @returns Number of streams processed
+     */
+    async collectAndRecordLagMetrics() {
+        try {
+            const allMetrics = await this.getAllStreamLagMetrics();
+            let processed = 0;
+            for (const [streamKey, metrics] of allMetrics) {
+                // Record stream length
+                this.metricsService.recordRedisStreamMetrics({
+                    streamKey,
+                    length: metrics.length,
+                });
+                // Record consumer lag for each consumer group
+                if (metrics.groups.length > 0) {
+                    for (const group of metrics.groups) {
+                        const lag = group.lag ?? group.pending;
+                        this.metricsService.recordRedisStreamMetrics({
+                            streamKey,
+                            length: metrics.length,
+                            consumerLag: lag,
+                        });
+                    }
+                }
+                else {
+                    // No consumer groups - record approximate lag from totalLag
+                    // (calculated in getStreamLagMetrics using tracked position)
+                    this.metricsService.recordRedisStreamMetrics({
+                        streamKey,
+                        length: metrics.length,
+                        consumerLag: metrics.totalLag,
+                    });
+                }
+                processed++;
+            }
+            return processed;
+        }
+        catch (error) {
+            console.error("[RedisStreamsService] Failed to collect lag metrics:", error);
+            return 0;
+        }
+    }
+    /**
+     * Start periodic lag metrics collection
+     * Collects and records lag metrics every intervalMs milliseconds
+     *
+     * @param intervalMs - Collection interval in milliseconds (default: 30000 = 30 seconds)
+     * @returns Interval ID for stopping the collection
+     */
+    startLagMetricsCollection(intervalMs = 30000) {
+        // Collect immediately on start
+        this.collectAndRecordLagMetrics().catch(console.error);
+        // Then collect periodically
+        return setInterval(() => {
+            this.collectAndRecordLagMetrics().catch(console.error);
+        }, intervalMs);
+    }
     /**
      * Disconnect from Redis (writer client)
      * Note: Reader connections are cleaned up automatically when their generators end
@@ -337,6 +626,10 @@ let RedisStreamsService = class RedisStreamsService {
     }
 };
 exports.RedisStreamsService = RedisStreamsService;
+__decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", MetricsService_1.MetricsService)
+], RedisStreamsService.prototype, "metricsService", void 0);
 exports.RedisStreamsService = RedisStreamsService = __decorate([
     (0, di_1.Service)(),
     __metadata("design:paramtypes", [])

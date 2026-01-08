@@ -15,6 +15,7 @@ const schema_1 = require("@tsed/schema");
 const di_1 = require("@tsed/di");
 const JobQueueService_1 = require("../services/JobQueueService");
 const SupabaseService_1 = require("../services/SupabaseService");
+const envValidation_1 = require("../utils/envValidation");
 let HealthController = class HealthController {
     jobQueueService;
     supabaseService;
@@ -31,13 +32,31 @@ let HealthController = class HealthController {
             supabase: await this.checkSupabase(),
             qdrant: await this.checkQdrant(),
         };
-        const allUp = Object.values(services).every((s) => s.status === "up");
-        const anyDown = Object.values(services).some((s) => s.status === "down");
+        // Get environment validation status
+        const envHealth = (0, envValidation_1.getEnvHealthStatus)();
+        const allServicesUp = Object.values(services).every((s) => s.status === "up");
+        const anyServiceDown = Object.values(services).some((s) => s.status === "down");
+        // Overall status considers both services and environment
+        let overallStatus;
+        if (anyServiceDown || envHealth.status === "unhealthy") {
+            overallStatus = "unhealthy";
+        }
+        else if (!allServicesUp || envHealth.status === "degraded") {
+            overallStatus = "degraded";
+        }
+        else {
+            overallStatus = "healthy";
+        }
         return {
-            status: allUp ? "healthy" : anyDown ? "unhealthy" : "degraded",
+            status: overallStatus,
             timestamp: new Date().toISOString(),
             version: process.env.npm_package_version || "0.1.0",
             services,
+            environment: {
+                status: envHealth.status,
+                missingRequired: envHealth.details.missingRequired,
+                warnings: envHealth.details.warnings,
+            },
         };
     }
     async readinessCheck() {
@@ -115,7 +134,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)("/detailed"),
     (0, schema_1.Summary)("Detailed health check"),
-    (0, schema_1.Description)("Returns detailed health status including all services"),
+    (0, schema_1.Description)("Returns detailed health status including all services and environment validation"),
     (0, schema_1.Returns)(200),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),

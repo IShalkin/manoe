@@ -8,6 +8,11 @@ interface HealthStatus {
         supabase: ServiceStatus;
         qdrant: ServiceStatus;
     };
+    environment?: {
+        status: "healthy" | "degraded" | "unhealthy";
+        missingRequired: string[];
+        warnings: string[];
+    };
 }
 interface ServiceStatus {
     status: "up" | "down" | "unknown";

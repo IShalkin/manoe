@@ -31,6 +31,8 @@ export interface GenerationOptions {
     llmConfig: LLMConfiguration;
     mode: "full" | "branching";
     settings?: Record<string, unknown>;
+    /** Embedding API key for WorldBibleEmbeddingService (Gemini API key) */
+    embeddingApiKey?: string;
 }
 /**
  * Run status
@@ -51,12 +53,16 @@ export declare class StorytellerOrchestrator {
     private activeRuns;
     private pauseCallbacks;
     private isShuttingDown;
+    private evaluationRateLimiter;
     private llmProvider;
     private redisStreams;
     private qdrantMemory;
     private langfuse;
     private supabase;
+    private metricsService;
     private agentFactory;
+    private evaluationService;
+    private worldBibleEmbedding;
     /**
      * Start a new generation run
      *
@@ -79,6 +85,12 @@ export declare class StorytellerOrchestrator {
      */
     private addSeedConstraints;
     /**
+     * Extract string value from a field that might be string or object
+     * Handles cases where LLM returns {name: "...", description: "..."} instead of plain string
+     * Prevents [object Object] serialization issues in constraints
+     */
+    private extractStringValue;
+    /**
      * Characters Phase - Character creation
      */
     private runCharactersPhase;
@@ -98,15 +110,24 @@ export declare class StorytellerOrchestrator {
      * Drafting Loop - Draft, Critique, Revise for each scene
      *
      * Key improvements:
-     * 1. Word count validation with expansion loop before Critic
-     * 2. Polish only runs if scene was approved (not after failed revisions)
-     * 3. Strips fake "Word count:" claims from Writer output
+     * 1. Proactive Beats Method for scenes > 1000 target words (split into 3-4 parts upfront)
+     * 2. Word count validation with expansion loop before Critic (for shorter scenes)
+     * 3. Polish only runs if scene was approved (not after failed revisions)
+     * 4. Strips fake "Word count:" claims from Writer output
      */
     private runDraftingLoop;
     /**
      * Draft a single scene
      */
     private draftScene;
+    /**
+     * Draft a scene using the Proactive Beats Method
+     * Splits the scene into 3-4 parts and generates each sequentially
+     * This prevents the Writer↔Critic deadlock where LLMs can't produce 1500+ words in one shot
+     *
+     * @param targetWordCount - Total target word count for the scene
+     */
+    private draftSceneWithBeats;
     /**
      * Critique a scene
      */
@@ -129,6 +150,14 @@ export declare class StorytellerOrchestrator {
      */
     private stripFakeWordCount;
     /**
+     * Strip overlap from continuation if Writer returned full text instead of just continuation
+     * This prevents text duplication when LLM ignores the "return only continuation" instruction
+     *
+     * Algorithm: Find the longest suffix of existingContent that matches a prefix of continuation,
+     * then strip that overlap from continuation.
+     */
+    private stripOverlap;
+    /**
      * Polish a scene (final refinement)
      *
      * CRITICAL: Includes post-polish validation to prevent chunk loss
@@ -136,7 +165,13 @@ export declare class StorytellerOrchestrator {
      */
     private polishScene;
     /**
-     * Validate polish output to prevent chunk loss
+     * Emit scene_polish_complete event when Polish is skipped
+     * This ensures frontend always has a canonical source of truth for each scene
+     * Without this, frontend falls back to collecting all Writer messages which causes duplication
+     */
+    private emitSceneFinal;
+    /**
+     * Validate polish output to prevent chunk loss and lazy polish notes
      * Returns true if polish is acceptable, false if we should fall back to pre-polish draft
      */
     private validatePolishOutput;
@@ -145,13 +180,26 @@ export declare class StorytellerOrchestrator {
      */
     private runArchivistCheck;
     /**
-     * Extract raw facts from generated content
+     * Extract raw facts from generated content and emit to frontend
+     * Uses canonical character names from state.characters as allowlist
      */
     private extractRawFacts;
     /**
      * Build constraints block for prompts
      */
     private buildConstraintsBlock;
+    /**
+     * Retrieve relevant context from Qdrant for hallucination prevention
+     *
+     * This method searches Qdrant for relevant characters, worldbuilding elements,
+     * and previous scenes that are semantically related to the current scene.
+     * The retrieved context helps the Writer maintain consistency with established facts.
+     *
+     * @param projectId - Project ID for filtering
+     * @param sceneOutline - Current scene outline to use as search query
+     * @returns Formatted context string for inclusion in Writer prompt
+     */
+    private getRelevantContext;
     /**
      * Call an agent with LLM
      */

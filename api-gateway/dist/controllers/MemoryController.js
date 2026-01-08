@@ -17,12 +17,14 @@ const common_1 = require("@tsed/common");
 const schema_1 = require("@tsed/schema");
 const di_1 = require("@tsed/di");
 const SupabaseService_1 = require("../services/SupabaseService");
+const entityMappers_1 = require("../utils/entityMappers");
 let MemoryController = class MemoryController {
     supabaseService;
     async getCharacters(projectId) {
         const characters = await this.supabaseService.getCharacters(projectId);
+        const characterDTOs = characters.map(entityMappers_1.mapCharacterToDTO);
         return {
-            characters,
+            characters: characterDTOs,
             count: characters.length,
         };
     }
@@ -30,50 +32,54 @@ let MemoryController = class MemoryController {
         // This would call Qdrant through the orchestrator
         // For now, return from Supabase with basic filtering
         const characters = await this.supabaseService.getCharacters(projectId);
-        const filtered = characters.filter((c) => c.name?.toLowerCase().includes(query.toLowerCase()) ||
+        const characterDTOs = characters.map(entityMappers_1.mapCharacterToDTO);
+        const filtered = characterDTOs.filter(c => c.name?.toLowerCase().includes(query.toLowerCase()) ||
             c.archetype?.toLowerCase().includes(query.toLowerCase())).slice(0, limit);
         return { results: filtered };
     }
     async getWorldbuilding(projectId, elementType) {
         const elements = await this.supabaseService.getWorldbuilding(projectId, elementType);
+        const elementDTOs = elements.map(entityMappers_1.mapWorldbuildingToDTO);
         return {
-            elements,
+            elements: elementDTOs,
             count: elements.length,
         };
     }
     async getScenes(projectId) {
         const drafts = await this.supabaseService.getDrafts(projectId);
+        const sceneDTOs = drafts.map(entityMappers_1.mapDraftToDTO);
         return {
-            scenes: drafts,
+            scenes: sceneDTOs,
             count: drafts.length,
         };
     }
     async getScene(projectId, sceneNumber) {
-        const drafts = await this.supabaseService.getDrafts(projectId);
-        const scene = drafts.find((d) => d.scene_number === sceneNumber);
-        if (!scene) {
+        const draft = await this.supabaseService.getDraftBySceneNumber(projectId, sceneNumber);
+        if (!draft) {
             throw new Error(`Scene ${sceneNumber} not found`);
         }
-        return scene;
+        return (0, entityMappers_1.mapDraftToDTO)(draft);
     }
     async getOutline(projectId) {
         const outline = await this.supabaseService.getOutline(projectId);
         if (!outline) {
             throw new Error("Outline not found");
         }
-        return outline;
+        return (0, entityMappers_1.mapOutlineToDTO)(outline);
     }
     async getCritiques(projectId) {
         const critiques = await this.supabaseService.getCritiques(projectId);
+        const critiqueDTOs = critiques.map(entityMappers_1.mapCritiqueToDTO);
         return {
-            critiques,
+            critiques: critiqueDTOs,
             count: critiques.length,
         };
     }
     async getAuditLogs(projectId, agentName, limit = 50) {
         const logs = await this.supabaseService.getAuditLogs(projectId, agentName, limit);
+        const logDTOs = logs.map(entityMappers_1.mapAuditLogToDTO);
         return {
-            logs,
+            logs: logDTOs,
             count: logs.length,
         };
     }

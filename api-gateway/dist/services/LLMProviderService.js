@@ -17,6 +17,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -29,6 +32,7 @@ const openai_1 = __importDefault(require("openai"));
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const generative_ai_1 = require("@google/generative-ai");
 const LLMModels_1 = require("../models/LLMModels");
+const MetricsService_1 = require("./MetricsService");
 /**
  * Provider base URLs
  */
@@ -64,6 +68,97 @@ const MODEL_CONTEXT_LENGTHS = {
     // Default for unknown models (assume large context)
     "default": 128000,
 };
+/**
+ * Models that do NOT support the temperature parameter
+ * These models only accept temperature=1 (default) or no temperature at all
+ * Includes OpenAI reasoning models (o1, o3 series) and some provider-specific models
+ */
+/**
+ * Known models that do NOT support the temperature parameter
+ * This is a static list for common models - runtime discovery handles unknown models
+ */
+const KNOWN_MODELS_WITHOUT_TEMPERATURE = [
+    // OpenAI reasoning models
+    "o1",
+    "o1-mini",
+    "o1-preview",
+    "o3",
+    "o3-mini",
+    // OpenRouter variants
+    "openai/o1",
+    "openai/o1-mini",
+    "openai/o1-preview",
+    "openai/o3",
+    "openai/o3-mini",
+];
+/**
+ * Runtime cache for models discovered to not support temperature
+ * This allows the system to learn about new models without code changes
+ */
+class TemperatureSupportCache {
+    static instance;
+    modelsWithoutTemperature = new Set();
+    static getInstance() {
+        if (!TemperatureSupportCache.instance) {
+            TemperatureSupportCache.instance = new TemperatureSupportCache();
+        }
+        return TemperatureSupportCache.instance;
+    }
+    /**
+     * Check if a model is known to not support temperature
+     */
+    doesNotSupportTemperature(model) {
+        return this.modelsWithoutTemperature.has(model.toLowerCase());
+    }
+    /**
+     * Mark a model as not supporting temperature (discovered at runtime)
+     */
+    markAsNoTemperatureSupport(model) {
+        const normalizedModel = model.toLowerCase();
+        this.modelsWithoutTemperature.add(normalizedModel);
+        console.log(`[TemperatureSupportCache] Learned that model "${model}" does not support temperature parameter`);
+    }
+    /**
+     * Get all models known to not support temperature
+     */
+    getModelsWithoutTemperature() {
+        return Array.from(this.modelsWithoutTemperature);
+    }
+}
+/**
+ * Check if a model supports the temperature parameter
+ * Uses both static list and runtime-discovered cache
+ * Returns false for reasoning models that only accept default temperature
+ */
+function modelSupportsTemperature(model) {
+    const normalizedModel = model.toLowerCase();
+    const cache = TemperatureSupportCache.getInstance();
+    // Check runtime cache first (learned from previous errors)
+    if (cache.doesNotSupportTemperature(normalizedModel)) {
+        return false;
+    }
+    // Check static list of known models
+    if (KNOWN_MODELS_WITHOUT_TEMPERATURE.some(m => normalizedModel === m.toLowerCase())) {
+        return false;
+    }
+    // Check prefix patterns for o1/o3 series (catches o1-2024-12-17, etc.)
+    if (normalizedModel.match(/^(openai\/)?(o1|o3)(-|$)/)) {
+        return false;
+    }
+    return true;
+}
+/**
+ * Check if an error is a temperature-related unsupported parameter error
+ */
+function isTemperatureUnsupportedError(error) {
+    if (error instanceof Error) {
+        const message = error.message.toLowerCase();
+        return ((message.includes("temperature") && message.includes("unsupported")) ||
+            (message.includes("temperature") && message.includes("does not support")) ||
+            (message.includes("temperature") && message.includes("only") && message.includes("default")));
+    }
+    return false;
+}
 /**
  * Model max OUTPUT token limits (completion tokens only)
  * Different from context length - this is the max tokens the model can generate
@@ -298,6 +393,7 @@ class TokenLimitCache {
 exports.TokenLimitCache = TokenLimitCache;
 let LLMProviderService = class LLMProviderService {
     static { LLMProviderService_1 = this; }
+    metricsService;
     /**
      * Create a chat completion using the specified provider
      *
@@ -333,11 +429,34 @@ let LLMProviderService = class LLMProviderService {
             }
             response.latencyMs = Date.now() - startTime;
             console.log(`[LLMProviderService] ${options.provider} completion finished in ${response.latencyMs}ms, tokens: ${response.usage?.totalTokens ?? 0}`);
+            // Record successful LLM call metrics
+            this.metricsService.recordLLMCall({
+                provider: options.provider,
+                model: options.model,
+                runId: options.runId || "unknown",
+                agentName: options.agentName || "unknown",
+                promptTokens: response.usage?.promptTokens ?? 0,
+                completionTokens: response.usage?.completionTokens ?? 0,
+                durationMs: response.latencyMs,
+                success: true,
+            });
             return response;
         }
         catch (error) {
             const elapsed = Date.now() - startTime;
             console.error(`[LLMProviderService] ${options.provider} completion failed after ${elapsed}ms:`, error instanceof Error ? error.message : error);
+            // Record failed LLM call metrics
+            this.metricsService.recordLLMCall({
+                provider: options.provider,
+                model: options.model,
+                runId: options.runId || "unknown",
+                agentName: options.agentName || "unknown",
+                promptTokens: 0,
+                completionTokens: 0,
+                durationMs: elapsed,
+                success: false,
+                errorType: error instanceof Error ? error.name : "unknown",
+            });
             throw error;
         }
     }
@@ -396,8 +515,15 @@ let LLMProviderService = class LLMProviderService {
         const requestParams = {
             model: options.model,
             messages: this.formatMessagesForOpenAI(options.messages),
-            temperature: options.temperature ?? 0.7,
         };
+        // Only include temperature for models that support it
+        // Reasoning models (o1, o3 series) don't support temperature parameter
+        if (modelSupportsTemperature(options.model)) {
+            requestParams.temperature = options.temperature ?? 0.7;
+        }
+        else {
+            console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+        }
         if (options.maxTokens) {
             // Get model context length and cap max_tokens to leave room for prompt
             // Estimate prompt tokens (rough estimate: 4 chars per token)
@@ -474,13 +600,20 @@ let LLMProviderService = class LLMProviderService {
         // Cap max_tokens to model's output limit to prevent "max_tokens exceeds model limit" errors
         const requestedMaxTokens = options.maxTokens ?? 4096;
         const cappedMaxTokens = capMaxTokensToModelLimit(options.model, requestedMaxTokens);
-        const response = await client.messages.create({
+        // Build request options - only include temperature for models that support it
+        const requestOptions = {
             model: options.model,
             max_tokens: cappedMaxTokens,
             system: systemMessage,
             messages: chatMessages,
-            temperature: options.temperature ?? 0.7,
-        });
+        };
+        if (modelSupportsTemperature(options.model)) {
+            requestOptions.temperature = options.temperature ?? 0.7;
+        }
+        else {
+            console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+        }
+        const response = await client.messages.create(requestOptions);
         const content = response.content[0]?.type === "text"
             ? response.content[0].text
             : "";
@@ -526,12 +659,19 @@ let LLMProviderService = class LLMProviderService {
         const cappedMaxTokens = options.maxTokens
             ? capMaxTokensToModelLimit(options.model, options.maxTokens)
             : undefined;
+        // Build generation config - only include temperature for models that support it
+        const generationConfig = {
+            maxOutputTokens: cappedMaxTokens,
+        };
+        if (modelSupportsTemperature(options.model)) {
+            generationConfig.temperature = options.temperature ?? 0.7;
+        }
+        else {
+            console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+        }
         const result = await model.generateContent({
             contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
-            generationConfig: {
-                temperature: options.temperature ?? 0.7,
-                maxOutputTokens: cappedMaxTokens,
-            },
+            generationConfig,
         });
         const response = result.response;
         const content = response.text() ?? "";
@@ -564,8 +704,14 @@ let LLMProviderService = class LLMProviderService {
         const requestParams = {
             model: options.model,
             messages: this.formatMessagesForOpenAI(options.messages),
-            temperature: options.temperature ?? 0.7,
         };
+        // Only include temperature for models that support it
+        if (modelSupportsTemperature(options.model)) {
+            requestParams.temperature = options.temperature ?? 0.7;
+        }
+        else {
+            console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+        }
         if (options.maxTokens) {
             // Cap max_tokens to model's output limit
             requestParams.max_tokens = capMaxTokensToModelLimit(options.model, options.maxTokens);
@@ -599,8 +745,14 @@ let LLMProviderService = class LLMProviderService {
         const requestParams = {
             model: options.model,
             messages: this.formatMessagesForOpenAI(options.messages),
-            temperature: options.temperature ?? 0.7,
         };
+        // Only include temperature for models that support it
+        if (modelSupportsTemperature(options.model)) {
+            requestParams.temperature = options.temperature ?? 0.7;
+        }
+        else {
+            console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+        }
         if (options.maxTokens) {
             // Cap max_tokens to model's output limit
             requestParams.max_tokens = capMaxTokensToModelLimit(options.model, options.maxTokens);
@@ -634,8 +786,14 @@ let LLMProviderService = class LLMProviderService {
         const requestParams = {
             model: options.model,
             messages: this.formatMessagesForOpenAI(options.messages),
-            temperature: options.temperature ?? 0.7,
         };
+        // Only include temperature for models that support it
+        if (modelSupportsTemperature(options.model)) {
+            requestParams.temperature = options.temperature ?? 0.7;
+        }
+        else {
+            console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
+        }
         if (options.maxTokens) {
             // Cap max_tokens to model's output limit
             requestParams.max_tokens = capMaxTokensToModelLimit(options.model, options.maxTokens);
@@ -702,12 +860,14 @@ let LLMProviderService = class LLMProviderService {
     }
     /**
      * Create completion with automatic retry for transient errors
-     * Also handles token limit errors with auto-discovery and caching
+     * Also handles token limit errors and temperature unsupported errors with auto-discovery and caching
      */
     async createCompletionWithRetry(options, maxRetries = 3, baseDelayMs = 1000) {
         let lastError = null;
         const tokenLimitCache = TokenLimitCache.getInstance();
+        const temperatureCache = TemperatureSupportCache.getInstance();
         let tokenLimitRetried = false;
+        let temperatureRetried = false;
         const cachedLimit = await tokenLimitCache.get(options.model);
         if (cachedLimit && options.maxTokens && options.maxTokens > cachedLimit) {
             console.log(`[LLMProviderService] Using cached limit for ${options.model}: ${cachedLimit}`);
@@ -719,6 +879,16 @@ let LLMProviderService = class LLMProviderService {
             }
             catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
+                // Handle temperature unsupported errors - learn and retry without temperature
+                if (isTemperatureUnsupportedError(error) && !temperatureRetried) {
+                    temperatureCache.markAsNoTemperatureSupport(options.model);
+                    console.log(`[LLMProviderService] Model ${options.model} doesn't support temperature, retrying without it`);
+                    // Remove temperature from options - the provider methods will check modelSupportsTemperature()
+                    // which now consults the cache, so the retry will work without temperature
+                    options = { ...options, temperature: undefined };
+                    temperatureRetried = true;
+                    continue;
+                }
                 if (this.isTokenLimitError(error) && !tokenLimitRetried) {
                     const limitError = extractMaxOutputTokensFromError(options.provider, lastError);
                     if (limitError) {
@@ -740,6 +910,10 @@ let LLMProviderService = class LLMProviderService {
     }
 };
 exports.LLMProviderService = LLMProviderService;
+__decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", MetricsService_1.MetricsService)
+], LLMProviderService.prototype, "metricsService", void 0);
 exports.LLMProviderService = LLMProviderService = LLMProviderService_1 = __decorate([
     (0, di_1.Service)()
 ], LLMProviderService);

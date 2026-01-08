@@ -14,6 +14,8 @@ exports.normalizeWorldbuilding = normalizeWorldbuilding;
 exports.normalizeNarrative = normalizeNarrative;
 exports.normalizeOutline = normalizeOutline;
 exports.normalizeCritique = normalizeCritique;
+exports.normalizeWorldbuildingElement = normalizeWorldbuildingElement;
+exports.normalizeCharacterForStorage = normalizeCharacterForStorage;
 /**
  * Convert any value to a prompt-safe string
  * Prevents [object Object] bugs when interpolating unknown values into prompts
@@ -266,6 +268,104 @@ function normalizeCritique(raw) {
     }
     if (normalized.revision_requests !== undefined && normalized.revisionRequests === undefined) {
         normalized.revisionRequests = normalized.revision_requests;
+    }
+    return normalized;
+}
+/**
+ * Normalize a worldbuilding element for storage
+ * Extracts name and description from various field formats
+ * Used by SupabaseService.saveWorldbuilding
+ *
+ * @param elementType - Type of worldbuilding element
+ * @param element - Raw element object
+ * @returns Normalized element with guaranteed name and description
+ */
+function normalizeWorldbuildingElement(elementType, element) {
+    const attributes = { ...element };
+    // Extract name from various possible fields
+    const name = String(element.name ||
+        element.Name ||
+        element.title ||
+        element.Title ||
+        element.location ||
+        `Unknown ${elementType}`);
+    // Extract description from various possible fields
+    const description = String(element.description ||
+        element.Description ||
+        element.content ||
+        element.Content ||
+        element.details ||
+        element.summary ||
+        "No description provided");
+    return { name, description, attributes };
+}
+/**
+ * Normalize character data from LLM output to Supabase storage format
+ * Maps LLM field names to database column names
+ */
+/**
+ * Normalize character data from LLM output to Supabase storage format
+ */
+function normalizeCharacterForStorage(character) {
+    const normalized = {};
+    const stringFields = new Set([
+        'archetype', 'core_motivation', 'potential_arc', 'family_background',
+        'inner_trap', 'psychological_wound', 'coping_mechanism', 'deepest_fear',
+        'breaking_point', 'occupation_role', 'visual_signature', 'public_goal',
+        'hidden_goal', 'defining_moment', 'special_skill', 'moral_stance', 'name'
+    ]);
+    const fieldMappings = {
+        role: 'archetype', motivation: 'core_motivation', character_arc: 'potential_arc',
+        backstory: 'family_background', name: 'name', archetype: 'archetype',
+        core_motivation: 'core_motivation', inner_trap: 'inner_trap',
+        psychological_wound: 'psychological_wound', coping_mechanism: 'coping_mechanism',
+        deepest_fear: 'deepest_fear', breaking_point: 'breaking_point',
+        occupation_role: 'occupation_role', affiliations: 'affiliations',
+        visual_signature: 'visual_signature', public_goal: 'public_goal',
+        hidden_goal: 'hidden_goal', defining_moment: 'defining_moment',
+        family_background: 'family_background', special_skill: 'special_skill',
+        quirks: 'quirks', moral_stance: 'moral_stance', potential_arc: 'potential_arc',
+    };
+    for (const [key, value] of Object.entries(character)) {
+        const mappedKey = fieldMappings[key];
+        if (mappedKey && value !== undefined && value !== null) {
+            if (normalized[mappedKey] === undefined) {
+                if (stringFields.has(mappedKey) && typeof value === 'object') {
+                    normalized[mappedKey] = JSON.stringify(value);
+                }
+                else {
+                    normalized[mappedKey] = value;
+                }
+            }
+        }
+    }
+    // Fallback logic for name field - handle various LLM output formats
+    // LLMs may return name as Name, fullName, full_name, characterName, character_name, etc.
+    if (!normalized.name) {
+        const nameValue = character.name ||
+            character.Name ||
+            character.fullName ||
+            character.full_name ||
+            character.characterName ||
+            character.character_name ||
+            character.title ||
+            character.Title;
+        if (nameValue && typeof nameValue === 'string' && nameValue.trim()) {
+            normalized.name = nameValue.trim();
+        }
+        else if (nameValue && typeof nameValue === 'object') {
+            // Handle case where name is an object with a name/value field
+            const nameObj = nameValue;
+            const extractedName = nameObj.name || nameObj.value || nameObj.text;
+            if (extractedName && typeof extractedName === 'string' && extractedName.trim()) {
+                normalized.name = extractedName.trim();
+            }
+        }
+        // Last resort: use "Unknown Character" to satisfy validation
+        // This ensures we always have a non-empty name for Zod validation
+        if (!normalized.name) {
+            normalized.name = "Unknown Character";
+        }
     }
     return normalized;
 }

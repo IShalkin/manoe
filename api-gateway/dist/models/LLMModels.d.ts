@@ -60,6 +60,8 @@ export declare class CompletionOptions {
     responseFormat?: {
         type: "json_object" | "text";
     };
+    runId?: string;
+    agentName?: string;
 }
 /**
  * Provider-specific configuration
