@@ -133,8 +133,9 @@ export class WorldBibleEmbeddingService {
     preferLocal: boolean = false
   ): Promise<void> {
     // Check if API key changed - always re-initialize with new key
-    const geminiKeyChanged = geminiApiKey && geminiApiKey !== this.currentGeminiKey;
-    const openaiKeyChanged = openaiApiKey && openaiApiKey !== this.currentOpenaiKey;
+    // Compare without truthy check to detect both additions AND removals of keys
+    const geminiKeyChanged = geminiApiKey !== this.currentGeminiKey;
+    const openaiKeyChanged = openaiApiKey !== this.currentOpenaiKey;
     const keyChanged = geminiKeyChanged || openaiKeyChanged;
     
     // Allow re-initialization if:
