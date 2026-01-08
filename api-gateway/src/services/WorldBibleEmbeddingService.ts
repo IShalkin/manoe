@@ -99,7 +99,7 @@ export class WorldBibleEmbeddingService {
   private geminiClient: GoogleGenerativeAI | null = null;
   private embeddingProvider: EmbeddingProvider = EmbeddingProvider.GEMINI;
   private embeddingDimension: number = 768;
-  private embeddingModel: string = "embedding-001";
+  private embeddingModel: string = "embedding-001"; // Gemini's newest unified embedding model
   private isConnected: boolean = false;
 
   @Inject()
@@ -154,9 +154,9 @@ export class WorldBibleEmbeddingService {
     if (!preferLocal && geminiApiKey) {
       this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
       this.embeddingProvider = EmbeddingProvider.GEMINI;
-      this.embeddingDimension = 768; // text-embedding-004 outputs 768 dimensions
-      this.embeddingModel = "text-embedding-004";
-      console.log("WorldBibleEmbedding: Using Gemini text-embedding-004 (768 dimensions)");
+      this.embeddingDimension = 768; // embedding-001 supports up to 3072, using 768 for backward compatibility
+      this.embeddingModel = "embedding-001";
+      console.log("WorldBibleEmbedding: Using Gemini embedding-001 (768 dimensions)");
     } else if (!preferLocal && openaiApiKey) {
       this.openaiClient = new OpenAI({ apiKey: openaiApiKey });
       this.embeddingProvider = EmbeddingProvider.OPENAI;
