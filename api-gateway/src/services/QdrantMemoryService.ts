@@ -154,9 +154,9 @@ export class QdrantMemoryService {
     } else if (!preferLocal && geminiApiKey) {
       this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
       this.embeddingProvider = EmbeddingProvider.GEMINI;
-      this.embeddingDimension = 768;
+      this.embeddingDimension = 3072; // gemini-embedding-001 outputs 3072 dimensions
       this.embeddingModel = "gemini-embedding-001";
-      console.log("Qdrant Memory: Using Gemini gemini-embedding-001 (768 dimensions)");
+      console.log("Qdrant Memory: Using Gemini gemini-embedding-001 (3072 dimensions)");
     } else {
       this.embeddingProvider = EmbeddingProvider.LOCAL;
       this.embeddingDimension = 384;

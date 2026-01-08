@@ -98,7 +98,7 @@ export class WorldBibleEmbeddingService {
   private openaiClient: OpenAI | null = null;
   private geminiClient: GoogleGenerativeAI | null = null;
   private embeddingProvider: EmbeddingProvider = EmbeddingProvider.GEMINI;
-  private embeddingDimension: number = 768;
+  private embeddingDimension: number = 3072; // gemini-embedding-001 outputs 3072 dimensions
   private embeddingModel: string = "gemini-embedding-001"; // Gemini's newest unified embedding model
   private isConnected: boolean = false;
 
@@ -172,9 +172,9 @@ export class WorldBibleEmbeddingService {
     if (!preferLocal && geminiApiKey) {
       this.geminiClient = new GoogleGenerativeAI(geminiApiKey);
       this.embeddingProvider = EmbeddingProvider.GEMINI;
-      this.embeddingDimension = 768; // gemini-embedding-001 supports up to 3072, using 768 for backward compatibility
+      this.embeddingDimension = 3072; // gemini-embedding-001 outputs 3072 dimensions
       this.embeddingModel = "gemini-embedding-001";
-      console.log("WorldBibleEmbedding: Using Gemini gemini-embedding-001 (768 dimensions)");
+      console.log("WorldBibleEmbedding: Using Gemini gemini-embedding-001 (3072 dimensions)");
     } else if (!preferLocal && openaiApiKey) {
       this.openaiClient = new OpenAI({ apiKey: openaiApiKey });
       this.embeddingProvider = EmbeddingProvider.OPENAI;
@@ -183,7 +183,7 @@ export class WorldBibleEmbeddingService {
       console.log("WorldBibleEmbedding: Using OpenAI embeddings (1536 dimensions)");
     } else {
       this.embeddingProvider = EmbeddingProvider.LOCAL;
-      this.embeddingDimension = 768;
+      this.embeddingDimension = 3072; // Keep consistent dimension for collection naming
       this.embeddingModel = "none";
       console.warn(
         "WorldBibleEmbedding: No embedding API key configured. " +
