@@ -1,12 +1,43 @@
 # MANOE - Multi-Agent Narrative Orchestration Engine
 
+![Production Ready](https://img.shields.io/badge/status-production%20ready-brightgreen.svg)
+![TypeScript](https://img.shields.io/badge/TypeScript-blue.svg)
+![Docker](https://img.shields.io/badge/Docker-supported-blue.svg)
+![License](https://img.shields.io/badge/license-CC--BY--NC--SA%204.0-blue.svg)
+
 A scalable, event-driven platform designed to automate the creation of exceptional narratives by strictly adhering to proven storytelling principles from the "Storyteller" framework. MANOE uses a multi-agent architecture where specialized AI agents collaborate in real-time to generate compelling stories.
 
-## Live Demo
+## Production Status
 
-- **Frontend**: https://manoe.iliashalkin.com
-- **API Gateway (ts.ed)**: https://manoe-gateway.iliashalkin.com
-- **Langfuse Dashboard**: https://langfuse.iliashalkin.com
+**✅ Production Ready** - MANOE is a mature, fully-implemented system with complete backend infrastructure, comprehensive documentation, and CI/CD pipeline.
+
+### Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/IShalkin/manoe.git
+cd manoe
+
+# Configure your API keys
+cp .env.example .env
+# Edit .env with your API keys (at least one LLM provider required)
+
+# Start all services (local development)
+docker-compose up -d
+
+# Or start production-ready stack
+docker compose -f docker-compose.vps.yml up -d --build
+```
+
+### What's Included
+
+- **9 Specialized AI Agents**: Architect, Profiler, Worldbuilder, Strategist, Writer, Critic, Originality, Impact, Archivist
+- **Multi-Provider LLM Support**: OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek, Venice AI
+- **Real-Time Streaming**: SSE via Redis for live progress updates
+- **Vector Memory**: Qdrant for narrative consistency and context
+- **Observability**: Langfuse tracing, Prometheus metrics, Grafana dashboards
+- **Complete CI/CD**: GitHub Actions with automated builds, comprehensive test suite (270 cases), and linting
+- **Production-Ready**: Docker containerization, security features, deployment scripts
 
 ## System Architecture
 
@@ -661,56 +692,65 @@ MANOE includes robust error handling for long-running generations:
 
 MANOE supports multiple LLM providers with BYOK (Bring Your Own Key). Configure at least one provider to get started.
 
-## Quick Start with Docker
+### Testing & Code Quality
 
-The fastest way to get started is using Docker Compose:
+**Automated Testing Suite:**
+- 270 test cases across 10 test suites (entrypoints in `tests/`, implementations in `api-gateway/src/__tests__/`):
+  - CORS configuration
+  - Agent implementations (Critic, Writer)
+  - Services (Evaluation, WorldBible Embedding, Data Consistency)
+  - Utilities (Schema Normalizers, String Utils, Token Limit Cache)
+  - Supabase schemas
+- Automatic execution on every pull request via GitHub Actions
+- Coverage reporting via Jest with configured paths to `api-gateway/src/`
+
+**Code Quality Tools:**
+- **Qodo**: AI-powered code review and recommendations
+- **Greptile**: Automated code analysis and pattern detection
+- **ESLint**: JavaScript/TypeScript linting
+- **TypeScript**: Static type checking
+
+## Deployment Options
+
+MANOE supports both local development and production deployments using Docker Compose.
+
+### Local Development
+
+Use `docker-compose.yml` for local development with a minimal stack:
 
 ```bash
-# Clone the repository
-git clone https://github.com/IShalkin/manoe.git
-cd manoe
-
-# Configure your API keys
-cp .env.example .env
-# Edit .env with your API keys (at least one LLM provider required)
-
-# Start all services
 docker-compose up -d
-
-# Access the frontend at http://localhost:5173
-# Access the API gateway at http://localhost:3000
 ```
 
-### Docker Services
+### Production Deployment
 
-The docker-compose.yml includes the following services:
+Use `docker-compose.vps.yml` for production deployment with the complete stack including:
 
-| Service | Internal Port | Description |
-|---------|---------------|-------------|
-| **frontend** | 5173 | React + TypeScript + Vite web interface |
-| **api-gateway** | 3000 | TypeScript/Ts.ED API gateway with SSE |
-| **redis** | 6379 | Message broker for real-time SSE events |
-| **qdrant** | 6333 | Vector database for character/worldbuilding memory |
-| **langfuse-web** | 3000 | Langfuse observability UI (separate subdomain) |
+- API Gateway (TypeScript/Ts.ED)
+- Full Langfuse observability stack (PostgreSQL, ClickHouse, Redis, MinIO)
+- Qdrant vector database with proper ulimits
+- Redis message broker
+- Integration with nginx-proxy for SSL certificates
 
-> **Note:** Ports shown are internal container ports. In production, services are accessed via nginx-proxy with separate subdomains (e.g., `manoe.iliashalkin.com`, `langfuse.iliashalkin.com`).
+```bash
+docker compose -f docker-compose.vps.yml up -d --build
+```
 
-### Environment Variables for Docker
+### Environment Variables
 
-Create a `.env` file in the root directory with your API keys:
+Create a `.env` file in the root directory. The `.env.example` file provides comprehensive configuration options.
 
+**Required: At least one LLM provider**
 ```env
-# Required: At least one LLM provider
 OPENAI_API_KEY=your-openai-key
-# Or use other providers:
-# ANTHROPIC_API_KEY=your-anthropic-key
-# GEMINI_API_KEY=your-gemini-key
-# VENICE_API_KEY=your-venice-key
-
-# Optional: Supabase for persistence
-VITE_SUPABASE_URL=your-supabase-url
-VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+# Or: ANTHROPIC_API_KEY, GEMINI_API_KEY, VENICE_API_KEY
 ```
+
+**See `.env.example` for complete configuration options including:**
+- Individual agent model selection
+- Redis, Qdrant, and Supabase connection settings
+- Langfuse observability configuration
+- CORS and security settings
 
 ### Supported LLM Providers
 
@@ -879,11 +919,11 @@ The VPS configuration includes nginx-proxy integration for automatic SSL certifi
 
 ## Current State
 
-The **frontend** is fully implemented and containerized. The **api-gateway** is fully implemented with a complete multi-agent system (105k+ lines of TypeScript). The **database layer** is production-ready with Supabase migrations. **CI/CD** is configured with GitHub Actions including Jest tests, TypeScript linting, and Docker builds. Documentation is comprehensive.
+The **frontend** is fully implemented and containerized. The **api-gateway** is fully implemented with a complete multi-agent system (~23,000 lines of TypeScript). The **database layer** is production-ready with 9 Supabase migrations. **CI/CD** is configured with GitHub Actions including comprehensive test suite (270 test cases with Jest), TypeScript linting, and automated Docker builds. Documentation is comprehensive.
 
 **Status: PRODUCTION READY**
 
-What's already working: Complete TypeScript API Gateway with 9 AI Agents fully implemented, real-time SSE streaming via Redis, Jest test suite with GitHub Actions, Docker containerization, Supabase database with 8 migrations, Qdrant vector memory integration, Redis caching layer with TTL-based caching, rate limiting middleware with fail-secure behavior, and multi-provider LLM support (OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek, Venice AI).
+What's already working: Complete TypeScript API Gateway (~23,000 lines) with 9 AI Agents fully implemented, real-time SSE streaming via Redis, CI/CD pipeline with automated builds, comprehensive test suite (270 test cases), TypeScript linting, Docker containerization, Supabase database with 9 migrations, Qdrant vector memory integration, Redis caching layer with TTL-based caching, rate limiting middleware with fail-secure behavior, Prometheus metrics, Grafana dashboards, and multi-provider LLM support (OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek, Venice AI).
 
 ## Success Metrics
 
