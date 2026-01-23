@@ -54,8 +54,12 @@ jobs:
           appDir: "api-gateway"
           testFramework: "Jest"
 
-          # This is relative to the root of the repo (so include appDir in the pattern).
-          testFileRegex: '^api-gateway/src/__tests__/.*\\.test\\.ts$'
+          # This is relative to the root of the repo.
+          # Accept both repo-root paths (api-gateway/...) and appDir-relative paths (src/...).
+          testFileRegex: '^(api-gateway/)?src/__tests__/.*\.test\.ts$'
 
-          testScript: 'node ./api-gateway/node_modules/jest/bin/jest.js --config api-gateway/jest.config.js --runInBand --silent {{file}}'
+          testScript: >-
+            bash -lc 'FILE="{{file}}";
+            if [[ "$FILE" != api-gateway/* ]]; then FILE="api-gateway/$FILE"; fi;
+            node ./api-gateway/node_modules/jest/bin/jest.js --config api-gateway/jest.config.js --runInBand --silent --runTestsByPath "$FILE"'
           runnerIndex: ${{ matrix.runnerIndex }}
