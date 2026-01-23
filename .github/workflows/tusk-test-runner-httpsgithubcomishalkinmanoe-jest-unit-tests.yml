@@ -40,7 +40,8 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install dependencies
+      - name: Install dependencies (api-gateway)
+        working-directory: api-gateway
         run: npm ci
 
       - name: Start runner
@@ -65,14 +66,14 @@ jobs:
           # services, create a separate workflow for each service with a different (and non-overlapping) appDir.
           # appDir should be relative to the root of the repo.
           # Remove this input if this doesn't apply to your repo (i.e., it is a single-service repo).
-          appDir: "https://github.com/IShalkin/manoe"
+          appDir: "api-gateway"
 
           # You may specify the test framework if it is a different one
           testFramework: "Jest"
 
           # Test file regex to match all test files in the service
           # This is relative to the root of the repo (i.e., the appDir should be included in it, if applicable).
-          testFileRegex: '^https://github.com/IShalkin/manoe/.*.(test|spec).(js|jsx|ts|tsx)$'
+          testFileRegex: '^api-gateway/.*\.(test|spec)\.(js|jsx|ts|tsx)$'
 
           # The script to run to lint the code (adapt accordingly).
           # This should be a command that fixes lint errors, not just checking for them.
@@ -81,13 +82,13 @@ jobs:
           # Example (Python w/ black): "black {{file}}"
           # Example (TypeScript w/ prettier + eslint): "npx prettier --write {{file}} && npx eslint --fix {{file}}"
           # If you need to run a compilation check (e.g. tsc), contact support@usetusk.ai to ensure it is set up correctly.
-          lintScript: '<your lint command for {{file}}>'
+          lintScript: 'api-gateway/node_modules/.bin/eslint --fix {{file}}'
 
           # The script to run to test the code (adapt accordingly). Required for the test runner.
           # {{file}} placeholder is required and will be replaced by Tusk with the file being tested.
           # Example (pytest): "pytest {{file}}"
           # If your test output is known to contain a lot of console logs, we recommend suppressing these logs (e.g., use --silent / --quiet flags or equivalent).
-          testScript: '<your test command for {{file}}>'
+          testScript: 'node ./api-gateway/node_modules/jest/bin/jest.js --config api-gateway/jest.config.js --runInBand --silent {{file}}'
 
           # The runner may run tests in parallel.
           # Set this value to 1 if you know that your tests should not be run concurrently in each environment.
