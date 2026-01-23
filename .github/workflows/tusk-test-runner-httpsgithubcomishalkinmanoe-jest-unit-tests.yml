@@ -87,9 +87,7 @@ jobs:
           # Example (pytest): "pytest {{file}}"
           # If your test output is known to contain a lot of console logs, we recommend suppressing these logs (e.g., use --silent / --quiet flags or equivalent).
           testScript: 'node ./api-gateway/node_modules/jest/bin/jest.js --config api-gateway/jest.config.js --runInBand --silent {{file}}'
-testScript: 'npx jest --config jest.config.js --runInBand --silent {{file}}'
           # The runner may run tests in parallel.
-          # Set this value to 1 if you know that your tests should not be run concurrently in each environment.
           # maxConcurrency: 1
 
           # Required for test parallelization where available, do not remove.
