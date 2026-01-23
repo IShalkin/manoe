@@ -31,7 +31,7 @@ services:
     environment:
       - VITE_SUPABASE_URL=${VITE_SUPABASE_URL:-}
       - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY:-}
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:3000/api}
+      - VITE_ORCHESTRATOR_URL=${VITE_ORCHESTRATOR_URL:-http://localhost:3000/orchestrate}
     depends_on:
       redis:
         condition: service_healthy

@@ -22,10 +22,10 @@ cd manoe
 cp .env.example .env
 # Edit .env with your API keys (at least one LLM provider required)
 
-# Start all services (local development)
-docker-compose up -d
+# Start frontend + Redis + Qdrant (local UI)
+docker compose up -d
 
-# Or start production-ready stack
+# Or start the full VPS stack (API Gateway + observability)
 docker compose -f docker-compose.vps.yml up -d --build
 ```
 
