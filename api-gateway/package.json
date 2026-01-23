@@ -26,7 +26,7 @@
     "@tsed/di": "^7.53.0",
     "@tsed/exceptions": "^7.53.0",
     "@tsed/json-mapper": "^7.53.0",
-    "@tsed/platform-express": "^7.53.0",
+    "@tsed/platform-express": "^8.24.0",
     "@tsed/schema": "^7.53.0",
     "@tsed/socketio": "^7.53.0",
     "@tsed/swagger": "^7.53.0",
