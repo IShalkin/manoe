@@ -2,67 +2,60 @@
 
 ## Overview
 
-Tests are maintained in **two locations** for maximum compatibility with all tools:
+Tests are maintained in **two locations** to balance discoverability (AI tools) with dependency locality (Node/TypeScript):
 
-```
+```text
 manoe/
-├── tests/                          # Primary location for AI agents and tools
-│   ├── *.test.ts                   # All 10 test files (273 cases)
-│   └── README.md                    # Test suite documentation
+├── tests/                          # Entrypoints for AI tools
+│   ├── *.test.ts                   # Thin imports of api-gateway/src/__tests__ (10 files, 270 cases)
+│   ├── README.md                   # Test suite documentation
+│   └── LOCATION_STRATEGY.md        # This document
 │
 └── api-gateway/
     └── src/
-        └── __tests__/              # Compatibility location for Tusk
-            ├── *.test.ts           # Same test files (duplicated)
-            └── (no README)
+        └── __tests__/              # Canonical test implementations (with correct relative imports)
+            └── *.test.ts
 ```
 
 ## Why Both Locations?
 
-### Primary Location: `tests/`
+### Entrypoints: `tests/`
 - ✅ Standard, discoverable location for AI agents (Qodo, Greptile, etc.)
-- ✅ Follows common project conventions
-- ✅ Easy to find for new contributors
-- ✅ Documented in `tests/README.md`
+- ✅ Keeps repo-root visibility without duplicating test logic
+- ✅ Points to canonical implementations under `api-gateway/src/__tests__/`
 
-### Compatibility Location: `api-gateway/src/__tests__/`
-- ✅ Legacy tools like Tusk expect tests here
-- ✅ CI/CD pipelines may reference this path
-- ✅ Maintains backward compatibility
+### Canonical Tests: `api-gateway/src/__tests__/`
+- ✅ Lives inside the Node package that owns the dependencies (`api-gateway/node_modules/`)
+- ✅ Keeps relative imports stable (`../services/*`, etc.)
+- ✅ Preserves compatibility with tools that expect this path
 
 ## How It Works
 
-Both locations contain **the same test files**. When you need to update tests:
-1. Update files in `tests/` (primary location)
-2. Copy changes to `api-gateway/src/__tests__/` for compatibility
-3. Or update both locations simultaneously
+- Each file in `tests/` is a thin wrapper that imports the corresponding file in `api-gateway/src/__tests__/`.
+- Make test changes in `api-gateway/src/__tests__/`. The wrappers in `tests/` should rarely change (mostly when adding/removing test files).
 
 ## Jest Configuration
 
-Jest is configured to run tests from **either** location:
+Jest is run from `api-gateway/` (where `node_modules/` lives) but executes tests from the repo-root `tests/` directory:
 
 ```javascript
 module.exports = {
-  rootDir: '..',
-  roots: ['<rootDir>/tests', '<rootDir>/api-gateway/src'],
+  rootDir: __dirname,
+  roots: ['<rootDir>/../tests'],
+  modulePaths: ['<rootDir>/node_modules'],
   testMatch: ['**/*.test.ts'],
   // ...
 };
 ```
 
-This ensures:
-- `npm test` from project root runs tests
-- Tests can be run from `api-gateway/` directory
-- Both test locations work correctly
-
 ## Future Migration
 
-Once all tools (Tusk, etc.) are updated to use the new standard location, the duplicate in `api-gateway/src/__tests__/` can be removed.
+If the repo is later converted to a true monorepo with root-level dependencies, the canonical tests can move to `tests/` and the thin wrappers can be removed.
 
 ## Benefits
 
 - ✅ **AI Agents**: Can discover tests in standard `tests/` location
 - ✅ **Tusk**: Continues to work with legacy path
 - ✅ **CI/CD**: Works with both GitHub Actions and Tusk
-- ✅ **Maintainability**: Clear primary location (`tests/`)
+- ✅ **Maintainability**: Single source of truth (no duplicated test logic)
 - ✅ **No Breaking Changes**: All existing tools continue to work

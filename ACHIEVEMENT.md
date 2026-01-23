@@ -16,7 +16,7 @@ The React SPA is built with TypeScript and Vite. Real-time updates flow through 
 
 ### Testing
 
-Comprehensive test suite with **273 test cases** across **10 test files** located in `tests/` directory:
+Comprehensive test suite with **270 test cases** across **10 test files** (repo-root entrypoints in `tests/`, implementations in `api-gateway/src/__tests__/`):
 - CORS configuration tests
 - Critic agent tests
 - Evaluation service tests
@@ -29,14 +29,15 @@ Comprehensive test suite with **273 test cases** across **10 test files** locate
 - Token limit cache tests
 
 **Test Structure:**
-- Tests are located in root `tests/` directory for maximum visibility
-- Jest is configured to collect coverage from `api-gateway/src/`
+- Repo-root `tests/` contains thin entrypoints for maximum visibility
+- Canonical test implementations live in `api-gateway/src/__tests__/` for dependency locality
+- Jest executes the entrypoints and collects coverage from `api-gateway/src/`
 - Tests run automatically via Jest in CI/CD pipeline on every pull request
 - Coverage reports are generated and uploaded as artifacts
 
 ### DevOps
 
-GitHub Actions CI/CD runs on every pull request with Jest test suite (273 tests), TypeScript linting for both frontend and backend, and automated Docker builds. PR validation workflows ensure code quality before merge.
+GitHub Actions CI/CD runs on every pull request with Jest test suite (270 tests), TypeScript linting for both frontend and backend, and automated Docker builds. PR validation workflows ensure code quality before merge.
 
 ### Code Quality Tools
 
@@ -57,7 +58,7 @@ Prometheus metrics collection provides operational visibility. Grafana dashboard
 
 ### Test Coverage
 
-While comprehensive tests exist (273 cases), increasing test coverage to 90%+ would improve confidence in edge cases. Adding integration tests would validate end-to-end workflows.
+While comprehensive tests exist (270 cases), increasing test coverage to 90%+ would improve confidence in edge cases. Adding integration tests would validate end-to-end workflows.
 
 ### Performance
 
@@ -70,7 +71,7 @@ Redis caching layer with TTL-based caching reduces database load. Rate limiting 
 
 ## Project Status: PRODUCTION READY
 
-This is a mature, fully-implemented system ready for deployment. The codebase includes approximately 23,000 lines of TypeScript across the API Gateway, 65 TypeScript files, comprehensive documentation, and a complete CI/CD pipeline with automated testing (273 test cases).
+This is a mature, fully-implemented system ready for deployment. The codebase includes approximately 23,000 lines of TypeScript across the API Gateway, 65 TypeScript files, comprehensive documentation, and a complete CI/CD pipeline with automated testing (270 test cases).
 
 ## Production Checklist
 
@@ -81,7 +82,7 @@ This is a mature, fully-implemented system ready for deployment. The codebase in
 ✅ Multi-provider LLM support
 ✅ Docker containerization
 ✅ CI/CD pipeline with automated builds and testing
-✅ 273 test cases with Jest and coverage reporting
+✅ 270 test cases with Jest and coverage reporting
 ✅ Prometheus metrics
 ✅ Grafana dashboards
 ✅ Langfuse observability integration

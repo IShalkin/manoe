@@ -36,7 +36,7 @@ docker compose -f docker-compose.vps.yml up -d --build
 - **Real-Time Streaming**: SSE via Redis for live progress updates
 - **Vector Memory**: Qdrant for narrative consistency and context
 - **Observability**: Langfuse tracing, Prometheus metrics, Grafana dashboards
-- **Complete CI/CD**: GitHub Actions with automated builds, comprehensive test suite (273 cases), and linting
+- **Complete CI/CD**: GitHub Actions with automated builds, comprehensive test suite (270 cases), and linting
 - **Production-Ready**: Docker containerization, security features, deployment scripts
 
 ## System Architecture
@@ -695,7 +695,7 @@ MANOE supports multiple LLM providers with BYOK (Bring Your Own Key). Configure 
 ### Testing & Code Quality
 
 **Automated Testing Suite:**
-- 273 test cases across 10 test files in `tests/` directory:
+- 270 test cases across 10 test suites (entrypoints in `tests/`, implementations in `api-gateway/src/__tests__/`):
   - CORS configuration
   - Agent implementations (Critic, Writer)
   - Services (Evaluation, WorldBible Embedding, Data Consistency)
@@ -919,11 +919,11 @@ The VPS configuration includes nginx-proxy integration for automatic SSL certifi
 
 ## Current State
 
-The **frontend** is fully implemented and containerized. The **api-gateway** is fully implemented with a complete multi-agent system (~23,000 lines of TypeScript). The **database layer** is production-ready with 9 Supabase migrations. **CI/CD** is configured with GitHub Actions including comprehensive test suite (273 test cases with Jest), TypeScript linting, and automated Docker builds. Documentation is comprehensive.
+The **frontend** is fully implemented and containerized. The **api-gateway** is fully implemented with a complete multi-agent system (~23,000 lines of TypeScript). The **database layer** is production-ready with 9 Supabase migrations. **CI/CD** is configured with GitHub Actions including comprehensive test suite (270 test cases with Jest), TypeScript linting, and automated Docker builds. Documentation is comprehensive.
 
 **Status: PRODUCTION READY**
 
-What's already working: Complete TypeScript API Gateway (~23,000 lines) with 9 AI Agents fully implemented, real-time SSE streaming via Redis, CI/CD pipeline with automated builds, comprehensive test suite (273 test cases), TypeScript linting, Docker containerization, Supabase database with 9 migrations, Qdrant vector memory integration, Redis caching layer with TTL-based caching, rate limiting middleware with fail-secure behavior, Prometheus metrics, Grafana dashboards, and multi-provider LLM support (OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek, Venice AI).
+What's already working: Complete TypeScript API Gateway (~23,000 lines) with 9 AI Agents fully implemented, real-time SSE streaming via Redis, CI/CD pipeline with automated builds, comprehensive test suite (270 test cases), TypeScript linting, Docker containerization, Supabase database with 9 migrations, Qdrant vector memory integration, Redis caching layer with TTL-based caching, rate limiting middleware with fail-secure behavior, Prometheus metrics, Grafana dashboards, and multi-provider LLM support (OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek, Venice AI).
 
 ## Success Metrics
 

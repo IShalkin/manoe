@@ -6,20 +6,21 @@
 
 **Problem:** Tests were hidden in `api-gateway/src/__tests__/`, causing AI agents to not detect them.
 
-**Solution:** Moved all 10 test files (273 test cases) to root `tests/` directory.
+**Solution:** Added a repo-root `tests/` directory with thin test entrypoints for AI tooling, while keeping the canonical test implementations in `api-gateway/src/__tests__/`.
 
 **Files Changed:**
-- `tests/` - New directory with all test files
-- `api-gateway/src/__tests__/` - Removed
-- `api-gateway/jest.config.js` - Updated to scan `tests/` directory
-- `tests/README.md` - Added comprehensive test documentation
+- `tests/` - New directory with test entrypoints and documentation
+- `api-gateway/src/__tests__/` - Canonical test implementations (kept inside the Node package)
+- `api-gateway/jest.config.js` - Updated to execute entrypoints from `../tests`
+- `api-gateway/package.json` - Updated lint scripts to include `../tests`
+- `tests/README.md` / `tests/LOCATION_STRATEGY.md` - Added documentation
 
 ### 2. Documentation Updates
 
 #### ACHIEVEMENT.md
-- Fixed test count: 273 test cases (not 270)
+- Fixed test count: 270 test cases
 - Added "Testing" section with accurate numbers
-- Updated tool name: "grep-tail" → "greptile"
+- Updated tool name: "grep-tail" → "Greptile"
 - Added detailed test structure explanation
 
 #### README.md
@@ -44,38 +45,33 @@
 
 ## Final Structure
 
-```
+```text
 manoe/
-├── tests/                          # NEW: All test files here
-│   ├── cors.test.ts
-│   ├── CriticAgent.test.ts
-│   ├── EvaluationService.test.ts
-│   └── ... (7 more test files)
-│   └── README.md
+├── tests/                          # Test entrypoints (repo root)
+│   ├── *.test.ts
+│   ├── README.md
+│   └── LOCATION_STRATEGY.md
 ├── api-gateway/
-│   ├── src/                        # Source code
-│   │   ├── agents/
-│   │   ├── services/
+│   ├── src/
+│   │   ├── __tests__/              # Canonical test implementations
 │   │   └── ...
-│   └── jest.config.js              # UPDATED: Scans tests/
-├── README.md                       # UPDATED: Accurate info
-├── ACHIEVEMENT.md                 # UPDATED: Fixed all metrics
+│   ├── jest.config.js              # Executes entrypoints from ../tests
+│   └── package.json                # Contains test/lint scripts
+├── README.md
+├── ACHIEVEMENT.md
 └── ...
 ```
 
 ## Benefits
 
 1. **AI Agent Compatibility:** Tests are now in standard `tests/` location
-2. **Better Discoverability:** Tools can easily find and analyze tests
-3. **Accurate Documentation:** All numbers and claims are verified
-4. **Generalizable:** Removed deployment-specific URLs
-5. **Clear Structure:** Test documentation explains setup and usage
+2. **Backwards compatibility:** Legacy tooling can continue using `api-gateway/src/__tests__/`
+3. **Clear developer workflow:** Edit tests in `api-gateway/src/__tests__/`; repo-root `tests/` are thin entrypoints
+4. **Accurate Documentation:** All numbers and claims are verified
+5. **Generalizable:** Removed deployment-specific URLs
 
 ## Verification
 
-- ✅ 10 test files in `tests/`
-- ✅ 273 test cases total
-- ✅ Jest configured correctly
-- ✅ No outdated test directories
-- ✅ All documentation updated
-- ✅ Tool names corrected (greptile, Qodo)
+- ✅ 10 test entrypoint files in `tests/`
+- ✅ 270 test cases total
+- ✅ Jest runs from `api-gateway/` and executes entrypoints from `tests/`

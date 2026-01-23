@@ -1,6 +1,8 @@
 # MANOE Test Suite
 
-This directory contains the complete test suite for the MANOE Multi-Agent Narrative Orchestration Engine.
+This directory contains repo-root test entrypoints for the MANOE Multi-Agent Narrative Orchestration Engine.
+
+The canonical test implementations live in `api-gateway/src/__tests__/`.
 
 ## Test Structure
 
@@ -19,6 +21,10 @@ tests/
 ```
 
 ## Running Tests
+
+> **Note:** Run tests from `api-gateway/` because that's where `node_modules/` and `jest.config.js` live.
+> The test files are stored in this repo-root `tests/` directory, but Jest is configured to execute them from `api-gateway/`.
+
 
 ### Run all tests
 ```bash
@@ -40,19 +46,20 @@ npm run test:coverage
 
 ## Test Coverage
 
-- **Total test cases**: 273
+- **Total test cases**: 270
 - **Test files**: 10
-- **Test suites**: 80
+- **Test suites**: 10
 
 ## Configuration
 
 Jest is configured to:
-- Find tests in `tests/` directory
+- Run entrypoints from the repo-root `tests/` directory
+- Execute canonical tests under `api-gateway/src/__tests__/` (imported by the entrypoints)
 - Collect coverage from `api-gateway/src/`
 - Run tests in Node.js environment
 - Use TypeScript (ts-jest preset)
 
-See `jest.config.js` for complete configuration.
+See `api-gateway/jest.config.js` for complete configuration.
 
 ## CI/CD
 
