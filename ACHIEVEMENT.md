@@ -86,4 +86,4 @@ This is a mature, fully-implemented system ready for deployment. The codebase in
 ✅ Grafana dashboards
 ✅ Langfuse observability integration
 ✅ Security features (JWT, CORS, rate limiting)
-✅ Code quality tools (Qodo, Grep-tail, ESLint, TypeScript)
+✅ Code quality tools (Qodo, Greptile, ESLint, TypeScript)
