@@ -27,7 +27,6 @@ jobs:
     strategy:
       matrix:
         runnerIndex: ${{ fromJson(github.event.inputs.runnerIndexes) }}
-
     steps:
       - name: Checkout
         id: checkout
