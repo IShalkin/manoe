@@ -58,8 +58,9 @@ jobs:
           # Accept both repo-root paths (api-gateway/...) and appDir-relative paths (src/...).
           testFileRegex: '^(api-gateway/)?src/__tests__/.*\.test\.ts$'
 
+          # Tusk runs this command in appDir (api-gateway), so paths should be relative to it.
           testScript: >-
             bash -lc 'FILE="{{file}}";
-            if [[ "$FILE" != api-gateway/* ]]; then FILE="api-gateway/$FILE"; fi;
-            node ./api-gateway/node_modules/jest/bin/jest.js --config api-gateway/jest.config.js --runInBand --silent --runTestsByPath "$FILE"'
+            FILE="${FILE#api-gateway/}";
+            node ./node_modules/jest/bin/jest.js --config jest.config.js --runInBand --silent --runTestsByPath "$FILE"'
           runnerIndex: ${{ matrix.runnerIndex }}
