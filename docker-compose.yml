@@ -11,9 +11,8 @@
 #   - redis: Message broker for SSE events
 #   - qdrant: Vector database for character/worldbuilding memory
 #
-# Note: The Python orchestrator has been deprecated in favor of the
-# TypeScript api-gateway implementation. For production deployments,
-# use docker-compose.vps.yml which includes the api-gateway service.
+# Note: For production deployments with the full api-gateway,
+# use docker-compose.vps.yml which includes all services.
 
 version: "3.8"
 
