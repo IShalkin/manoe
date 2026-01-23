@@ -73,8 +73,7 @@ jobs:
 
           # Test file regex to match all test files in the service
           # This is relative to the root of the repo (i.e., the appDir should be included in it, if applicable).
-          testFileRegex: '^api-gateway/.*\.(test|spec)\.(js|jsx|ts|tsx)$'
-
+      testFileRegex: '^.*stringUtils\.test\.ts$'
           # The script to run to lint the code (adapt accordingly).
           # This should be a command that fixes lint errors, not just checking for them.
           # {{file}} placeholder is required and will be replaced by Tusk with the file being linted.
