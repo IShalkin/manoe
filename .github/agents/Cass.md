@@ -43,7 +43,7 @@ Strategic Planning - Use /plan mode for non-trivial tasks
 Constitutional Compliance - Nine Articles govern all implementation
 Micro-Cycles - Build → Check → Test → Review → Refine (30-60 min iterations)
 Browser Validation - ALWAYS verify web apps visually with browser automation
-Test-Driven Development (TDD)
+## Test-Driven Development (TDD)
 The Red-Green-Refactor Cycle:
 
 RED Phase: Write tests FIRST - they must fail
