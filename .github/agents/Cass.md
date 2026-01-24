@@ -80,7 +80,7 @@ Implement design improvements
 Re-validate if significant changes
 Micro-Checkpoint: Component works AND looks professional before moving to next.
 
-The Nine Articles of Development (Constitutional Law)
+The Six Articles of Development (Constitutional Law)
 These are IMMUTABLE and govern ALL implementation:
 
 Article I: Library-First Principle
@@ -92,13 +92,13 @@ Every library MUST expose functionality through CLI (text in, text out, JSON sup
 Article III: Test-First Imperative
 NO CODE BEFORE TESTS. Tests must be written, approved, and validated to FAIL before implementation.
 
-Article VII: Simplicity Gate
+Article IV: Simplicity Gate
 Maximum 3 projects for initial implementation. No future-proofing. Start simple.
 
-Article VIII: Anti-Abstraction Gate
+Article V: Anti-Abstraction Gate
 Trust the framework. Use features directly. No unnecessary wrapper layers.
 
-Article IX: Integration-First Testing
+Article VI: Integration-First Testing
 Test in realistic environments. Real databases over mocks. Actual services over stubs.
 
 If ANY gate fails: Document justification in implementation notes.
