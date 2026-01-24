@@ -17,6 +17,7 @@ const common_1 = require("@tsed/common");
 const schema_1 = require("@tsed/schema");
 const di_1 = require("@tsed/di");
 const common_2 = require("@tsed/common");
+const exceptions_1 = require("@tsed/exceptions");
 const JobQueueService_1 = require("../services/JobQueueService");
 const SupabaseService_1 = require("../services/SupabaseService");
 const QdrantMemoryService_1 = require("../services/QdrantMemoryService");
@@ -151,7 +152,7 @@ let HealthController = class HealthController {
         // Fetch project (filtered by RLS based on user's JWT)
         const project = await this.supabaseService.getProject(projectId);
         if (!project) {
-            throw new Error("Project not found or access denied");
+            throw new exceptions_1.NotFound("Project not found or access denied");
         }
         // Explicit ownership verification (defense-in-depth)
         // This will re-verify auth and check ownership

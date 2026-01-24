@@ -44,12 +44,12 @@ export declare class AuthMiddleware {
     private extractUserContext;
     /**
      * Helper function for controllers to require authentication
-     * Throws an error if user is not authenticated
+     * Throws Unauthorized (401) if user is not authenticated
      */
     static requireAuth(req: Request): UserContext;
     /**
      * Helper function for controllers to verify project ownership
-     * Throws an error if user doesn't own the project
+     * Throws BadRequest (400) if project has no owner, Forbidden (403) if user doesn't own it
      */
     static verifyOwnership(req: Request, project: {
         user_id?: string;

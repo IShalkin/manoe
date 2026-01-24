@@ -2,6 +2,7 @@ import { Controller, Get, PathParams, Post } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { Req } from "@tsed/common";
+import { NotFound } from "@tsed/exceptions";
 import type { Request } from "express";
 import { JobQueueService } from "../services/JobQueueService";
 import { SupabaseService } from "../services/SupabaseService";
@@ -232,7 +233,7 @@ export class HealthController {
     // Fetch project (filtered by RLS based on user's JWT)
     const project = await this.supabaseService.getProject(projectId);
     if (!project) {
-      throw new Error("Project not found or access denied");
+      throw new NotFound("Project not found or access denied");
     }
 
     // Explicit ownership verification (defense-in-depth)

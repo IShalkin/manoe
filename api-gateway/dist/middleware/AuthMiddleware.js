@@ -32,6 +32,7 @@ var AuthMiddleware_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthMiddleware = void 0;
 const common_1 = require("@tsed/common");
+const exceptions_1 = require("@tsed/exceptions");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 let AuthMiddleware = AuthMiddleware_1 = class AuthMiddleware {
     // Paths that don't require authentication
@@ -91,8 +92,12 @@ let AuthMiddleware = AuthMiddleware_1 = class AuthMiddleware {
             return null;
         }
         try {
-            // Verify and decode JWT token
-            const decoded = jsonwebtoken_1.default.verify(token, jwtSecret);
+            // Verify and decode JWT token with explicit algorithm specification
+            // This prevents algorithm confusion attacks where an attacker could change
+            // the token's algorithm from RS256 to HS256 and forge signatures
+            const decoded = jsonwebtoken_1.default.verify(token, jwtSecret, {
+                algorithms: ['HS256'] // Supabase uses HS256 for JWT secrets
+            });
             return {
                 userId: decoded.sub,
                 email: decoded.email,
@@ -114,25 +119,25 @@ let AuthMiddleware = AuthMiddleware_1 = class AuthMiddleware {
     }
     /**
      * Helper function for controllers to require authentication
-     * Throws an error if user is not authenticated
+     * Throws Unauthorized (401) if user is not authenticated
      */
     static requireAuth(req) {
         if (!req.userContext) {
-            throw new Error("Authentication required");
+            throw new exceptions_1.Unauthorized("Authentication required");
         }
         return req.userContext;
     }
     /**
      * Helper function for controllers to verify project ownership
-     * Throws an error if user doesn't own the project
+     * Throws BadRequest (400) if project has no owner, Forbidden (403) if user doesn't own it
      */
     static verifyOwnership(req, project) {
         const userContext = AuthMiddleware_1.requireAuth(req);
         if (!project.user_id) {
-            throw new Error("Project does not have an owner");
+            throw new exceptions_1.BadRequest("Project does not have an owner");
         }
         if (project.user_id !== userContext.userId) {
-            throw new Error("Access denied: You do not own this project");
+            throw new exceptions_1.Forbidden("Access denied: You do not own this project");
         }
     }
 };

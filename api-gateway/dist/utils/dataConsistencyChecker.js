@@ -113,6 +113,8 @@ class DataConsistencyChecker {
     async checkCharactersConsistency(projectId) {
         const supabaseCharacters = await this.supabaseService.getCharacters(projectId);
         const qdrantCharacters = await this.qdrantMemoryService.getProjectCharacters(projectId);
+        // Create Set for O(1) lookup instead of O(n) find() in loop
+        const supabaseIdSet = new Set(supabaseCharacters.map((sc) => sc.id));
         // Find orphaned vectors (in Qdrant but not referenced in Supabase)
         // Match by the Supabase UUID stored in character.id
         const orphanedVectorIds = [];
@@ -125,8 +127,7 @@ class DataConsistencyChecker {
                 orphanedVectorIds.push(identifier);
                 continue;
             }
-            const matchingSupabase = supabaseCharacters.find((sc) => sc.id === characterId);
-            if (!matchingSupabase) {
+            if (!supabaseIdSet.has(characterId)) {
                 orphanedVectorIds.push(qdrantChar.qdrantPointId || String(characterId));
             }
         }
@@ -150,6 +151,8 @@ class DataConsistencyChecker {
         const supabaseWorldbuilding = await this.supabaseService.getWorldbuilding(projectId);
         // Get all worldbuilding from Qdrant using scroll API (no 100-element limitation)
         const qdrantWorldbuilding = await this.qdrantMemoryService.getProjectWorldbuilding(projectId);
+        // Create Set for O(1) lookup instead of O(n) find() in loop
+        const supabaseIdSet = new Set(supabaseWorldbuilding.map((swb) => swb.id));
         // Find orphaned vectors (in Qdrant but not in Supabase)
         // Match by the Supabase UUID stored in element.id
         const orphanedVectorIds = [];
@@ -162,8 +165,7 @@ class DataConsistencyChecker {
                 orphanedVectorIds.push(identifier);
                 continue;
             }
-            const matchingSupabase = supabaseWorldbuilding.find((swb) => swb.id === elementId);
-            if (!matchingSupabase) {
+            if (!supabaseIdSet.has(elementId)) {
                 orphanedVectorIds.push(qdrantWb.qdrantPointId || String(elementId));
             }
         }
@@ -187,6 +189,8 @@ class DataConsistencyChecker {
         const supabaseDrafts = await this.supabaseService.getDrafts(projectId);
         // Get all scenes from Qdrant using scroll API (no 100-element limitation)
         const qdrantScenes = await this.qdrantMemoryService.getProjectScenes(projectId);
+        // Create Set for O(1) lookup instead of O(n) find() in loop
+        const supabaseIdSet = new Set(supabaseDrafts.map((sd) => sd.id));
         // Find orphaned vectors (in Qdrant but not in Supabase)
         // Match by the Supabase UUID stored in scene.id
         const orphanedVectorIds = [];
@@ -199,8 +203,7 @@ class DataConsistencyChecker {
                 orphanedVectorIds.push(identifier);
                 continue;
             }
-            const matchingSupabase = supabaseDrafts.find((sd) => sd.id === sceneId);
-            if (!matchingSupabase) {
+            if (!supabaseIdSet.has(sceneId)) {
                 orphanedVectorIds.push(qdrantScene.qdrantPointId || String(sceneId));
             }
         }

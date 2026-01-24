@@ -14,6 +14,7 @@
  */
 
 import { Middleware, Req, Res, Next, Context } from "@tsed/common";
+import { Unauthorized, Forbidden, BadRequest } from "@tsed/exceptions";
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
@@ -115,8 +116,12 @@ export class AuthMiddleware {
     }
 
     try {
-      // Verify and decode JWT token
-      const decoded = jwt.verify(token, jwtSecret) as SupabaseJwtPayload;
+      // Verify and decode JWT token with explicit algorithm specification
+      // This prevents algorithm confusion attacks where an attacker could change
+      // the token's algorithm from RS256 to HS256 and forge signatures
+      const decoded = jwt.verify(token, jwtSecret, {
+        algorithms: ['HS256'] // Supabase uses HS256 for JWT secrets
+      }) as SupabaseJwtPayload;
 
       return {
         userId: decoded.sub,
@@ -138,28 +143,28 @@ export class AuthMiddleware {
 
   /**
    * Helper function for controllers to require authentication
-   * Throws an error if user is not authenticated
+   * Throws Unauthorized (401) if user is not authenticated
    */
   static requireAuth(req: Request): UserContext {
     if (!req.userContext) {
-      throw new Error("Authentication required");
+      throw new Unauthorized("Authentication required");
     }
     return req.userContext;
   }
 
   /**
    * Helper function for controllers to verify project ownership
-   * Throws an error if user doesn't own the project
+   * Throws BadRequest (400) if project has no owner, Forbidden (403) if user doesn't own it
    */
   static verifyOwnership(req: Request, project: { user_id?: string }): void {
     const userContext = AuthMiddleware.requireAuth(req);
     
     if (!project.user_id) {
-      throw new Error("Project does not have an owner");
+      throw new BadRequest("Project does not have an owner");
     }
 
     if (project.user_id !== userContext.userId) {
-      throw new Error("Access denied: You do not own this project");
+      throw new Forbidden("Access denied: You do not own this project");
     }
   }
 }
