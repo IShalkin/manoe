@@ -120,7 +120,9 @@ class DataConsistencyChecker {
             const characterId = qdrantChar.character?.id;
             if (!characterId) {
                 // Vector has no character ID - consider it orphaned
-                orphanedVectorIds.push(qdrantChar.qdrantPointId || "unknown");
+                // Use a descriptive identifier that helps with debugging
+                const identifier = qdrantChar.qdrantPointId || `unknown-char-${qdrantChar.name || "unnamed"}`;
+                orphanedVectorIds.push(identifier);
                 continue;
             }
             const matchingSupabase = supabaseCharacters.find((sc) => sc.id === characterId);
@@ -155,7 +157,9 @@ class DataConsistencyChecker {
             const elementId = qdrantWb.element?.id;
             if (!elementId) {
                 // Vector has no element ID - consider it orphaned
-                orphanedVectorIds.push(qdrantWb.qdrantPointId || "unknown");
+                // Use a descriptive identifier that helps with debugging
+                const identifier = qdrantWb.qdrantPointId || `unknown-wb-${qdrantWb.elementType || "unknown-type"}`;
+                orphanedVectorIds.push(identifier);
                 continue;
             }
             const matchingSupabase = supabaseWorldbuilding.find((swb) => swb.id === elementId);
@@ -190,7 +194,9 @@ class DataConsistencyChecker {
             const sceneId = qdrantScene.scene?.id;
             if (!sceneId) {
                 // Vector has no scene ID - consider it orphaned
-                orphanedVectorIds.push(qdrantScene.qdrantPointId || "unknown");
+                // Use a descriptive identifier that helps with debugging
+                const identifier = qdrantScene.qdrantPointId || `unknown-scene-${qdrantScene.sceneNumber || "unknown-number"}`;
+                orphanedVectorIds.push(identifier);
                 continue;
             }
             const matchingSupabase = supabaseDrafts.find((sd) => sd.id === sceneId);

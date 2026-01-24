@@ -146,6 +146,7 @@ let HealthController = class HealthController {
         // - Explicit error messages for debugging
         // - Complies with security best practices
         // Extract user context from JWT (set by AuthMiddleware)
+        // We don't need to store the return value since verifyOwnership will call requireAuth internally
         AuthMiddleware_1.AuthMiddleware.requireAuth(req);
         // Fetch project (filtered by RLS based on user's JWT)
         const project = await this.supabaseService.getProject(projectId);
@@ -153,6 +154,7 @@ let HealthController = class HealthController {
             throw new Error("Project not found or access denied");
         }
         // Explicit ownership verification (defense-in-depth)
+        // This will re-verify auth and check ownership
         AuthMiddleware_1.AuthMiddleware.verifyOwnership(req, project);
         const checker = (0, dataConsistencyChecker_1.createDataConsistencyChecker)(this.supabaseService, this.qdrantMemoryService);
         return checker.repairMissingEmbeddings(projectId);

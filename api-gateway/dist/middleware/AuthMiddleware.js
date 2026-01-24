@@ -85,8 +85,9 @@ let AuthMiddleware = AuthMiddleware_1 = class AuthMiddleware {
         const token = authHeader.substring(7);
         const jwtSecret = process.env.SUPABASE_JWT_SECRET;
         if (!jwtSecret) {
+            // Don't reveal specific environment variable names in production logs
             // eslint-disable-next-line no-console
-            console.warn("[AuthMiddleware] SUPABASE_JWT_SECRET not configured - cannot verify JWT tokens");
+            console.warn("[AuthMiddleware] JWT secret not configured - JWT verification disabled");
             return null;
         }
         try {

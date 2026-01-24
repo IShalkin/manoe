@@ -226,6 +226,7 @@ export class HealthController {
     // - Complies with security best practices
     
     // Extract user context from JWT (set by AuthMiddleware)
+    // We don't need to store the return value since verifyOwnership will call requireAuth internally
     AuthMiddleware.requireAuth(req);
 
     // Fetch project (filtered by RLS based on user's JWT)
@@ -235,6 +236,7 @@ export class HealthController {
     }
 
     // Explicit ownership verification (defense-in-depth)
+    // This will re-verify auth and check ownership
     AuthMiddleware.verifyOwnership(req, project);
 
     const checker = createDataConsistencyChecker(
