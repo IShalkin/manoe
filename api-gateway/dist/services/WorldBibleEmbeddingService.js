@@ -67,7 +67,7 @@ let WorldBibleEmbeddingService = class WorldBibleEmbeddingService {
     openaiClient = null;
     geminiClient = null;
     embeddingProvider = EmbeddingProvider.GEMINI;
-    embeddingDimension = 768;
+    embeddingDimension = 3072; // gemini-embedding-001 outputs 3072 dimensions
     embeddingModel = "gemini-embedding-001"; // Gemini's newest unified embedding model
     isConnected = false;
     metricsService;
@@ -92,8 +92,9 @@ let WorldBibleEmbeddingService = class WorldBibleEmbeddingService {
      */
     async connect(openaiApiKey, geminiApiKey, preferLocal = false) {
         // Check if API key changed - always re-initialize with new key
-        const geminiKeyChanged = geminiApiKey && geminiApiKey !== this.currentGeminiKey;
-        const openaiKeyChanged = openaiApiKey && openaiApiKey !== this.currentOpenaiKey;
+        // Compare without truthy check to detect both additions AND removals of keys
+        const geminiKeyChanged = geminiApiKey !== this.currentGeminiKey;
+        const openaiKeyChanged = openaiApiKey !== this.currentOpenaiKey;
         const keyChanged = geminiKeyChanged || openaiKeyChanged;
         // Allow re-initialization if:
         // 1. We were previously disabled (no API key / LOCAL mode) and now have a key
@@ -125,9 +126,9 @@ let WorldBibleEmbeddingService = class WorldBibleEmbeddingService {
         if (!preferLocal && geminiApiKey) {
             this.geminiClient = new generative_ai_1.GoogleGenerativeAI(geminiApiKey);
             this.embeddingProvider = EmbeddingProvider.GEMINI;
-            this.embeddingDimension = 768; // gemini-embedding-001 supports up to 3072, using 768 for backward compatibility
+            this.embeddingDimension = 3072; // gemini-embedding-001 outputs 3072 dimensions
             this.embeddingModel = "gemini-embedding-001";
-            console.log("WorldBibleEmbedding: Using Gemini gemini-embedding-001 (768 dimensions)");
+            console.log("WorldBibleEmbedding: Using Gemini gemini-embedding-001 (3072 dimensions)");
         }
         else if (!preferLocal && openaiApiKey) {
             this.openaiClient = new openai_1.default({ apiKey: openaiApiKey });
@@ -138,7 +139,7 @@ let WorldBibleEmbeddingService = class WorldBibleEmbeddingService {
         }
         else {
             this.embeddingProvider = EmbeddingProvider.LOCAL;
-            this.embeddingDimension = 768;
+            this.embeddingDimension = 3072; // Keep consistent dimension for collection naming
             this.embeddingModel = "none";
             console.warn("WorldBibleEmbedding: No embedding API key configured. " +
                 "Semantic consistency checking is DISABLED. " +

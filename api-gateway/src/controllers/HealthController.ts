@@ -1,11 +1,15 @@
 import { Controller, Get, PathParams, Post } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
+import { Req } from "@tsed/common";
+import { NotFound } from "@tsed/exceptions";
+import type { Request } from "express";
 import { JobQueueService } from "../services/JobQueueService";
 import { SupabaseService } from "../services/SupabaseService";
 import { QdrantMemoryService } from "../services/QdrantMemoryService";
 import { getEnvHealthStatus } from "../utils/envValidation";
 import { createDataConsistencyChecker, ConsistencyReport, GlobalConsistencyReport } from "../utils/dataConsistencyChecker";
+import { AuthMiddleware } from "../middleware/AuthMiddleware";
 
 interface HealthStatus {
   status: "healthy" | "degraded" | "unhealthy";
@@ -194,26 +198,47 @@ export class HealthController {
   @Description("Re-indexes entities that are missing Qdrant embeddings. Requires project ownership.")
   @Returns(200)
   @Returns(404)
+  @Returns(401)
+  @Returns(403)
   async repairProjectConsistency(
-    @PathParams("projectId") projectId: string
+    @PathParams("projectId") projectId: string,
+    @Req() req: Request
   ): Promise<{
     repairedCharacters: number;
     repairedWorldbuilding: number;
     repairedScenes: number;
     errors: string[];
   }> {
-    // SECURITY: Authorization is handled by Supabase RLS (Row Level Security).
-    // The getProject() call uses the authenticated user's JWT token, and RLS policies
-    // ensure users can only access their own projects. If the user doesn't own the
-    // project, getProject() returns null (RLS filters it out).
+    // SECURITY: Defense-in-depth authorization
+    // 
+    // Layer 1 (Database): Supabase RLS (Row Level Security) policies filter results
+    // based on the authenticated user's JWT token. If the user doesn't own the project,
+    // getProject() returns null (RLS filters it out).
     //
-    // TODO: For defense-in-depth, consider adding explicit user ownership verification
-    // at the application layer. This would require passing user context through the
-    // request (e.g., via middleware that extracts user_id from the JWT).
+    // Layer 2 (Application): Explicit user ownership verification at the application layer.
+    // This provides defense-in-depth security in case RLS policies are misconfigured
+    // or bypassed. We extract user_id from the JWT and explicitly verify it matches
+    // the project's user_id.
+    //
+    // Benefits of defense-in-depth:
+    // - Protection against RLS policy bugs or misconfigurations
+    // - Clear audit trail of authorization checks
+    // - Explicit error messages for debugging
+    // - Complies with security best practices
+    
+    // Extract user context from JWT (set by AuthMiddleware)
+    // We don't need to store the return value since verifyOwnership will call requireAuth internally
+    AuthMiddleware.requireAuth(req);
+
+    // Fetch project (filtered by RLS based on user's JWT)
     const project = await this.supabaseService.getProject(projectId);
     if (!project) {
-      throw new Error("Project not found or access denied");
+      throw new NotFound("Project not found or access denied");
     }
+
+    // Explicit ownership verification (defense-in-depth)
+    // This will re-verify auth and check ownership
+    AuthMiddleware.verifyOwnership(req, project);
 
     const checker = createDataConsistencyChecker(
       this.supabaseService,

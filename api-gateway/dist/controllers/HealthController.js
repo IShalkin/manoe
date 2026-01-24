@@ -8,17 +8,26 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.HealthController = void 0;
 const common_1 = require("@tsed/common");
 const schema_1 = require("@tsed/schema");
 const di_1 = require("@tsed/di");
+const common_2 = require("@tsed/common");
+const exceptions_1 = require("@tsed/exceptions");
 const JobQueueService_1 = require("../services/JobQueueService");
 const SupabaseService_1 = require("../services/SupabaseService");
+const QdrantMemoryService_1 = require("../services/QdrantMemoryService");
 const envValidation_1 = require("../utils/envValidation");
+const dataConsistencyChecker_1 = require("../utils/dataConsistencyChecker");
+const AuthMiddleware_1 = require("../middleware/AuthMiddleware");
 let HealthController = class HealthController {
     jobQueueService;
     supabaseService;
+    qdrantMemoryService;
     async healthCheck() {
         return {
             status: "ok",
@@ -112,6 +121,45 @@ let HealthController = class HealthController {
             status: "unknown",
         };
     }
+    async checkProjectConsistency(projectId) {
+        const checker = (0, dataConsistencyChecker_1.createDataConsistencyChecker)(this.supabaseService, this.qdrantMemoryService);
+        return checker.checkProjectConsistency(projectId);
+    }
+    async checkGlobalConsistency() {
+        const checker = (0, dataConsistencyChecker_1.createDataConsistencyChecker)(this.supabaseService, this.qdrantMemoryService);
+        return checker.checkGlobalConsistency();
+    }
+    async repairProjectConsistency(projectId, req) {
+        // SECURITY: Defense-in-depth authorization
+        // 
+        // Layer 1 (Database): Supabase RLS (Row Level Security) policies filter results
+        // based on the authenticated user's JWT token. If the user doesn't own the project,
+        // getProject() returns null (RLS filters it out).
+        //
+        // Layer 2 (Application): Explicit user ownership verification at the application layer.
+        // This provides defense-in-depth security in case RLS policies are misconfigured
+        // or bypassed. We extract user_id from the JWT and explicitly verify it matches
+        // the project's user_id.
+        //
+        // Benefits of defense-in-depth:
+        // - Protection against RLS policy bugs or misconfigurations
+        // - Clear audit trail of authorization checks
+        // - Explicit error messages for debugging
+        // - Complies with security best practices
+        // Extract user context from JWT (set by AuthMiddleware)
+        // We don't need to store the return value since verifyOwnership will call requireAuth internally
+        AuthMiddleware_1.AuthMiddleware.requireAuth(req);
+        // Fetch project (filtered by RLS based on user's JWT)
+        const project = await this.supabaseService.getProject(projectId);
+        if (!project) {
+            throw new exceptions_1.NotFound("Project not found or access denied");
+        }
+        // Explicit ownership verification (defense-in-depth)
+        // This will re-verify auth and check ownership
+        AuthMiddleware_1.AuthMiddleware.verifyOwnership(req, project);
+        const checker = (0, dataConsistencyChecker_1.createDataConsistencyChecker)(this.supabaseService, this.qdrantMemoryService);
+        return checker.repairMissingEmbeddings(projectId);
+    }
 };
 exports.HealthController = HealthController;
 __decorate([
@@ -122,6 +170,10 @@ __decorate([
     (0, di_1.Inject)(),
     __metadata("design:type", SupabaseService_1.SupabaseService)
 ], HealthController.prototype, "supabaseService", void 0);
+__decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", QdrantMemoryService_1.QdrantMemoryService)
+], HealthController.prototype, "qdrantMemoryService", void 0);
 __decorate([
     (0, common_1.Get)("/"),
     (0, schema_1.Summary)("Basic health check"),
@@ -159,6 +211,39 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], HealthController.prototype, "livenessCheck", null);
+__decorate([
+    (0, common_1.Get)("/consistency/:projectId"),
+    (0, schema_1.Summary)("Check data consistency for a project"),
+    (0, schema_1.Description)("Verifies consistency between Supabase and Qdrant data for a specific project"),
+    (0, schema_1.Returns)(200),
+    __param(0, (0, common_1.PathParams)("projectId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], HealthController.prototype, "checkProjectConsistency", null);
+__decorate([
+    (0, common_1.Get)("/consistency"),
+    (0, schema_1.Summary)("Check global data consistency"),
+    (0, schema_1.Description)("Verifies consistency between Supabase and Qdrant data for all projects"),
+    (0, schema_1.Returns)(200),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], HealthController.prototype, "checkGlobalConsistency", null);
+__decorate([
+    (0, common_1.Post)("/consistency/:projectId/repair"),
+    (0, schema_1.Summary)("Repair missing embeddings for a project"),
+    (0, schema_1.Description)("Re-indexes entities that are missing Qdrant embeddings. Requires project ownership."),
+    (0, schema_1.Returns)(200),
+    (0, schema_1.Returns)(404),
+    (0, schema_1.Returns)(401),
+    (0, schema_1.Returns)(403),
+    __param(0, (0, common_1.PathParams)("projectId")),
+    __param(1, (0, common_2.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], HealthController.prototype, "repairProjectConsistency", null);
 exports.HealthController = HealthController = __decorate([
     (0, common_1.Controller)("/health"),
     (0, schema_1.Tags)("Health"),

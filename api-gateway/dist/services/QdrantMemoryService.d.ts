@@ -40,6 +40,7 @@ export interface CharacterPayload {
     character: Record<string, unknown>;
     name: string;
     createdAt: string;
+    qdrantPointId?: string;
     [key: string]: unknown;
 }
 /**
@@ -50,6 +51,7 @@ export interface WorldbuildingPayload {
     elementType: string;
     element: Record<string, unknown>;
     createdAt: string;
+    qdrantPointId?: string;
     [key: string]: unknown;
 }
 /**
@@ -60,6 +62,7 @@ export interface ScenePayload {
     sceneNumber: number;
     scene: Record<string, unknown>;
     createdAt: string;
+    qdrantPointId?: string;
     [key: string]: unknown;
 }
 export declare class QdrantMemoryService {
@@ -112,9 +115,20 @@ export declare class QdrantMemoryService {
      */
     searchCharacters(projectId: string, query: string, limit?: number): Promise<SearchResult<CharacterPayload>[]>;
     /**
-     * Get all characters for a project
+     * Get all characters for a project using scroll API
+     * Returns characters with their Qdrant point IDs for accurate matching
      */
     getProjectCharacters(projectId: string): Promise<CharacterPayload[]>;
+    /**
+     * Get all worldbuilding elements for a project using scroll API
+     * Returns worldbuilding with their Qdrant point IDs for accurate matching
+     */
+    getProjectWorldbuilding(projectId: string): Promise<WorldbuildingPayload[]>;
+    /**
+     * Get all scenes for a project using scroll API
+     * Returns scenes with their Qdrant point IDs for accurate matching
+     */
+    getProjectScenes(projectId: string): Promise<ScenePayload[]>;
     /**
      * Store worldbuilding element in Qdrant
      */

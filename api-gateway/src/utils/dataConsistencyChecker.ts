@@ -155,11 +155,7 @@ export class DataConsistencyChecker {
 
   /**
    * Check characters consistency between Supabase and Qdrant
-   * 
-   * KNOWN LIMITATION: Orphan detection uses name-based matching because
-   * QdrantMemoryService.getProjectCharacters() doesn't return Qdrant point IDs.
-   * This is fragile if character names are duplicated or changed.
-   * TODO: Modify getProjectCharacters() to return point IDs for proper ID-based matching.
+   * Uses scroll API with Qdrant point IDs for accurate orphan detection
    */
   private async checkCharactersConsistency(
     projectId: string
@@ -167,14 +163,23 @@ export class DataConsistencyChecker {
     const supabaseCharacters = await this.supabaseService.getCharacters(projectId);
     const qdrantCharacters = await this.qdrantMemoryService.getProjectCharacters(projectId);
 
+    // Create Set for O(1) lookup instead of O(n) find() in loop
+    const supabaseIdSet = new Set(supabaseCharacters.map((sc) => sc.id));
+
     // Find orphaned vectors (in Qdrant but not referenced in Supabase)
-    // Note: Uses name-based matching as a workaround - see method documentation
+    // Match by the Supabase UUID stored in character.id
     const orphanedVectorIds: string[] = [];
     for (const qdrantChar of qdrantCharacters) {
-      const charName = qdrantChar.name;
-      const matchingSupabase = supabaseCharacters.find((sc) => sc.name === charName);
-      if (!matchingSupabase) {
-        orphanedVectorIds.push(charName);
+      const characterId = qdrantChar.character?.id as string | undefined;
+      if (!characterId) {
+        // Vector has no character ID - consider it orphaned
+        // Use a descriptive identifier that helps with debugging
+        const identifier = qdrantChar.qdrantPointId || `unknown-char-${qdrantChar.name || "unnamed"}`;
+        orphanedVectorIds.push(identifier);
+        continue;
+      }
+      if (!supabaseIdSet.has(characterId)) {
+        orphanedVectorIds.push(qdrantChar.qdrantPointId || String(characterId));
       }
     }
 
@@ -194,35 +199,34 @@ export class DataConsistencyChecker {
 
   /**
    * Check worldbuilding consistency between Supabase and Qdrant
-   * 
-   * KNOWN LIMITATION: Orphan detection is not supported for worldbuilding entities.
-   * This is because QdrantMemoryService doesn't expose a getProjectWorldbuilding() method
-   * like it does for characters. The empty-string search workaround is limited to 100 results
-   * and doesn't provide the entity identifiers needed for orphan detection.
-   * 
-   * To implement full orphan detection, either:
-   * 1. Add getProjectWorldbuilding() to QdrantMemoryService (recommended)
-   * 2. Use Qdrant's scroll API to fetch all vectors with project filter
+   * Uses scroll API for accurate counts and full orphan detection
    */
   private async checkWorldbuildingConsistency(
     projectId: string
   ): Promise<ConsistencyCheckResult> {
     const supabaseWorldbuilding = await this.supabaseService.getWorldbuilding(projectId);
     
-    // Get Qdrant worldbuilding count by searching with empty query
-    // WARNING: Limited to 100 results - may undercount for projects with >100 worldbuilding elements
-    // TODO: Use scroll API for accurate count (requires QdrantMemoryService changes)
-    let qdrantCount = 0;
-    try {
-      const searchResults = await this.qdrantMemoryService.searchWorldbuilding(
-        projectId,
-        "",
-        100
-      );
-      qdrantCount = searchResults.length;
-    } catch {
-      // If search fails, assume 0 vectors
-      qdrantCount = 0;
+    // Get all worldbuilding from Qdrant using scroll API (no 100-element limitation)
+    const qdrantWorldbuilding = await this.qdrantMemoryService.getProjectWorldbuilding(projectId);
+
+    // Create Set for O(1) lookup instead of O(n) find() in loop
+    const supabaseIdSet = new Set(supabaseWorldbuilding.map((swb) => swb.id));
+
+    // Find orphaned vectors (in Qdrant but not in Supabase)
+    // Match by the Supabase UUID stored in element.id
+    const orphanedVectorIds: string[] = [];
+    for (const qdrantWb of qdrantWorldbuilding) {
+      const elementId = qdrantWb.element?.id as string | undefined;
+      if (!elementId) {
+        // Vector has no element ID - consider it orphaned
+        // Use a descriptive identifier that helps with debugging
+        const identifier = qdrantWb.qdrantPointId || `unknown-wb-${qdrantWb.elementType || "unknown-type"}`;
+        orphanedVectorIds.push(identifier);
+        continue;
+      }
+      if (!supabaseIdSet.has(elementId)) {
+        orphanedVectorIds.push(qdrantWb.qdrantPointId || String(elementId));
+      }
     }
 
     // Find missing embeddings (in Supabase but no qdrant_id)
@@ -232,41 +236,43 @@ export class DataConsistencyChecker {
 
     return {
       supabaseCount: supabaseWorldbuilding.length,
-      qdrantCount,
-      // Orphan detection not supported - see method documentation above
-      orphanedVectorIds: [],
+      qdrantCount: qdrantWorldbuilding.length,
+      orphanedVectorIds,
       missingEmbeddingIds,
-      isConsistent: missingEmbeddingIds.length === 0,
+      isConsistent: orphanedVectorIds.length === 0 && missingEmbeddingIds.length === 0,
     };
   }
 
   /**
    * Check scenes/drafts consistency between Supabase and Qdrant
-   * 
-   * KNOWN LIMITATIONS (same as worldbuilding):
-   * 1. Qdrant count is capped at 100 results - may undercount for large projects
-   * 2. Orphan detection is not supported (requires scroll API implementation)
-   * 
-   * TODO: Add getProjectScenes() to QdrantMemoryService using scroll API for accurate counts
+   * Uses scroll API for accurate counts and full orphan detection
    */
   private async checkScenesConsistency(
     projectId: string
   ): Promise<ConsistencyCheckResult> {
     const supabaseDrafts = await this.supabaseService.getDrafts(projectId);
     
-    // Get Qdrant scenes by searching with empty query
-    // WARNING: Limited to 100 results - may undercount for projects with >100 scenes
-    // TODO: Use scroll API for accurate count (requires QdrantMemoryService changes)
-    let qdrantCount = 0;
-    try {
-      const searchResults = await this.qdrantMemoryService.searchScenes(
-        projectId,
-        "",
-        100
-      );
-      qdrantCount = searchResults.length;
-    } catch {
-      qdrantCount = 0;
+    // Get all scenes from Qdrant using scroll API (no 100-element limitation)
+    const qdrantScenes = await this.qdrantMemoryService.getProjectScenes(projectId);
+
+    // Create Set for O(1) lookup instead of O(n) find() in loop
+    const supabaseIdSet = new Set(supabaseDrafts.map((sd) => sd.id));
+
+    // Find orphaned vectors (in Qdrant but not in Supabase)
+    // Match by the Supabase UUID stored in scene.id
+    const orphanedVectorIds: string[] = [];
+    for (const qdrantScene of qdrantScenes) {
+      const sceneId = qdrantScene.scene?.id as string | undefined;
+      if (!sceneId) {
+        // Vector has no scene ID - consider it orphaned
+        // Use a descriptive identifier that helps with debugging
+        const identifier = qdrantScene.qdrantPointId || `unknown-scene-${qdrantScene.sceneNumber || "unknown-number"}`;
+        orphanedVectorIds.push(identifier);
+        continue;
+      }
+      if (!supabaseIdSet.has(sceneId)) {
+        orphanedVectorIds.push(qdrantScene.qdrantPointId || String(sceneId));
+      }
     }
 
     // Find missing embeddings (drafts without qdrant_id)
@@ -277,11 +283,10 @@ export class DataConsistencyChecker {
 
     return {
       supabaseCount: supabaseDrafts.length,
-      qdrantCount,
-      // Orphan detection not supported - requires scroll API implementation
-      orphanedVectorIds: [],
+      qdrantCount: qdrantScenes.length,
+      orphanedVectorIds,
       missingEmbeddingIds,
-      isConsistent: missingEmbeddingIds.length === 0,
+      isConsistent: orphanedVectorIds.length === 0 && missingEmbeddingIds.length === 0,
     };
   }
 

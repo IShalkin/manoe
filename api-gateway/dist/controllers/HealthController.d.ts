@@ -1,3 +1,5 @@
+import type { Request } from "express";
+import { ConsistencyReport, GlobalConsistencyReport } from "../utils/dataConsistencyChecker";
 interface HealthStatus {
     status: "healthy" | "degraded" | "unhealthy";
     timestamp: string;
@@ -22,6 +24,7 @@ interface ServiceStatus {
 export declare class HealthController {
     private jobQueueService;
     private supabaseService;
+    private qdrantMemoryService;
     healthCheck(): Promise<{
         status: string;
         timestamp: string;
@@ -37,6 +40,14 @@ export declare class HealthController {
     private checkRedis;
     private checkSupabase;
     private checkQdrant;
+    checkProjectConsistency(projectId: string): Promise<ConsistencyReport>;
+    checkGlobalConsistency(): Promise<GlobalConsistencyReport>;
+    repairProjectConsistency(projectId: string, req: Request): Promise<{
+        repairedCharacters: number;
+        repairedWorldbuilding: number;
+        repairedScenes: number;
+        errors: string[];
+    }>;
 }
 export {};
 //# sourceMappingURL=HealthController.d.ts.map

@@ -41,6 +41,7 @@ import { RedisStreamsService } from "./services/RedisStreamsService";
 
 // Import middleware
 import { RateLimitMiddleware } from "./middleware/RateLimitMiddleware";
+import { AuthMiddleware } from "./middleware/AuthMiddleware";
 
 const rootDir = __dirname;
 
@@ -156,6 +157,7 @@ All endpoints require a valid API key passed via the \`x-api-key\` header or Bea
     methodOverride(),
     bodyParser.json(),
     bodyParser.urlencoded({ extended: true }),
+    AuthMiddleware,
     RateLimitMiddleware,
   ],
   exclude: ["**/*.spec.ts"],

@@ -18,10 +18,14 @@ const schema_1 = require("@tsed/schema");
 const di_1 = require("@tsed/di");
 const JobQueueService_1 = require("../services/JobQueueService");
 const SupabaseService_1 = require("../services/SupabaseService");
+const QdrantMemoryService_1 = require("../services/QdrantMemoryService");
+const CacheService_1 = require("../services/CacheService");
 const ProjectModels_1 = require("../models/ProjectModels");
 let ProjectController = class ProjectController {
     jobQueueService;
     supabaseService;
+    qdrantMemoryService;
+    cacheService;
     async initProject(body) {
         // Create project in Supabase
         const project = await this.supabaseService.createProject({
@@ -53,10 +57,14 @@ let ProjectController = class ProjectController {
         };
     }
     async getProject(id) {
-        const project = await this.supabaseService.getProject(id);
-        if (!project) {
-            throw new Error("Project not found");
-        }
+        // Use cache with getOrSet pattern for read operations
+        const project = await this.cacheService.getOrSet("project", id, async () => {
+            const dbProject = await this.supabaseService.getProject(id);
+            if (!dbProject) {
+                throw new Error("Project not found");
+            }
+            return dbProject;
+        });
         return {
             id: project.id,
             status: project.status,
@@ -68,7 +76,8 @@ let ProjectController = class ProjectController {
         };
     }
     async getNarrativePossibility(id) {
-        return await this.supabaseService.getNarrativePossibility(id);
+        // Use cache with getOrSet pattern for read operations
+        return await this.cacheService.getOrSet("narrative", id, async () => await this.supabaseService.getNarrativePossibility(id));
     }
     async approvePhase(id, phase) {
         const project = await this.supabaseService.getProject(id);
@@ -88,6 +97,8 @@ let ProjectController = class ProjectController {
         }
         // Update project status
         await this.supabaseService.updateProjectStatus(id, nextPhase);
+        // Invalidate cache after status update
+        await this.cacheService.invalidate("project", id);
         // Enqueue next phase job
         await this.jobQueueService.enqueueJob({
             jobId: `${nextPhase}-${id}`,
@@ -115,7 +126,26 @@ let ProjectController = class ProjectController {
         };
     }
     async deleteProject(id) {
+        // First, delete all Qdrant vectors for this project to prevent orphaned data
+        // This must happen BEFORE Supabase deletion since we need the project to exist
+        // for proper cascade deletion tracking
+        // 
+        // FAIL-FAST APPROACH: If Qdrant deletion fails, we abort the entire operation
+        // to prevent orphaned data. This follows the "fail fast" principle - it's better
+        // to fail and let the user retry than to succeed with partial deletion.
+        try {
+            await this.qdrantMemoryService.deleteProjectData(id);
+            console.log(`[ProjectController] Deleted Qdrant vectors for project ${id}`);
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[ProjectController] Failed to delete Qdrant vectors for project ${id}:`, error);
+            throw new Error(`Cannot delete project: vector cleanup failed. Please try again. ${errorMessage}`);
+        }
+        // Delete from Supabase (cascades to related tables via foreign keys)
         await this.supabaseService.deleteProject(id);
+        // Invalidate all caches for this project
+        await this.cacheService.invalidateProject(id);
         return { success: true };
     }
     async _getPhaseInputData(projectId, phase) {
@@ -162,6 +192,14 @@ __decorate([
     (0, di_1.Inject)(),
     __metadata("design:type", SupabaseService_1.SupabaseService)
 ], ProjectController.prototype, "supabaseService", void 0);
+__decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", QdrantMemoryService_1.QdrantMemoryService)
+], ProjectController.prototype, "qdrantMemoryService", void 0);
+__decorate([
+    (0, di_1.Inject)(),
+    __metadata("design:type", CacheService_1.CacheService)
+], ProjectController.prototype, "cacheService", void 0);
 __decorate([
     (0, common_1.Post)("/init"),
     (0, schema_1.Summary)("Initialize a new narrative project"),
@@ -216,8 +254,9 @@ __decorate([
 __decorate([
     (0, common_1.Delete)("/:id"),
     (0, schema_1.Summary)("Delete a project"),
-    (0, schema_1.Description)("Delete a project and all associated data"),
+    (0, schema_1.Description)("Delete a project and all associated data including vector embeddings. Fails if vector deletion fails to maintain data consistency."),
     (0, schema_1.Returns)(200),
+    (0, schema_1.Returns)(500),
     __param(0, (0, common_1.PathParams)("id")),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),

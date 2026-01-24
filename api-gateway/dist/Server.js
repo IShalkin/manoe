@@ -81,6 +81,9 @@ const FeedbackController_1 = require("./controllers/FeedbackController");
 // Import services for state recovery
 const StorytellerOrchestrator_1 = require("./services/StorytellerOrchestrator");
 const RedisStreamsService_1 = require("./services/RedisStreamsService");
+// Import middleware
+const RateLimitMiddleware_1 = require("./middleware/RateLimitMiddleware");
+const AuthMiddleware_1 = require("./middleware/AuthMiddleware");
 const rootDir = __dirname;
 let Server = class Server {
     app;
@@ -258,7 +261,7 @@ All endpoints require a valid API key passed via the \`x-api-key\` header or Bea
                 credentials: true,
                 methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
                 allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "x-api-key"],
-                exposedHeaders: ["Content-Length", "X-Request-Id"],
+                exposedHeaders: ["Content-Length", "X-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
                 preflightContinue: false,
                 optionsSuccessStatus: 204,
             }),
@@ -267,8 +270,13 @@ All endpoints require a valid API key passed via the \`x-api-key\` header or Bea
             (0, method_override_1.default)(),
             bodyParser.json(),
             bodyParser.urlencoded({ extended: true }),
+            AuthMiddleware_1.AuthMiddleware,
+            RateLimitMiddleware_1.RateLimitMiddleware,
         ],
         exclude: ["**/*.spec.ts"],
+        componentsScan: [
+            `${rootDir}/middleware/**/*.ts`,
+        ],
     })
 ], Server);
 //# sourceMappingURL=Server.js.map
