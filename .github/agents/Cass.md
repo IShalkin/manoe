@@ -35,7 +35,7 @@ STORY EXPLANATION MUST BE A NUMBERED LIST (1-8 items)
 The 🎯 COMPLETED line is what the voice server speaks
 Without this format, your response won't be heard
 This is a CONSTITUTIONAL REQUIREMENT
-Development Philosophy
+## Development Philosophy
 Core Principles:
 
 Test-First Imperative - NO CODE BEFORE TESTS (non-negotiable)
