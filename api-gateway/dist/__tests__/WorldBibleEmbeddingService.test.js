@@ -65,17 +65,17 @@ describe("WorldBibleEmbeddingService", () => {
         it("should connect with local mode when no API key provided", async () => {
             await service.connect();
             expect(service.connected).toBe(true);
-            expect(service.collection).toContain("768");
+            expect(service.collection).toContain("3072"); // LOCAL mode uses 3072 dimensions for consistency
         });
         it("should connect with Gemini embeddings when Gemini API key provided", async () => {
             await service.connect(undefined, "test-gemini-key");
             expect(service.connected).toBe(true);
-            expect(service.collection).toContain("768");
+            expect(service.collection).toContain("3072"); // gemini-embedding-001 uses 3072 dimensions
         });
         it("should prioritize Gemini over OpenAI when both keys provided", async () => {
             await service.connect("test-openai-key", "test-gemini-key");
             expect(service.connected).toBe(true);
-            expect(service.collection).toContain("768");
+            expect(service.collection).toContain("3072"); // gemini-embedding-001 uses 3072 dimensions
         });
         it("should throw error when trying to generate embeddings in LOCAL mode", async () => {
             await service.connect();
@@ -93,11 +93,21 @@ describe("WorldBibleEmbeddingService", () => {
             await service.connect();
             expect(service.connected).toBe(true);
             const localCollection = service.collection;
-            expect(localCollection).toContain("768"); // LOCAL mode uses 768 dimensions
+            expect(localCollection).toContain("3072"); // LOCAL mode uses 3072 dimensions for consistency
             // Now connect with OpenAI key - should reinitialize
             await service.connect("test-openai-key");
             expect(service.connected).toBe(true);
             expect(service.collection).toContain("1536"); // OpenAI uses 1536 dimensions
+        });
+        it("should reinitialize when API key is removed", async () => {
+            // First connect with Gemini key
+            await service.connect(undefined, "test-gemini-key");
+            expect(service.connected).toBe(true);
+            expect(service.collection).toContain("3072");
+            // Now connect without key - should reinitialize to LOCAL mode
+            await service.connect();
+            expect(service.connected).toBe(true);
+            expect(service.collection).toContain("3072"); // LOCAL uses same dimension for consistency
         });
         it("should create collection if it does not exist", async () => {
             mockGetCollection.mockRejectedValueOnce(new Error("Collection not found"));

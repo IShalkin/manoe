@@ -2,6 +2,8 @@ import { StoryProjectDTO, ProjectResponseDTO, NarrativePossibilityDTO } from "..
 export declare class ProjectController {
     private jobQueueService;
     private supabaseService;
+    private qdrantMemoryService;
+    private cacheService;
     initProject(body: StoryProjectDTO): Promise<ProjectResponseDTO>;
     getProject(id: string): Promise<ProjectResponseDTO>;
     getNarrativePossibility(id: string): Promise<NarrativePossibilityDTO | null>;

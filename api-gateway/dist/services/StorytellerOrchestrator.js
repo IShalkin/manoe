@@ -122,10 +122,6 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
         };
         this.activeRuns.set(runId, state);
         common_1.$log.info(`[StorytellerOrchestrator] startGeneration: state initialized and stored, runId: ${runId}`);
-        // Initialize Qdrant memory with API key for embeddings
-        await this.qdrantMemory.connect(options.llmConfig.provider === LLMModels_1.LLMProvider.OPENAI ? options.llmConfig.apiKey : undefined, options.llmConfig.provider === LLMModels_1.LLMProvider.GEMINI ? options.llmConfig.apiKey : undefined);
-        // Initialize WorldBibleEmbeddingService for semantic consistency checking
-        // 
         // Embedding API Key Resolution (in priority order):
         // 1. Dedicated embedding API key from frontend settings (always treated as Gemini key)
         // 2. LLM provider key (only if provider is Gemini or OpenAI)
@@ -157,8 +153,12 @@ let StorytellerOrchestrator = class StorytellerOrchestrator {
             // No embedding key available - semantic checks will be disabled
             embeddingSource = "none (semantic checks disabled)";
         }
+        // Initialize Qdrant memory with resolved embedding API keys
+        // IMPORTANT: Use the same resolved keys for both services to ensure consistent embedding dimensions
+        await this.qdrantMemory.connect(openaiApiKey, geminiApiKey);
+        // Initialize WorldBibleEmbeddingService for semantic consistency checking
         await this.worldBibleEmbedding.connect(openaiApiKey, geminiApiKey);
-        common_1.$log.info(`[StorytellerOrchestrator] WorldBibleEmbeddingService initialized with: ${embeddingSource}, provider: ${this.worldBibleEmbedding.provider}`);
+        common_1.$log.info(`[StorytellerOrchestrator] Embedding services initialized with: ${embeddingSource}, provider: ${this.worldBibleEmbedding.provider}`);
         // Start Langfuse trace
         this.langfuse.startTrace({
             projectId: options.projectId,

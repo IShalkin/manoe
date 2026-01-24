@@ -44,8 +44,8 @@ let QdrantMemoryService = class QdrantMemoryService {
     openaiClient = null;
     geminiClient = null;
     embeddingProvider = EmbeddingProvider.LOCAL;
-    embeddingDimension = 384;
-    embeddingModel = "all-MiniLM-L6-v2";
+    embeddingDimension = 3072; // Default to 3072 for collection naming consistency
+    embeddingModel = "none";
     isConnected = false;
     // Track current API keys to detect changes (fixes singleton caching issue)
     currentGeminiKey;
@@ -70,8 +70,9 @@ let QdrantMemoryService = class QdrantMemoryService {
      */
     async connect(openaiApiKey, geminiApiKey, preferLocal = false) {
         // Detect if API keys have changed - need to reinitialize if so
-        const geminiKeyChanged = geminiApiKey && geminiApiKey !== this.currentGeminiKey;
-        const openaiKeyChanged = openaiApiKey && openaiApiKey !== this.currentOpenaiKey;
+        // Compare without truthy check to detect both additions AND removals of keys
+        const geminiKeyChanged = geminiApiKey !== this.currentGeminiKey;
+        const openaiKeyChanged = openaiApiKey !== this.currentOpenaiKey;
         const keyChanged = geminiKeyChanged || openaiKeyChanged;
         // Skip if already connected with same keys
         if (this.isConnected && !keyChanged) {
@@ -100,15 +101,15 @@ let QdrantMemoryService = class QdrantMemoryService {
         else if (!preferLocal && geminiApiKey) {
             this.geminiClient = new generative_ai_1.GoogleGenerativeAI(geminiApiKey);
             this.embeddingProvider = EmbeddingProvider.GEMINI;
-            this.embeddingDimension = 768;
+            this.embeddingDimension = 3072; // gemini-embedding-001 outputs 3072 dimensions
             this.embeddingModel = "gemini-embedding-001";
-            console.log("Qdrant Memory: Using Gemini gemini-embedding-001 (768 dimensions)");
+            console.log("Qdrant Memory: Using Gemini gemini-embedding-001 (3072 dimensions)");
         }
         else {
             this.embeddingProvider = EmbeddingProvider.LOCAL;
-            this.embeddingDimension = 384;
-            this.embeddingModel = "all-MiniLM-L6-v2";
-            console.log("Qdrant Memory: Using local embeddings (384 dimensions)");
+            this.embeddingDimension = 3072; // Use 3072 for collection naming consistency with Gemini
+            this.embeddingModel = "none";
+            console.log("Qdrant Memory: Using local embeddings (3072 dimensions for consistency)");
         }
         // Set versioned collection names based on embedding dimension
         // This prevents data loss when switching embedding providers
@@ -182,10 +183,8 @@ let QdrantMemoryService = class QdrantMemoryService {
                     ? this.embeddingModel
                     : `models/${this.embeddingModel}`;
                 const model = this.geminiClient.getGenerativeModel({ model: modelPath });
-                // Use proper content format with role and parts
-                const result = await model.embedContent({
-                    content: { role: "user", parts: [{ text }] },
-                });
+                // Use simple text format for embedContent (embedding models support string input)
+                const result = await model.embedContent(text);
                 return result.embedding.values;
             }
             catch (error) {
@@ -288,18 +287,88 @@ let QdrantMemoryService = class QdrantMemoryService {
         }
     }
     /**
-     * Get all characters for a project
+     * Get all characters for a project using scroll API
+     * Returns characters with their Qdrant point IDs for accurate matching
      */
     async getProjectCharacters(projectId) {
         if (!this.client)
             return [];
-        const results = await this.client.scroll(this.collectionCharacters, {
-            filter: {
-                must: [{ key: "projectId", match: { value: projectId } }],
-            },
-            limit: 100,
-        });
-        return results.points.map((point) => point.payload);
+        const allCharacters = [];
+        let offset = undefined;
+        do {
+            const results = await this.client.scroll(this.collectionCharacters, {
+                filter: {
+                    must: [{ key: "projectId", match: { value: projectId } }],
+                },
+                limit: 100,
+                offset,
+                with_payload: true,
+            });
+            for (const point of results.points) {
+                const payload = point.payload;
+                payload.qdrantPointId = String(point.id);
+                allCharacters.push(payload);
+            }
+            const nextOffset = results.next_page_offset;
+            offset = typeof nextOffset === "string" || typeof nextOffset === "number" ? nextOffset : undefined;
+        } while (offset !== undefined);
+        return allCharacters;
+    }
+    /**
+     * Get all worldbuilding elements for a project using scroll API
+     * Returns worldbuilding with their Qdrant point IDs for accurate matching
+     */
+    async getProjectWorldbuilding(projectId) {
+        if (!this.client)
+            return [];
+        const allWorldbuilding = [];
+        let offset = undefined;
+        do {
+            const results = await this.client.scroll(this.collectionWorldbuilding, {
+                filter: {
+                    must: [{ key: "projectId", match: { value: projectId } }],
+                },
+                limit: 100,
+                offset,
+                with_payload: true,
+            });
+            for (const point of results.points) {
+                const payload = point.payload;
+                payload.qdrantPointId = String(point.id);
+                allWorldbuilding.push(payload);
+            }
+            const nextOffset = results.next_page_offset;
+            offset = typeof nextOffset === "string" || typeof nextOffset === "number" ? nextOffset : undefined;
+        } while (offset !== undefined);
+        return allWorldbuilding;
+    }
+    /**
+     * Get all scenes for a project using scroll API
+     * Returns scenes with their Qdrant point IDs for accurate matching
+     */
+    async getProjectScenes(projectId) {
+        if (!this.client)
+            return [];
+        const allScenes = [];
+        let offset = undefined;
+        do {
+            const results = await this.client.scroll(this.collectionScenes, {
+                filter: {
+                    must: [{ key: "projectId", match: { value: projectId } }],
+                },
+                limit: 100,
+                offset,
+                with_payload: true,
+            });
+            for (const point of results.points) {
+                const payload = point.payload;
+                payload.qdrantPointId = String(point.id);
+                allScenes.push(payload);
+            }
+            const nextOffset = results.next_page_offset;
+            offset = typeof nextOffset === "string" || typeof nextOffset === "number" ? nextOffset : undefined;
+        } while (offset !== undefined);
+        return allScenes;
     }
     /**
      * Store worldbuilding element in Qdrant
