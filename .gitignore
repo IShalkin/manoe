@@ -13,6 +13,10 @@ frontend/dist.tar.gz
 node_modules/
 dist.tar.gz
 
+# API Gateway build artifacts
+api-gateway/dist/
+api-gateway/node_modules/
+
 # Python
 __pycache__/
 *.py[cod]

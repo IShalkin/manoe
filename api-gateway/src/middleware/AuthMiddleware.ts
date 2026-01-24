@@ -24,7 +24,10 @@ export interface UserContext {
 }
 
 // Extend Express Request to include user context
+// This is a module augmentation, not a traditional namespace
+// eslint-disable-next-line @typescript-eslint/no-namespace
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       userContext?: UserContext;
@@ -64,7 +67,7 @@ export class AuthMiddleware {
     @Req() req: Request,
     @Res() res: Response,
     @Next() next: NextFunction,
-    @Context() ctx: Context
+    @Context() _ctx: Context
   ): Promise<void> {
     // Skip auth extraction for exempt paths
     if (this.isExemptPath(req.path)) {
@@ -79,6 +82,8 @@ export class AuthMiddleware {
       }
     } catch (error) {
       // Log but don't block - let controllers decide if auth is required
+      // Using console.debug for optional auth extraction (not a critical error)
+      // eslint-disable-next-line no-console
       console.debug("[AuthMiddleware] Failed to extract user context:", error instanceof Error ? error.message : "Unknown error");
     }
 
@@ -103,6 +108,7 @@ export class AuthMiddleware {
     const jwtSecret = process.env.SUPABASE_JWT_SECRET;
 
     if (!jwtSecret) {
+      // eslint-disable-next-line no-console
       console.warn("[AuthMiddleware] SUPABASE_JWT_SECRET not configured - cannot verify JWT tokens");
       return null;
     }
@@ -119,8 +125,10 @@ export class AuthMiddleware {
     } catch (error) {
       // Invalid or expired token
       if (error instanceof jwt.JsonWebTokenError) {
+        // eslint-disable-next-line no-console
         console.debug("[AuthMiddleware] Invalid JWT token:", error.message);
       } else if (error instanceof jwt.TokenExpiredError) {
+        // eslint-disable-next-line no-console
         console.debug("[AuthMiddleware] Expired JWT token");
       }
       return null;

@@ -226,7 +226,7 @@ export class HealthController {
     // - Complies with security best practices
     
     // Extract user context from JWT (set by AuthMiddleware)
-    const userContext = AuthMiddleware.requireAuth(req);
+    AuthMiddleware.requireAuth(req);
 
     // Fetch project (filtered by RLS based on user's JWT)
     const project = await this.supabaseService.getProject(projectId);

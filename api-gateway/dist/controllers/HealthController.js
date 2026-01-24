@@ -146,7 +146,7 @@ let HealthController = class HealthController {
         // - Explicit error messages for debugging
         // - Complies with security best practices
         // Extract user context from JWT (set by AuthMiddleware)
-        const userContext = AuthMiddleware_1.AuthMiddleware.requireAuth(req);
+        AuthMiddleware_1.AuthMiddleware.requireAuth(req);
         // Fetch project (filtered by RLS based on user's JWT)
         const project = await this.supabaseService.getProject(projectId);
         if (!project) {

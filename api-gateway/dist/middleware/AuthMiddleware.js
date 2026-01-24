@@ -50,7 +50,7 @@ let AuthMiddleware = AuthMiddleware_1 = class AuthMiddleware {
      * but doesn't block requests without it. Individual controllers can decide
      * whether to require authentication.
      */
-    async use(req, res, next, ctx) {
+    async use(req, res, next, _ctx) {
         // Skip auth extraction for exempt paths
         if (this.isExemptPath(req.path)) {
             next();
@@ -64,6 +64,8 @@ let AuthMiddleware = AuthMiddleware_1 = class AuthMiddleware {
         }
         catch (error) {
             // Log but don't block - let controllers decide if auth is required
+            // Using console.debug for optional auth extraction (not a critical error)
+            // eslint-disable-next-line no-console
             console.debug("[AuthMiddleware] Failed to extract user context:", error instanceof Error ? error.message : "Unknown error");
         }
         next();
@@ -83,6 +85,7 @@ let AuthMiddleware = AuthMiddleware_1 = class AuthMiddleware {
         const token = authHeader.substring(7);
         const jwtSecret = process.env.SUPABASE_JWT_SECRET;
         if (!jwtSecret) {
+            // eslint-disable-next-line no-console
             console.warn("[AuthMiddleware] SUPABASE_JWT_SECRET not configured - cannot verify JWT tokens");
             return null;
         }
@@ -98,9 +101,11 @@ let AuthMiddleware = AuthMiddleware_1 = class AuthMiddleware {
         catch (error) {
             // Invalid or expired token
             if (error instanceof jsonwebtoken_1.default.JsonWebTokenError) {
+                // eslint-disable-next-line no-console
                 console.debug("[AuthMiddleware] Invalid JWT token:", error.message);
             }
             else if (error instanceof jsonwebtoken_1.default.TokenExpiredError) {
+                // eslint-disable-next-line no-console
                 console.debug("[AuthMiddleware] Expired JWT token");
             }
             return null;

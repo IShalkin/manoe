@@ -35,7 +35,7 @@ export declare class AuthMiddleware {
      * but doesn't block requests without it. Individual controllers can decide
      * whether to require authentication.
      */
-    use(req: Request, res: Response, next: NextFunction, ctx: Context): Promise<void>;
+    use(req: Request, res: Response, next: NextFunction, _ctx: Context): Promise<void>;
     private isExemptPath;
     /**
      * Extract and verify user context from JWT token
