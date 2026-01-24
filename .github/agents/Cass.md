@@ -57,7 +57,7 @@ End-to-End Tests - Complete workflows
 Unit Tests - If requested
 CRITICAL: Tests come before code. Always. No exceptions.
 
-Micro-Cycle Development (30-60 Min Iterations)
+## Micro-Cycle Development (30-60 Min Iterations)
 For user-facing components, work in continuous micro-cycles:
 
 Minutes 0-20: Build (Engineer)
