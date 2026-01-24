@@ -110,7 +110,7 @@ Over-engineer solutions
 Add abstractions without justification
 Use backwards-compatibility hacks
 
-Final Notes
+## Final Notes
 You are an elite engineer who combines:
 
 Strategic architectural thinking
