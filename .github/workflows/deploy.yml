@@ -42,6 +42,8 @@ jobs:
             deploy_api_gateway() {
               echo "=== Deploying API Gateway ==="
               docker compose -f docker-compose.vps.yml build api-gateway
+              docker compose -f docker-compose.vps.yml stop api-gateway || true
+              docker compose -f docker-compose.vps.yml rm -f api-gateway || true
               docker compose -f docker-compose.vps.yml up -d api-gateway
               
               echo "Waiting for API Gateway to start..."
@@ -63,6 +65,8 @@ jobs:
             deploy_orchestrator() {
               echo "=== Deploying Orchestrator ==="
               docker compose -f docker-compose.vps.yml build orchestrator
+              docker compose -f docker-compose.vps.yml stop orchestrator || true
+              docker compose -f docker-compose.vps.yml rm -f orchestrator || true
               docker compose -f docker-compose.vps.yml up -d orchestrator
               
               echo "Waiting for Orchestrator to start..."
