@@ -1,721 +1,86 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import rehypeSanitize from 'rehype-sanitize';
-import type { ProjectResult } from '../hooks/useProjects';
-import { orchestratorFetch, getAuthenticatedSSEUrl } from '../lib/api';
-import type { NarrativePossibility, NarrativePossibilitiesRecommendation } from '../types';
+import { orchestratorFetch } from '../lib/api';
 import { NarrativePossibilitiesSelector } from './NarrativePossibilitiesSelector';
 import { FeedbackButtons } from './FeedbackButtons';
+import { MarkdownContent } from './chat/MarkdownContent';
+import type {
+  AgentChatProps,
+  EditState,
+  AgentName,
+  AgentState,
+} from '../types/chat';
+import {
+  AGENTS,
+  AGENT_DEPENDENCIES,
+  AGENT_TO_PHASE,
+  AGENT_COLORS,
+  AGENT_BORDER_COLORS,
+  AGENT_GLOW_COLORS,
+  AGENT_DESCRIPTIONS,
+  AGENT_TEXT_COLORS,
+  AGENT_ICONS,
+  normalizeAgentName,
+  getPhasesToRegenerate,
+} from '../types/chat';
+import {
+  extractStoryText,
+  formatAgentContent,
+  formatStrategistContent,
+} from '../utils/formatting';
 
-// Maximum input length for JSON parsing to prevent ReDoS attacks
-const MAX_JSON_INPUT_LENGTH = 1_000_000; // 1MB limit
-
-// Tolerant JSON parser that handles common LLM output issues
-// Security: Input length is limited to prevent ReDoS attacks
-function tolerantJsonParse(str: string): unknown | null {
-  // Security: Reject excessively long inputs to prevent ReDoS
-  if (!str || str.length > MAX_JSON_INPUT_LENGTH) {
-    console.warn('[tolerantJsonParse] Input rejected: empty or exceeds max length');
-    return null;
-  }
+export function AgentChat({
+  // Identification
+  runId,
+  projectId,
   
-  const trimmed = str.trim();
+  // SSE Data (from parent)
+  messages,
+  isConnected,
+  currentPhase,
+  activeAgent,
+  isComplete,
+  isCancelled,
+  error: sseError,
   
-  // Try standard JSON.parse first (fastest path)
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // Continue to tolerant parsing
-  }
+  // Narrative Possibilities
+  narrativePossibilities,
+  narrativeRecommendation,
   
-  // Try to fix common issues
-  let fixed = trimmed;
+  // Checkpoints
+  checkpointResults,
+  activeCheckpoint,
   
-  // Remove trailing commas before } or ]
-  // Note: This regex is safe - linear time complexity
-  fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
+  // Motif Layer
+  motifLayerResult,
+  isMotifPlanningActive,
   
-  // Replace Python-style booleans and None
-  // Note: These regexes are safe - word boundary matching is O(n)
-  fixed = fixed.replace(/\bTrue\b/g, 'true');
-  fixed = fixed.replace(/\bFalse\b/g, 'false');
-  fixed = fixed.replace(/\bNone\b/g, 'null');
+  // Diagnostics
+  diagnosticResults,
+  activeDiagnosticScene,
   
-  // Replace single quotes with double quotes (careful with apostrophes)
-  // Only do this if there are no double quotes in the string
-  if (!fixed.includes('"') && fixed.includes("'")) {
-    fixed = fixed.replace(/'/g, '"');
-  }
+  // Interruption
+  isInterrupted,
   
-  try {
-    return JSON.parse(fixed);
-  } catch {
-    // Continue
-  }
+  // Project data
+  projectResult,
   
-  // Try to extract JSON from the string
-  // Note: This regex could be slow on pathological inputs, but we've limited input size
-  const jsonMatch = fixed.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[0]);
-    } catch {
-      // Try with fixes on extracted JSON
-      let extracted = jsonMatch[0];
-      extracted = extracted.replace(/,(\s*[}\]])/g, '$1');
-      extracted = extracted.replace(/\bTrue\b/g, 'true');
-      extracted = extracted.replace(/\bFalse\b/g, 'false');
-      extracted = extracted.replace(/\bNone\b/g, 'null');
-      try {
-        return JSON.parse(extracted);
-      } catch {
-        // Give up
-      }
-    }
-  }
-  
-  return null;
-}
-
-function formatAnyAsMarkdown(parsed: unknown): string {
-  if (parsed === null || parsed === undefined) {
-    return '';
-  }
-  if (typeof parsed === 'string') {
-    // Check if the string itself is JSON (double-encoded)
-    const trimmed = parsed.trim();
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        const innerParsed = JSON.parse(trimmed);
-        return formatAnyAsMarkdown(innerParsed);
-      } catch {
-        return parsed;
-      }
-    }
-    return parsed;
-  }
-  if (typeof parsed === 'number' || typeof parsed === 'boolean') {
-    return String(parsed);
-  }
-  if (Array.isArray(parsed)) {
-    return parsed.map((item, i) => {
-      if (typeof item === 'object' && item !== null) {
-        return `${i + 1}. ${formatObjectInline(item as Record<string, unknown>)}`;
-      }
-      return `${i + 1}. ${item}`;
-    }).join('\n');
-  }
-  if (typeof parsed === 'object') {
-    return formatJsonAsMarkdown(parsed as Record<string, unknown>);
-  }
-  return String(parsed);
-}
-
-// Extract clean story text from agent content (Polish or Writer)
-function extractStoryText(content: string, agentType: 'Polish' | 'Writer' | 'other'): string {
-  if (!content || typeof content !== 'string') {
-    return '';
-  }
-
-  const trimmed = content.trim();
-  
-  // Try to parse as JSON first
-  let parsed: unknown = null;
-  
-  // Check for ```json code blocks
-  if (trimmed.includes('```json')) {
-    const jsonMatch = trimmed.match(/```json\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      parsed = tolerantJsonParse(jsonMatch[1]);
-    }
-  }
-  
-  // Try direct JSON parse
-  if (parsed === null) {
-    parsed = tolerantJsonParse(trimmed);
-  }
-  
-  // Try to extract JSON from string
-  if (parsed === null && (trimmed.includes('{') || trimmed.includes('['))) {
-    const extracted = extractJsonFromString(trimmed);
-    if (extracted) {
-      parsed = tolerantJsonParse(extracted);
-    }
-  }
-  
-  // If we have a parsed object, extract the story text
-  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    const obj = parsed as Record<string, unknown>;
-    
-    // For Polish agent, prefer polished_content
-    if (agentType === 'Polish') {
-      if (typeof obj.polished_content === 'string' && obj.polished_content.trim()) {
-        return obj.polished_content;
-      }
-      // Fallback fields for Polish
-      if (typeof obj.content === 'string' && obj.content.trim()) {
-        return obj.content;
-      }
-    }
-    
-    // For Writer agent, prefer narrative_content
-    if (agentType === 'Writer') {
-      if (typeof obj.narrative_content === 'string' && obj.narrative_content.trim()) {
-        return obj.narrative_content;
-      }
-      if (typeof obj.scene_content === 'string' && obj.scene_content.trim()) {
-        return obj.scene_content;
-      }
-      if (typeof obj.content === 'string' && obj.content.trim()) {
-        return obj.content;
-      }
-    }
-    
-    // Generic fallbacks for any agent
-    if (typeof obj.polished_content === 'string' && obj.polished_content.trim()) {
-      return obj.polished_content;
-    }
-    if (typeof obj.narrative_content === 'string' && obj.narrative_content.trim()) {
-      return obj.narrative_content;
-    }
-    if (typeof obj.scene_content === 'string' && obj.scene_content.trim()) {
-      return obj.scene_content;
-    }
-    if (typeof obj.content === 'string' && obj.content.trim()) {
-      return obj.content;
-    }
-  }
-  
-  // If content doesn't look like JSON, return as-is (might be plain text)
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[') && !trimmed.includes('```json')) {
-    return trimmed;
-  }
-  
-  // Last resort: return the formatted content (will show JSON as markdown)
-  return '';
-}
-
-function extractJsonFromString(content: string): string | null {
-  // Try to find balanced JSON object or array
-  const trimmed = content.trim();
-  let startChar = '';
-  let endChar = '';
-  let startIdx = -1;
-  
-  // Find the first { or [
-  for (let i = 0; i < trimmed.length; i++) {
-    if (trimmed[i] === '{') {
-      startChar = '{';
-      endChar = '}';
-      startIdx = i;
-      break;
-    } else if (trimmed[i] === '[') {
-      startChar = '[';
-      endChar = ']';
-      startIdx = i;
-      break;
-    }
-  }
-  
-  if (startIdx === -1) return null;
-  
-  // Count brackets to find balanced end
-  let depth = 0;
-  let inString = false;
-  let escapeNext = false;
-  
-  for (let i = startIdx; i < trimmed.length; i++) {
-    const char = trimmed[i];
-    
-    if (escapeNext) {
-      escapeNext = false;
-      continue;
-    }
-    
-    if (char === '\\' && inString) {
-      escapeNext = true;
-      continue;
-    }
-    
-    if (char === '"' && !escapeNext) {
-      inString = !inString;
-      continue;
-    }
-    
-    if (!inString) {
-      if (char === startChar) depth++;
-      else if (char === endChar) {
-        depth--;
-        if (depth === 0) {
-          return trimmed.substring(startIdx, i + 1);
-        }
-      }
-    }
-  }
-  
-  return null; // Incomplete JSON
-}
-
-function formatAgentContent(content: string): string {
-  if (!content || typeof content !== 'string') {
-    return '';
-  }
-  
-  const trimmed = content.trim();
-  
-  // Check for ```json code blocks first
-  if (content.includes('```json') || content.includes('```')) {
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      const blockParsed = tolerantJsonParse(jsonMatch[1]);
-      if (blockParsed !== null) {
-        return formatAnyAsMarkdown(blockParsed);
-      }
-    }
-  }
-  
-  // Try tolerant JSON parse (handles common LLM issues)
-  const parsed = tolerantJsonParse(trimmed);
-  if (parsed !== null && typeof parsed === 'object') {
-    return formatAnyAsMarkdown(parsed);
-  }
-  
-  // Try to extract JSON from string (handles prefix/suffix text)
-  if (trimmed.includes('{') || trimmed.includes('[')) {
-    const extracted = extractJsonFromString(trimmed);
-    if (extracted) {
-      const extractedParsed = tolerantJsonParse(extracted);
-      if (extractedParsed !== null && typeof extractedParsed === 'object') {
-        return formatAnyAsMarkdown(extractedParsed);
-      }
-    }
-  }
-  
-  // Return original content if nothing worked
-  return content;
-}
-
-// Strategist-specific formatter for outline data
-function formatStrategistContent(content: string): string {
-  if (!content || typeof content !== 'string') {
-    return '';
-  }
-  
-  const trimmed = content.trim();
-  let parsed: unknown = null;
-  
-  // Try to parse JSON
-  if (trimmed.includes('```json')) {
-    const jsonMatch = trimmed.match(/```json\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      parsed = tolerantJsonParse(jsonMatch[1]);
-    }
-  }
-  if (parsed === null) {
-    parsed = tolerantJsonParse(trimmed);
-  }
-  if (parsed === null && trimmed.includes('{')) {
-    const extracted = extractJsonFromString(trimmed);
-    if (extracted) {
-      parsed = tolerantJsonParse(extracted);
-    }
-  }
-  
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return formatAgentContent(content);
-  }
-  
-  const obj = parsed as Record<string, unknown>;
-  const lines: string[] = [];
-  
-  // Structure overview
-  if (obj.structure_type) {
-    const structureNames: Record<string, string> = {
-      'ThreeAct': 'Three Act Structure',
-      'HeroJourney': "Hero's Journey",
-      'FiveAct': 'Five Act Structure',
-      'SevenPoint': 'Seven Point Story Structure',
-      'SaveTheCat': 'Save the Cat Beat Sheet',
-    };
-    lines.push(`**Structure:** ${structureNames[obj.structure_type as string] || obj.structure_type}`);
-  }
-  
-  if (obj.total_scenes) {
-    lines.push(`**Total Scenes:** ${obj.total_scenes}`);
-  }
-  
-  // Key structural points
-  const keyPoints: string[] = [];
-  if (obj.inciting_incident_scene) keyPoints.push(`Inciting Incident: Scene ${obj.inciting_incident_scene}`);
-  if (obj.midpoint_scene) keyPoints.push(`Midpoint: Scene ${obj.midpoint_scene}`);
-  if (obj.climax_scene) keyPoints.push(`Climax: Scene ${obj.climax_scene}`);
-  if (obj.resolution_scene) keyPoints.push(`Resolution: Scene ${obj.resolution_scene}`);
-  
-  if (keyPoints.length > 0) {
-    lines.push('');
-    lines.push('**Key Story Beats:**');
-    keyPoints.forEach(point => lines.push(`- ${point}`));
-  }
-  
-  // Scenes summary (compact view)
-  if (Array.isArray(obj.scenes) && obj.scenes.length > 0) {
-    lines.push('');
-    lines.push('**Scene Outline:**');
-    const scenesToShow = obj.scenes.slice(0, 10) as Array<Record<string, unknown>>;
-    scenesToShow.forEach((scene, idx) => {
-      const sceneNum = scene.scene_number || idx + 1;
-      const title = scene.title || `Scene ${sceneNum}`;
-      const conflict = scene.conflict_type ? ` (${scene.conflict_type})` : '';
-      lines.push(`${sceneNum}. **${title}**${conflict}`);
-      if (scene.setting && typeof scene.setting === 'string' && scene.setting.length < 80) {
-        lines.push(`   *${scene.setting}*`);
-      }
-    });
-    if (obj.scenes.length > 10) {
-      lines.push(`... and ${obj.scenes.length - 10} more scenes`);
-    }
-  }
-  
-  // Demo mode fields (opening_hook, turning_points, etc.)
-  if (obj.opening_hook) {
-    lines.push('');
-    lines.push(`**Opening Hook:** ${obj.opening_hook}`);
-  }
-  if (Array.isArray(obj.turning_points) && obj.turning_points.length > 0) {
-    lines.push('');
-    lines.push('**Turning Points:**');
-    obj.turning_points.forEach((point, idx) => {
-      lines.push(`${idx + 1}. ${point}`);
-    });
-  }
-  if (obj.climax && typeof obj.climax === 'string') {
-    lines.push('');
-    lines.push(`**Climax:** ${obj.climax}`);
-  }
-  if (obj.resolution && typeof obj.resolution === 'string') {
-    lines.push('');
-    lines.push(`**Resolution:** ${obj.resolution}`);
-  }
-  
-  return lines.length > 0 ? lines.join('\n') : formatAgentContent(content);
-}
-
-function formatJsonAsMarkdown(obj: Record<string, unknown>, depth = 0): string {
-  const lines: string[] = [];
-  const indent = '  '.repeat(depth);
-  
-  for (const [key, value] of Object.entries(obj)) {
-    const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    
-    if (Array.isArray(value)) {
-      // Filter out empty/null items before rendering
-      const filteredItems = value.filter(item => {
-        if (item === null || item === undefined) return false;
-        if (typeof item === 'string' && item.trim() === '') return false;
-        if (typeof item === 'object' && Object.keys(item).length === 0) return false;
-        return true;
-      });
-      
-      if (filteredItems.length > 0) {
-        lines.push(`${indent}**${formattedKey}:**`);
-        lines.push('');  // Add blank line before list for proper markdown
-        filteredItems.forEach((item, i) => {
-          if (typeof item === 'object' && item !== null) {
-            // Format each field on its own line for better readability
-            const itemLines: string[] = [];
-            for (const [itemKey, itemValue] of Object.entries(item as Record<string, unknown>)) {
-              const formattedItemKey = itemKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-              if (itemValue !== null && itemValue !== undefined && itemValue !== '') {
-                // Stringify objects/arrays to prevent [object Object]
-                const displayValue = typeof itemValue === 'object' 
-                  ? JSON.stringify(itemValue, null, 2)
-                  : String(itemValue);
-                itemLines.push(`**${formattedItemKey}**: ${displayValue}`);
-              }
-            }
-            if (itemLines.length > 0) {
-              lines.push(`${indent}${i + 1}. ${itemLines.join(', ')}`);
-            }
-          } else {
-            const itemText = String(item).trim();
-            if (itemText) {
-              lines.push(`${indent}${i + 1}. ${itemText}`);
-            }
-          }
-        });
-      }
-    } else if (typeof value === 'object' && value !== null) {
-      lines.push(`${indent}**${formattedKey}:**`);
-      lines.push(formatJsonAsMarkdown(value as Record<string, unknown>, depth + 1));
-    } else if (typeof value === 'boolean') {
-      lines.push(`${indent}**${formattedKey}:** ${value ? 'Yes' : 'No'}`);
-    } else if (typeof value === 'number') {
-      lines.push(`${indent}**${formattedKey}:** ${value}`);
-    } else if (value) {
-      const strValue = String(value);
-      if (strValue.length > 100) {
-        lines.push(`${indent}**${formattedKey}:**\n${indent}> ${strValue}`);
-      } else {
-        lines.push(`${indent}**${formattedKey}:** ${strValue}`);
-      }
-    }
-  }
-  
-  // Use double newlines for proper markdown paragraph breaks
-  return lines.join('\n\n');
-}
-
-function formatObjectInline(obj: Record<string, unknown>): string {
-  const parts: string[] = [];
-  for (const [key, value] of Object.entries(obj)) {
-    // Format key: replace underscores with spaces and capitalize
-    const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    if (typeof value === 'string' && value.length < 80) {
-      parts.push(`**${formattedKey}**: ${value}`);
-    } else if (typeof value === 'number' || typeof value === 'boolean') {
-      parts.push(`**${formattedKey}**: ${value}`);
-    }
-  }
-  // Join with line breaks for better readability
-  return parts.join(', ');
-}
-
-function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
-  return (
-    <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
-      <ReactMarkdown
-        rehypePlugins={[rehypeSanitize]}
-        components={{
-          p: ({ children }) => <p className="mb-2 last:mb-0 text-slate-300 leading-relaxed">{children}</p>,
-          strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
-          em: ({ children }) => <em className="text-slate-400">{children}</em>,
-          ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
-          ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-          li: ({ children }) => <li className="text-slate-300">{children}</li>,
-          blockquote: ({ children }) => (
-            <blockquote className="border-l-2 border-slate-600 pl-3 my-2 text-slate-400 italic">
-              {children}
-            </blockquote>
-          ),
-          code: ({ children }) => (
-            <code className="bg-slate-800 px-1.5 py-0.5 rounded text-xs text-cyan-400">{children}</code>
-          ),
-          pre: ({ children }) => (
-            <pre className="bg-slate-800/50 p-3 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap break-words">{children}</pre>
-          ),
-          h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
-          h2: ({ children }) => <h2 className="text-base font-semibold text-white mb-2">{children}</h2>,
-          h3: ({ children }) => <h3 className="text-sm font-semibold text-slate-200 mb-1">{children}</h3>,
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  );
-}
-
-interface AgentMessage {
-  id: string;
-  type: string;
-  timestamp: string;
-  eventId?: string;  // Unique event ID for deduplication
-  data: {
-    agent?: string;
-    message_type?: string;
-    content?: string;
-    to_agent?: string;
-    phase?: string;
-    status?: string;
-    error?: string;
-    result?: Record<string, unknown>;
-    result_summary?: string;
-    round?: number;
-    // Additional fields for agent_thought and agent_dialogue events from backend
-    thought?: string;  // For agent_thought events
-    from?: string;     // For agent_dialogue events (sender agent)
-    to?: string;       // For agent_dialogue events (recipient agent)
-    sentiment?: string; // For agent_thought events
-    dialogueType?: string; // For agent_dialogue events
-    // Fields for scene_expand_complete and scene_polish_complete events
-    sceneNum?: number;  // Scene number for assembled scene events
-    assembledContent?: string;  // Full assembled scene content from expandScene
-    finalContent?: string;  // Final polished content from polishScene
-    wordCount?: number;  // Word count of the scene
-    polishStatus?: string;  // Status of polish operation
-  };
-}
-
-interface GenerationResult {
-  narrative_possibility?: Record<string, unknown>;
-  story?: string;
-  agents?: Record<string, string>;
-  error?: string;
-}
-
-interface AgentChatProps {
-  runId: string | null;
-  orchestratorUrl: string;
-  onComplete?: (result: GenerationResult) => void;
-  onClose?: () => void;
-  projectId?: string;
-  projectResult?: ProjectResult | null;
-  onUpdateResult?: (result: ProjectResult) => void;
-  onRegenerate?: (constraints: RegenerationConstraints) => void;
-  onNarrativePossibilitySelected?: (possibility: NarrativePossibility) => void;
-  onResume?: (previousRunId: string, startFromPhase: string) => void;
-}
-
-export interface RegenerationConstraints {
-  editComment: string;
-  editedAgent: string;
-  editedContent: string;
-  lockedAgents: Record<string, string>;
-  agentsToRegenerate: string[];
-  scenesToRegenerate?: number[];
-}
-
-interface EditState {
-  agent: string;
-  content: string;
-  originalContent: string;
-}
-
-const AGENTS = ['Architect', 'Profiler', 'Narrator', 'Strategist', 'Writer', 'Critic'] as const;
-type AgentName = typeof AGENTS[number];
-
-// Normalize agent name from backend (lowercase) to frontend (title case)
-// Backend sends: "architect", "profiler", etc.
-// Frontend expects: "Architect", "Profiler", etc.
-const normalizeAgentName = (name: string | undefined): string | undefined => {
-  if (!name) return undefined;
-  const normalized = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-  // Check if it's a valid agent name
-  if (AGENTS.includes(normalized as AgentName)) {
-    return normalized;
-  }
-  return name; // Return original if not a known agent
-};
-
-const AGENT_DEPENDENCIES: Record<AgentName, AgentName[]> = {
-  Architect: ['Profiler', 'Narrator', 'Strategist', 'Writer', 'Critic'],
-  Profiler: ['Narrator', 'Strategist', 'Writer', 'Critic'],
-  Narrator: ['Strategist', 'Writer', 'Critic'],
-  Strategist: ['Writer', 'Critic'],
-  Writer: ['Critic'],
-  Critic: ['Writer', 'Critic'],
-};
-
-// Phase taxonomy mapping - aligned with backend orchestrator phases
-// Backend phases: genesis → characters → worldbuilding → outlining → motif_layer → advanced_planning → drafting → polish
-const AGENT_TO_PHASE: Record<string, string> = {
-  'Architect': 'Genesis',
-  'Profiler': 'Characters',
-  'Narrator': 'Narrator Design',
-  'Worldbuilder': 'Worldbuilding',
-  'Strategist': 'Outlining',
-  'Writer': 'Drafting',
-  'Critic': 'Drafting', // Critic is part of Writer↔Critic drafting loop, not a separate polish phase
-};
-
-// Phase order matching backend orchestrator flow
-const PHASE_ORDER = ['Genesis', 'Characters', 'Narrator Design', 'Worldbuilding', 'Outlining', 'Motif Layer', 'Advanced Planning', 'Drafting', 'Polish'];
-
-const getPhasesToRegenerate = (editedAgent: string): string[] => {
-  const startPhase = AGENT_TO_PHASE[editedAgent] || 'Genesis';
-  const startIndex = PHASE_ORDER.indexOf(startPhase);
-  if (startIndex === -1) return PHASE_ORDER;
-  return PHASE_ORDER.slice(startIndex);
-};
-
-const AGENT_COLORS: Record<string, string> = {
-  Architect: 'bg-blue-500',
-  Profiler: 'bg-cyan-500',
-  Narrator: 'bg-indigo-500',
-  Strategist: 'bg-green-500',
-  Writer: 'bg-amber-500',
-  Critic: 'bg-red-500',
-  System: 'bg-neutral-500',
-};
-
-const AGENT_BORDER_COLORS: Record<string, string> = {
-  Architect: 'border-blue-500/50',
-  Profiler: 'border-cyan-500/50',
-  Narrator: 'border-indigo-500/50',
-  Strategist: 'border-green-500/50',
-  Writer: 'border-amber-500/50',
-  Critic: 'border-red-500/50',
-  System: 'border-neutral-500/50',
-};
-
-const AGENT_GLOW_COLORS: Record<string, string> = {
-  Architect: 'shadow-blue-500/20',
-  Profiler: 'shadow-cyan-500/20',
-  Narrator: 'shadow-indigo-500/20',
-  Strategist: 'shadow-green-500/20',
-  Writer: 'shadow-amber-500/20',
-  Critic: 'shadow-red-500/20',
-  System: 'shadow-neutral-500/20',
-};
-
-const AGENT_DESCRIPTIONS: Record<string, string> = {
-  Architect: 'Narrative Designer',
-  Profiler: 'Character Psychologist',
-  Narrator: 'Voice Designer',
-  Strategist: 'Plot Engineer',
-  Writer: 'Scene Composer',
-  Critic: 'Quality Analyst',
-};
-
-const AGENT_TEXT_COLORS: Record<string, string> = {
-  Architect: 'text-blue-400',
-  Profiler: 'text-cyan-400',
-  Narrator: 'text-indigo-400',
-  Strategist: 'text-green-400',
-  Writer: 'text-amber-400',
-  Critic: 'text-red-400',
-  System: 'text-neutral-400',
-};
-
-const AGENT_ICONS: Record<string, string> = {
-  Architect: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4',
-  Profiler: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
-  Narrator: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z',
-  Strategist: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
-  Writer: 'M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z',
-  Critic: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
-  System: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
-};
-
-interface AgentState {
-  status: 'idle' | 'thinking' | 'complete';
-  messages: Array<{ content: string; round: number; timestamp: string }>;
-  lastUpdate: string;
-}
-
-export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, projectId, projectResult, onUpdateResult, onRegenerate, onNarrativePossibilitySelected, onResume }: AgentChatProps) {
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [currentPhase, setCurrentPhase] = useState<string>('Initializing');
-  const [isComplete, setIsComplete] = useState(false);
-  const [isCancelled, setIsCancelled] = useState(false);
+  // Callbacks
+  onClose,
+  onUpdateResult,
+  onRegenerate,
+  onNarrativePossibilitySelected,
+  onResume,
+  onReconnect,
+}: AgentChatProps) {
+  // Local UI state only
   const [isCancelling, setIsCancelling] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
-  const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
-  const [narrativePossibilities, setNarrativePossibilities] = useState<NarrativePossibility[] | null>(null);
-  const [narrativeRecommendation, setNarrativeRecommendation] = useState<NarrativePossibilitiesRecommendation | null>(null);
   const [isSelectingNarrative, setIsSelectingNarrative] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const currentRoundRef = useRef(1);
-  const hasMessageInCurrentRoundRef = useRef(false);
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  // Track seen eventIds to prevent duplicate messages from SSE reconnects/replays
-  // Use bounded size to prevent memory leaks in long sessions
-  const seenEventIdsRef = useRef<Set<string>>(new Set());
-  const MAX_SEEN_EVENT_IDS = 1000;
   
+  // Edit state
   const [editState, setEditState] = useState<EditState | null>(null);
   const [lockedAgents, setLockedAgents] = useState<Record<string, boolean>>(() => projectResult?.locks || {});
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -726,81 +91,32 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
   const [selectedScenes, setSelectedScenes] = useState<number[]>([]);
   const [sceneCount, setSceneCount] = useState(0);
   
-  // Deepening Checkpoint state
-  const [checkpointResults, setCheckpointResults] = useState<Record<string, {
-    checkpoint_type: string;
-    scene_number: number;
-    passed: boolean;
-    overall_score: number;
-    criteria_scores?: Record<string, { score: number; feedback: string }>;
-  }>>({});
-  const [activeCheckpoint, setActiveCheckpoint] = useState<string | null>(null);
-
-  // Motif Layer Planning state
-  const [motifLayerResult, setMotifLayerResult] = useState<{
-    core_symbols_count: number;
-    character_motifs_count: number;
-    scene_targets_count: number;
-    has_structural_motifs: boolean;
-  } | null>(null);
-  const [isMotifPlanningActive, setIsMotifPlanningActive] = useState(false);
-
-  // Diagnostic (Two-Pass Critic) state
-  const [diagnosticResults, setDiagnosticResults] = useState<Record<number, {
-    scene_number: number;
-    rubric?: {
-      overall_score: number;
-      dimensions: Record<string, number>;
-      didacticism_detected: boolean;
-      cliches_found: string[];
-      evidence_quotes: string[];
-      weakness_candidates: Array<{ dimension: string; score: number; reason: string }>;
-    };
-    weakest_link?: {
-      dimension: string;
-      severity: string;
-      evidence: string;
-      revision_issues: string;
-    };
-    status: 'rubric_scanning' | 'analyzing_weakness' | 'revision_sent' | 'complete';
-  }>>({});
-  const [activeDiagnosticScene, setActiveDiagnosticScene] = useState<number | null>(null);
-
-  // Interrupted run state (for resume after redeploy)
-  const [isInterrupted, setIsInterrupted] = useState(false);
+  // Resume state (local loading flags)
   const [canResume, setCanResume] = useState(false);
   const [resumeFromPhase, setResumeFromPhase] = useState<string | null>(null);
   const [lastCompletedPhase, setLastCompletedPhase] = useState<string | null>(null);
   const [isLoadingResumeState, setIsLoadingResumeState] = useState(false);
+  
+  // Local error state (for API errors, not SSE errors)
+  const [localError, setLocalError] = useState<string | null>(null);
+  
+  // Combine SSE error and local error
+  const error = sseError || localError;
 
+  // Sync locked agents from projectResult
   useEffect(() => {
     if (projectResult?.locks) {
       setLockedAgents(projectResult.locks);
     }
   }, [projectResult?.locks]);
 
-  // Reset state when runId changes (new generation or regeneration)
+  // Reset local UI state when runId changes
   useEffect(() => {
     if (runId) {
-      // Close existing EventSource connection
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-      // Reset all state for new run
-      setMessages([]);
-      setIsConnected(false);
-      setError(null);
-      setCurrentPhase('Initializing');
-      setIsComplete(false);
-      setIsCancelled(false);
+      // Reset local UI state for new run
       setIsCancelling(false);
       setSelectedRound(null);
       setIsPlaying(false);
-      currentRoundRef.current = 1;
-      hasMessageInCurrentRoundRef.current = false;
-      // Clear seen event IDs for new run to allow fresh events
-      seenEventIdsRef.current.clear();
       // Reset edit state
       setEditState(null);
       setShowConfirmModal(false);
@@ -811,57 +127,62 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       setShowSceneModal(false);
       setSelectedScenes([]);
       setSceneCount(0);
-      // Reset checkpoint state
-      setCheckpointResults({});
-      setActiveCheckpoint(null);
-      // Reset motif layer state
-      setMotifLayerResult(null);
-      setIsMotifPlanningActive(false);
-      // Reset diagnostic state
-      setDiagnosticResults({});
-      setActiveDiagnosticScene(null);
-      // Reset interrupted state
-      setIsInterrupted(false);
+      // Reset resume state
       setCanResume(false);
       setResumeFromPhase(null);
       setLastCompletedPhase(null);
       setIsLoadingResumeState(false);
+      setLocalError(null);
     }
   }, [runId]);
 
+  // Fetch resume state when interrupted
+  useEffect(() => {
+    if (isInterrupted && runId && !canResume && !isLoadingResumeState) {
+      setIsLoadingResumeState(true);
+      orchestratorFetch(`/runs/${runId}/state`, { method: 'GET' })
+        .then(response => response.ok ? response.json() : null)
+        .then(state => {
+          if (state && state.can_resume) {
+            setCanResume(true);
+            setResumeFromPhase(state.resume_from_phase);
+            setLastCompletedPhase(state.last_completed_phase);
+          }
+        })
+        .catch(err => console.error('Failed to fetch run state:', err))
+        .finally(() => setIsLoadingResumeState(false));
+    }
+  }, [isInterrupted, runId, canResume, isLoadingResumeState]);
+
   // Handle stop generation (uses pause so it can be resumed)
+  // Note: SSE state (isCancelled, isConnected, currentPhase) is managed by useGenerationStream
+  // via generation_cancelled event from the server
   const handleStopGeneration = useCallback(async () => {
-    if (!runId || !orchestratorUrl || isCancelling || isComplete) return;
+    if (!runId || isCancelling || isComplete) return;
     
     setIsCancelling(true);
     
     try {
-      // Close SSE connection first
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-      
       // Call pause endpoint (not cancel) so generation can be resumed
       const response = await orchestratorFetch(`/runs/${runId}/pause`, {
         method: 'POST',
       });
       
-      if (response.ok) {
-        setIsCancelled(true);
-        setIsConnected(false);
-        setCurrentPhase('Paused');
+      if (!response.ok) {
+        console.error('Failed to pause generation');
       }
+      // SSE state updates will be handled by the hook via generation_cancelled event
     } catch (err) {
       console.error('Failed to pause generation:', err);
     } finally {
       setIsCancelling(false);
     }
-  }, [runId, orchestratorUrl, isCancelling, isComplete]);
+  }, [runId, isCancelling, isComplete]);
 
-  // Handle resume generation
+  // Handle resume generation after pause
+  // Note: SSE reconnection is triggered via onReconnect callback to parent
   const handleResumeGeneration = useCallback(async () => {
-    if (!runId || !orchestratorUrl || isResuming || !isCancelled) return;
+    if (!runId || isResuming || !isCancelled) return;
     
     setIsResuming(true);
     
@@ -872,22 +193,20 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
       });
       
       if (response.ok) {
-        setIsCancelled(false);
-        setCurrentPhase('Resuming...');
-        // Trigger SSE reconnection via useEffect
-        setReconnectTrigger(prev => prev + 1);
+        // Trigger SSE reconnection via parent's hook
+        onReconnect?.();
       } else {
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
         console.error('Failed to resume:', errorData);
-        setError(`Failed to resume: ${errorData.detail || 'Unknown error'}`);
+        setLocalError(`Failed to resume: ${errorData.detail || 'Unknown error'}`);
       }
     } catch (err) {
       console.error('Failed to resume generation:', err);
-      setError('Failed to resume generation. Please try again.');
+      setLocalError('Failed to resume generation. Please try again.');
     } finally {
       setIsResuming(false);
     }
-  }, [runId, orchestratorUrl, isResuming, isCancelled]);
+  }, [runId, isResuming, isCancelled, onReconnect]);
 
   // Handle resume interrupted generation (after redeploy)
   const handleResumeInterrupted = useCallback(async () => {
@@ -907,16 +226,16 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
           // Call parent's onResume with the parameters
           onResume(runId, state.resume_from_phase);
         } else {
-          setError('This run cannot be resumed. Please start a new generation.');
+          setLocalError('This run cannot be resumed. Please start a new generation.');
         }
       } else {
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
         console.error('Failed to get run state:', errorData);
-        setError(`Failed to get run state: ${errorData.detail || 'Unknown error'}`);
+        setLocalError(`Failed to get run state: ${errorData.detail || 'Unknown error'}`);
       }
     } catch (err) {
       console.error('Failed to resume interrupted generation:', err);
-      setError('Failed to resume generation. Please try again.');
+      setLocalError('Failed to resume generation. Please try again.');
     } finally {
       setIsLoadingResumeState(false);
     }
@@ -1094,313 +413,8 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     setSelectedScenes([]);
   }, []);
 
-  useEffect(() => {
-    if (!runId) return;
-
-    // Connect to SSE endpoint with authentication
-    let eventSource: EventSource | null = null;
-    
-    const connectSSE = async () => {
-      try {
-        const sseUrl = await getAuthenticatedSSEUrl(`/runs/${runId}/events`);
-        eventSource = new EventSource(sseUrl);
-        eventSourceRef.current = eventSource;
-
-        eventSource.onopen = () => {
-          setIsConnected(true);
-          setError(null);
-        };
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as AgentMessage;
-        
-        if (data.type === 'phase_start' && data.data.phase) {
-          setCurrentPhase(data.data.phase.charAt(0).toUpperCase() + data.data.phase.slice(1));
-        }
-        
-        if (data.type === 'agent_message') {
-          data.data.round = currentRoundRef.current;
-          hasMessageInCurrentRoundRef.current = true;
-        }
-        
-        if (data.type === 'agent_complete') {
-          // Only increment round if we've seen at least one message in the current round
-          // This prevents starting from round 2 if agent_complete arrives before agent_message
-          if (hasMessageInCurrentRoundRef.current) {
-            currentRoundRef.current += 1;
-            hasMessageInCurrentRoundRef.current = false;
-          }
-        }
-
-        // Handle narrative possibilities generated event (branching mode)
-        if (data.type === 'narrative_possibilities_generated') {
-          const possibilities = (data.data as unknown as { possibilities: NarrativePossibility[] }).possibilities || [];
-          const recommendation = (data.data as unknown as { recommendation: NarrativePossibilitiesRecommendation }).recommendation || null;
-          setNarrativePossibilities(possibilities);
-          setNarrativeRecommendation(recommendation);
-          setCurrentPhase('Select Narrative');
-          setIsComplete(true);
-          if (eventSource) eventSource.close();
-          setIsConnected(false);
-          return;
-        }
-
-        // Handle deepening checkpoint events
-        if (data.type === 'checkpoint_start') {
-          const checkpointType = (data.data as unknown as { checkpoint_type: string }).checkpoint_type;
-          const sceneNumber = (data.data as unknown as { scene_number: number }).scene_number;
-          setActiveCheckpoint(checkpointType);
-          setCurrentPhase(`Checkpoint: ${checkpointType.replace(/_/g, ' ')}`);
-          // Initialize checkpoint result as pending
-          setCheckpointResults(prev => ({
-            ...prev,
-            [checkpointType]: {
-              checkpoint_type: checkpointType,
-              scene_number: sceneNumber,
-              passed: false,
-              overall_score: 0,
-            }
-          }));
-        }
-
-        if (data.type === 'checkpoint_complete') {
-          const result = data.data as unknown as {
-            checkpoint_type: string;
-            scene_number: number;
-            passed: boolean;
-            overall_score: number;
-            criteria_scores?: Record<string, { score: number; feedback: string }>;
-          };
-          setActiveCheckpoint(null);
-          setCheckpointResults(prev => ({
-            ...prev,
-            [result.checkpoint_type]: result
-          }));
-        }
-
-        // Handle motif layer planning events
-        if (data.type === 'motif_planning_start') {
-          setIsMotifPlanningActive(true);
-          setCurrentPhase('Motif Layer Planning');
-        }
-
-        if (data.type === 'motif_planning_complete') {
-          const result = data.data as unknown as {
-            core_symbols_count: number;
-            character_motifs_count: number;
-            scene_targets_count: number;
-            has_structural_motifs: boolean;
-          };
-          setIsMotifPlanningActive(false);
-          setMotifLayerResult(result);
-        }
-
-        // Handle diagnostic (two-pass Critic) events
-        if (data.type === 'diagnostic_pass_start') {
-          const sceneNumber = (data.data as unknown as { scene_number: number }).scene_number;
-          setActiveDiagnosticScene(sceneNumber);
-          setCurrentPhase(`Diagnostic: Scene ${sceneNumber}`);
-          setDiagnosticResults(prev => ({
-            ...prev,
-            [sceneNumber]: {
-              scene_number: sceneNumber,
-              status: 'rubric_scanning',
-            }
-          }));
-        }
-
-        if (data.type === 'diagnostic_rubric_complete') {
-          const result = data.data as unknown as {
-            scene_number: number;
-            overall_score: number;
-            dimensions: Record<string, number>;
-            didacticism_detected: boolean;
-            cliches_found: string[];
-            evidence_quotes: string[];
-            weakness_candidates: Array<{ dimension: string; score: number; reason: string }>;
-          };
-          setDiagnosticResults(prev => ({
-            ...prev,
-            [result.scene_number]: {
-              ...prev[result.scene_number],
-              scene_number: result.scene_number,
-              rubric: {
-                overall_score: result.overall_score,
-                dimensions: result.dimensions,
-                didacticism_detected: result.didacticism_detected,
-                cliches_found: result.cliches_found || [],
-                evidence_quotes: result.evidence_quotes || [],
-                weakness_candidates: result.weakness_candidates || [],
-              },
-              status: 'analyzing_weakness',
-            }
-          }));
-        }
-
-        if (data.type === 'diagnostic_weakest_link') {
-          const result = data.data as unknown as {
-            scene_number: number;
-            weakest_link: string;
-            severity: string;
-            evidence?: string;
-            revision_issues: string;
-          };
-          setDiagnosticResults(prev => ({
-            ...prev,
-            [result.scene_number]: {
-              ...prev[result.scene_number],
-              weakest_link: {
-                dimension: result.weakest_link,
-                severity: result.severity,
-                evidence: result.evidence || '',
-                revision_issues: result.revision_issues,
-              },
-              status: 'revision_sent',
-            }
-          }));
-          setActiveDiagnosticScene(null);
-        }
-        
-        // CRITICAL: Deduplicate events by eventId before storing
-        // This prevents duplicate messages from SSE reconnects/replays which cause snowball duplication
-        if (data.eventId) {
-          if (seenEventIdsRef.current.has(data.eventId)) {
-            console.log('[AgentChat] Skipping duplicate event:', data.eventId, data.type);
-            return;
-          }
-          seenEventIdsRef.current.add(data.eventId);
-          
-          // Prevent unbounded growth - keep only last MAX_SEEN_EVENT_IDS events
-          if (seenEventIdsRef.current.size > MAX_SEEN_EVENT_IDS) {
-            const items = Array.from(seenEventIdsRef.current);
-            seenEventIdsRef.current = new Set(items.slice(-MAX_SEEN_EVENT_IDS));
-          }
-        }
-        
-        setMessages((prev) => [...prev, data]);
-        
-        // Handle cancellation event
-        if (data.type === 'generation_cancelled') {
-          setCurrentPhase('Cancelled');
-          setIsCancelled(true);
-          if (eventSource) eventSource.close();
-          setIsConnected(false);
-          return;
-        }
-        
-        // Close connection when generation is complete or errored
-        if (data.type === 'generation_complete' || data.type === 'generation_error') {
-          const isInterruptedRun = data.type === 'generation_error' && data.data.status === 'interrupted';
-          setCurrentPhase(data.type === 'generation_complete' ? 'Complete' : (isInterruptedRun ? 'Interrupted' : 'Error'));
-          setIsComplete(true);
-          if (eventSource) eventSource.close();
-          setIsConnected(false);
-          
-          // Set interrupted state for resume functionality
-          if (isInterruptedRun) {
-            setIsInterrupted(true);
-            // Fetch run state to check if resume is possible
-            orchestratorFetch(`/runs/${runId}/state`, { method: 'GET' })
-              .then(response => response.ok ? response.json() : null)
-              .then(state => {
-                if (state && state.can_resume) {
-                  setCanResume(true);
-                  setResumeFromPhase(state.resume_from_phase);
-                  setLastCompletedPhase(state.last_completed_phase);
-                }
-              })
-              .catch(err => console.error('Failed to fetch run state:', err));
-          }
-          
-          // Call onComplete callback with result
-          if (onComplete) {
-            if (data.type === 'generation_error') {
-              onComplete({ error: data.data.error || 'Unknown error' });
-            } else {
-              // Extract the best available result content
-              const allMessages = [...messages, data];
-              
-              // Collect all agent outputs for persistence
-              const agentMessages = allMessages.filter(
-                m => m.type === 'agent_message' && m.data.content?.trim()
-              );
-              const agentOutputs: Record<string, string> = {};
-              agentMessages.forEach(m => {
-                const agent = m.data.agent || 'Unknown';
-                if (m.data.content) {
-                  agentOutputs[agent] = m.data.content;
-                }
-              });
-              
-              // Try phase_complete with result first
-              const phaseCompleteEvents = allMessages.filter(m => m.type === 'phase_complete' && m.data.result);
-              if (phaseCompleteEvents.length > 0) {
-                const genesisComplete = phaseCompleteEvents.find(m => m.data.phase === 'genesis');
-                const phaseComplete = genesisComplete || phaseCompleteEvents[phaseCompleteEvents.length - 1];
-                onComplete({
-                  narrative_possibility: phaseComplete.data.result,
-                  agents: agentOutputs,
-                });
-                return;
-              }
-              
-              // Try generation_complete result_summary
-              const completeEvent = allMessages.find(m => m.type === 'generation_complete');
-              if (completeEvent?.data.result_summary) {
-                onComplete({
-                  story: completeEvent.data.result_summary,
-                  agents: agentOutputs,
-                });
-                return;
-              }
-              
-              // Use Writer's last message as the story content
-              const writerMessages = allMessages.filter(
-                m => m.type === 'agent_message' && m.data.agent === 'Writer' && m.data.content?.trim()
-              );
-              if (writerMessages.length > 0) {
-                onComplete({
-                  story: writerMessages[writerMessages.length - 1].data.content,
-                  agents: agentOutputs,
-                });
-                return;
-              }
-              
-              // Fall back to all agent messages combined
-              onComplete({
-                agents: agentOutputs,
-              });
-            }
-          }
-        }
-      } catch (e) {
-        console.error('Failed to parse SSE message:', e);
-      }
-    };
-
-        eventSource.onerror = () => {
-          setIsConnected(false);
-          setError('Connection lost. Reconnecting...');
-        };
-      } catch (err) {
-        console.error('Failed to connect to SSE:', err);
-        setError(err instanceof Error ? err.message : 'Failed to connect');
-      }
-    };
-
-    connectSSE();
-
-    return () => {
-      if (eventSource) {
-        eventSource.close();
-      }
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-    };
-  }, [runId, orchestratorUrl, reconnectTrigger]);
+  // SSE connection is now managed by useGenerationStream hook in parent
+  // All SSE data is received via props
 
   // Compute available rounds from messages
   const rounds = useMemo(() => {
@@ -1501,15 +515,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
     return states;
   }, [messages]);
 
-  // Determine which agent is currently active
-  const activeAgent = useMemo(() => {
-    for (const agent of AGENTS) {
-      if (agentStates[agent].status === 'thinking') {
-        return agent;
-      }
-    }
-    return null;
-  }, [agentStates]);
+  // activeAgent now comes from props (via useGenerationStream hook)
 
   // Extract final result from messages - prefer assembled scene events over individual agent messages
   // CRITICAL: Deduplicate by sceneNum to prevent text duplication from SSE reconnects/replays
@@ -2439,7 +1445,7 @@ export function AgentChat({ runId, orchestratorUrl, onComplete, onClose, project
                                 Round {round}
                               </button>
                               <span className="text-xs text-slate-500 ml-auto">
-                                {new Date(msg.timestamp).toLocaleTimeString()}
+                                {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
                               </span>
                             </div>
                             <MarkdownContent content={formatAgentContent(content)} className="text-sm" />
