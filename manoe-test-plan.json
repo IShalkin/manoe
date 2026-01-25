@@ -1,0 +1,48 @@
+{
+  "testPlan": {
+    "name": "MANOE Basic API Test",
+    "description": "Basic API testing for MANOE Multi-Agent Narrative Orchestration Engine",
+    "tests": [
+      {
+        "id": "test-001",
+        "name": "Health Check Endpoint",
+        "type": "api",
+        "endpoint": {
+          "url": "http://localhost:3000/api/health",
+          "method": "GET",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expectations": {
+          "statusCode": 200,
+          "responseTime": "< 1000ms"
+        }
+      },
+      {
+        "id": "test-002",
+        "name": "Generate Story Request",
+        "type": "api",
+        "endpoint": {
+          "url": "http://localhost:3000/orchestrate/generate",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "seed_idea": "What if a detective could see the last 10 seconds of a murder victim's life?",
+            "moral_compass": "ambiguous",
+            "target_audience": "Adult thriller readers",
+            "provider": "openai",
+            "model": "gpt-4o-mini"
+          }
+        },
+        "expectations": {
+          "statusCode": 202,
+          "responseTime": "< 5000ms",
+          "hasRunId": true
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "name": "Manoe E2E Tests",
+  "description": "End-to-end testing for MANOE Multi-Agent Narrative Orchestration Engine",
+  "version": "1.0.0",
+  "testType": "e2e",
+  "endpoints": [
+    {
+      "name": "Health Check",
+      "method": "GET",
+      "url": "http://localhost:3000/api/health",
+      "expectedStatus": 200,
+      "timeout": 5000
+    },
+    {
+      "name": "Generate Story - Genesis Phase",
+      "method": "POST",
+      "url": "http://localhost:3000/orchestrate/generate",
+      "body": {
+        "seed_idea": "What if a detective could see the last 10 seconds of a murder victim's life?",
+        "moral_compass": "ambiguous",
+        "target_audience": "Adult thriller readers",
+        "themes": "justice,truth",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "supabase_project_id": "test-project-001"
+      },
+      "expectedStatus": 202,
+      "timeout": 30000,
+      "validation": {
+        "responseHas": ["runId"]
+      }
+    },
+    {
+      "name": "Stream Events",
+      "method": "GET",
+      "url": "http://localhost:3000/orchestrate/stream/{runId}",
+      "expectedStatus": 200,
+      "timeout": 60000
+    },
+    {
+      "name": "Cancel Generation",
+      "method": "POST",
+      "url": "http://localhost:3000/orchestrate/cancel/{runId}",
+      "expectedStatus": 200,
+      "timeout": 5000
+    }
+  ],
+  "services": [
+    {
+      "name": "Qdrant",
+      "checkUrl": "http://localhost:6333/health",
+      "timeout": 5000
+    }
+  ]
+}
