@@ -123,9 +123,11 @@ export function useFinalResult(messages: AgentMessage[]): string {
     );
     if (storyAgentMessages.length > 0) {
       const lastMsg = storyAgentMessages[storyAgentMessages.length - 1];
-      const extracted = extractStoryText(lastMsg.data.content || '', 'other');
-      if (extracted) return extracted;
-      return lastMsg.data.content || '';
+      if (lastMsg) {
+        const extracted = extractStoryText(lastMsg.data.content ?? '', 'other');
+        if (extracted) return extracted;
+        return lastMsg.data.content ?? '';
+      }
     }
     
     return '';

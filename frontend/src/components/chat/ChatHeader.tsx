@@ -12,7 +12,7 @@ export interface ChatHeaderProps {
   isResuming: boolean;
   onStop: () => void;
   onResume: () => void;
-  onClose?: () => void;
+  onClose?: (() => void) | undefined;
 }
 
 export function ChatHeader({

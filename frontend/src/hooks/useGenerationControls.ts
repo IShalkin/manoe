@@ -10,8 +10,8 @@ export interface UseGenerationControlsProps {
   isComplete: boolean;
   isCancelled: boolean;
   isInterrupted: boolean;
-  onReconnect?: () => void;
-  onResume?: (runId: string, fromPhase: string) => void;
+  onReconnect?: (() => void) | undefined;
+  onResume?: ((runId: string, fromPhase: string) => void) | undefined;
 }
 
 export interface UseGenerationControlsReturn {

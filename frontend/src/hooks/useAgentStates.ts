@@ -67,8 +67,10 @@ export function getDisplayMessage(
   
   if (selectedRound !== null) {
     const roundMessages = state.messages.filter(m => m.round === selectedRound);
-    return roundMessages.length > 0 ? roundMessages[roundMessages.length - 1] : null;
+    const lastMsg = roundMessages[roundMessages.length - 1];
+    return lastMsg ?? null;
   }
   
-  return state.messages[state.messages.length - 1];
+  const lastMsg = state.messages[state.messages.length - 1];
+  return lastMsg ?? null;
 }

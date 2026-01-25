@@ -59,7 +59,7 @@ export function extractStoryText(content: string, agentType: 'Polish' | 'Writer'
   // Check for ```json code blocks
   if (trimmed.includes('```json')) {
     const jsonMatch = trimmed.match(/```json\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
+    if (jsonMatch?.[1]) {
       parsed = tolerantJsonParse(jsonMatch[1]);
     }
   }
@@ -143,7 +143,7 @@ export function formatAgentContent(content: string): string {
   // Check for ```json code blocks first
   if (content.includes('```json') || content.includes('```')) {
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
+    if (jsonMatch?.[1]) {
       const blockParsed = tolerantJsonParse(jsonMatch[1]);
       if (blockParsed !== null) {
         return formatAnyAsMarkdown(blockParsed);
@@ -186,7 +186,7 @@ export function formatStrategistContent(content: string): string {
   // Try to parse JSON
   if (trimmed.includes('```json')) {
     const jsonMatch = trimmed.match(/```json\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
+    if (jsonMatch?.[1]) {
       parsed = tolerantJsonParse(jsonMatch[1]);
     }
   }

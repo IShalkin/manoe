@@ -9,10 +9,10 @@ import { AgentType } from "../../types/agent";
 
 interface DialogueBubbleProps {
   from: AgentType;
-  to?: AgentType;
+  to?: AgentType | undefined;
   message: string;
   type: "question" | "objection" | "approval" | "suggestion" | "thought";
-  timestamp?: string;
+  timestamp?: string | undefined;
 }
 
 const TYPE_COLORS = {
