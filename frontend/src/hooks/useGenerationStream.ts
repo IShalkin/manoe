@@ -132,6 +132,8 @@ export function useGenerationStream({
   // Use bounded size to prevent memory leaks in long sessions
   const seenEventIdsRef = useRef<Set<string>>(new Set());
   const MAX_SEEN_EVENT_IDS = 1000;
+  // Maximum messages to store to prevent client-side DoS from malicious/misbehaving SSE streams
+  const MAX_MESSAGES = 5000;
   
   // Track current round for agent messages
   const currentRoundRef = useRef(1);
@@ -427,7 +429,14 @@ export function useGenerationStream({
             if (data.type === 'new_developments_collected') {
               const developments = data.data.developments as FactUpdate[];
               if (developments && Array.isArray(developments)) {
-                setRawFacts((prev) => [...prev, ...developments]);
+                setRawFacts((prev) => {
+                  const updated = [...prev, ...developments];
+                  // Limit to prevent unbounded growth (facts are small, allow more)
+                  if (updated.length > MAX_MESSAGES) {
+                    return updated.slice(-MAX_MESSAGES);
+                  }
+                  return updated;
+                });
               }
             }
 
@@ -569,8 +578,15 @@ export function useGenerationStream({
               }
             }
 
-            // Store message
-            setMessages((prev) => [...prev, data]);
+            // Store message with bounded array to prevent DoS
+            setMessages((prev) => {
+              const updated = [...prev, data];
+              // Keep only last MAX_MESSAGES to prevent unbounded memory growth
+              if (updated.length > MAX_MESSAGES) {
+                return updated.slice(-MAX_MESSAGES);
+              }
+              return updated;
+            });
             callbacksRef.current.onMessage?.(data);
 
           } catch (e) {

@@ -39,10 +39,16 @@ export function tolerantJsonParse(str: string): unknown | null {
   fixed = fixed.replace(/\bFalse\b/g, 'false');
   fixed = fixed.replace(/\bNone\b/g, 'null');
   
-  // Replace single quotes with double quotes (careful with apostrophes)
-  // Only do this if there are no double quotes in the string
+  // Replace single quotes with double quotes for JSON keys/values
+  // Only do this if there are no double quotes in the string (pure single-quote JSON)
+  // IMPORTANT: This is a heuristic for Python-style JSON, not a general solution
+  // It will break strings containing apostrophes like "O'Brien"
+  // We only apply this when there are NO double quotes at all (pure Python dict output)
   if (!fixed.includes('"') && fixed.includes("'")) {
-    fixed = fixed.replace(/'/g, '"');
+    // More careful replacement: only replace quotes that look like JSON delimiters
+    // Pattern: match single quotes that appear to be JSON string delimiters
+    // This handles: {'key': 'value'} but NOT arbitrary text with apostrophes
+    fixed = fixed.replace(/'([^']*)'(?=\s*[:,}\]])/g, '"$1"');
   }
   
   try {
