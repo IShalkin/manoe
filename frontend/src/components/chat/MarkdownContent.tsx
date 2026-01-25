@@ -11,27 +11,26 @@ interface MarkdownContentProps {
   className?: string;
 }
 
+/**
+ * Security: Restrict URIs to safe protocols only
+ * Blocks javascript:, data:, and other potentially dangerous URI schemes
+ */
+function sanitizeUrl(url: string): string {
+  const value = (url || '').trim();
+  // Allow anchor links
+  if (value.startsWith('#')) return value;
+  // Allow safe protocols only
+  if (/^(https?:|mailto:)/i.test(value)) return value;
+  // Block everything else (javascript:, data:, etc.)
+  return '';
+}
+
 export function MarkdownContent({ content, className = '' }: MarkdownContentProps) {
   return (
     <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
       <ReactMarkdown
         rehypePlugins={[rehypeSanitize]}
-        transformLinkUri={(href) => {
-          const value = (href || '').trim();
-          // Allow in-page anchors
-          if (value.startsWith('#')) return value;
-
-          // Allow only http(s) and mailto; block javascript:, data:, vbscript:, etc.
-          if (/^(https?:|mailto:)/i.test(value)) return value;
-
-          return '';
-        }}
-        transformImageUri={(src) => {
-          const value = (src || '').trim();
-          // Allow only http(s); block data: and other protocols
-          if (/^https?:/i.test(value)) return value;
-          return '';
-        }}
+        urlTransform={sanitizeUrl}
         components={{
           a: ({ children, href }) => (
             <a

@@ -20,15 +20,6 @@ export interface FactUpdate {
   category: 'char' | 'world' | 'plot';
 }
 
-export interface WorldStateFact {
-  key: string;
-  value: string;
-  scene_number: number;
-  category: string;
-  is_global?: boolean;
-  source: 'raw' | 'canonical';
-}
-
 export interface GenerationStreamState {
   // Connection state
   isConnected: boolean;
@@ -41,7 +32,6 @@ export interface GenerationStreamState {
   
   // World state (for WorldStatePanel)
   rawFacts: FactUpdate[];
-  worldState: WorldStateFact[];
   
   // Narrative Possibilities (Branching Mode)
   narrativePossibilities: NarrativePossibility[] | null;
@@ -113,9 +103,6 @@ export function useGenerationStream({
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [rawFacts, setRawFacts] = useState<FactUpdate[]>([]);
-  // worldState is managed externally, but we expose it for compatibility
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [worldState] = useState<WorldStateFact[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
@@ -631,7 +618,6 @@ export function useGenerationStream({
     
     // World state
     rawFacts,
-    worldState,
     
     // Narrative Possibilities
     narrativePossibilities,
