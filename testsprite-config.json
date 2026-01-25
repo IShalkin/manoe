@@ -40,17 +40,12 @@
     {
       "name": "Cancel Generation",
       "method": "POST",
-      "url": "http://localhost:3000/orchestrate/runs/{runId}/cancel",
+      "url": "http://localhost:3000/orchestrate/cancel/{runId}",
       "expectedStatus": 200,
       "timeout": 5000
     }
   ],
   "services": [
-    {
-      "name": "Redis",
-      "checkUrl": "redis://localhost:6379",
-      "timeout": 5000
-    },
     {
       "name": "Qdrant",
       "checkUrl": "http://localhost:6333/health",

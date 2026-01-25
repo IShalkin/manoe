@@ -88,7 +88,7 @@
 - **Purpose:** Test real-time event streaming
 
 #### Scenario 4: Cancel Generation
-- **Endpoint:** POST /orchestrate/runs/{runId}/cancel
+- **Endpoint:** POST /orchestrate/cancel/{runId}
 - **Expected:** 200 OK
 - **Purpose:** Test generation cancellation
 
@@ -180,8 +180,8 @@ TestSprite MCP server has been successfully configured in:
 
  3. **Run E2E Tests:**
     ```bash
-    cd /path/to/manoe
-    node test-e2e.js
+    # From project root directory
+    TEST_AUTH_TOKEN="your-auth-token" node test-e2e.js
     ```
 
 4. **Run with Coverage:**
