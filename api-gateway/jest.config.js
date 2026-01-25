@@ -22,7 +22,7 @@ module.exports = {
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
 
-  // Coverage thresholds - enforce 80% on new code
+  // Coverage thresholds - enforce 60% minimum coverage
   coverageThreshold: {
     global: {
       branches: 60,

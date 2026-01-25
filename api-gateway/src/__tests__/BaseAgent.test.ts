@@ -2,7 +2,21 @@
  * Unit Tests for BaseAgent
  *
  * Tests the base agent's core functionality without making actual LLM calls.
- * Uses local function implementations to avoid dependency injection issues.
+ * 
+ * DESIGN CHOICE: These tests use local function implementations that mirror
+ * BaseAgent logic, rather than importing the actual class. This approach:
+ * 
+ * 1. Avoids complex dependency injection (LLMProvider, Langfuse, Redis)
+ * 2. Enables fast, isolated unit tests without external services
+ * 3. Tests the pure logic of helper functions independently
+ * 
+ * TRADE-OFF: Changes to BaseAgent methods won't automatically break these tests.
+ * To ensure production code stays in sync, we recommend:
+ * - Running integration tests that use actual BaseAgent instances
+ * - Reviewing these tests when modifying BaseAgent helper methods
+ * 
+ * NOTE: The actual BaseAgent.validateOutput() throws ValidationError,
+ * while this test version returns { success, error } for easier assertions.
  */
 
 import { z } from 'zod';

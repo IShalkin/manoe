@@ -2,7 +2,23 @@
  * Unit Tests for StorytellerOrchestrator
  *
  * Tests the core orchestration logic without making actual LLM calls.
- * Uses local function implementations to avoid dependency injection issues.
+ * 
+ * DESIGN CHOICE: These tests use local function implementations that mirror
+ * StorytellerOrchestrator logic, rather than importing the actual class.
+ * This approach:
+ * 
+ * 1. Avoids complex dependency injection (agents, Redis, Langfuse, Supabase)
+ * 2. Enables fast, isolated unit tests without external services
+ * 3. Tests the pure logic of helper functions independently
+ * 
+ * TRADE-OFF: Changes to StorytellerOrchestrator methods won't automatically 
+ * break these tests. To ensure production code stays in sync:
+ * - Run integration tests that use actual orchestrator instances
+ * - Review these tests when modifying orchestrator helper methods
+ * 
+ * NOTE: extractStringValue() here checks 'name', 'description', 'value' fields.
+ * Production code may check additional fields like 'theme', 'type', 'structure'.
+ * Keep field lists synchronized when extending either implementation.
  */
 
 // ============================================================================

@@ -59,6 +59,23 @@ export interface MockSupabaseQueryBuilder {
 }
 
 export function createMockSupabaseClient() {
+  /**
+   * Default mock Supabase query builder.
+   * 
+   * NOTE: This mock returns { data: [], error: null } for ALL operations
+   * (SELECT, INSERT, UPDATE, DELETE). In production, Supabase returns
+   * different response shapes:
+   * - SELECT: { data: rows[], error: null }
+   * - INSERT: { data: insertedRows[], error: null }
+   * - DELETE: { data: null, error: null }
+   * 
+   * For tests requiring specific response shapes, override the `then` mock
+   * in your test setup:
+   * 
+   * queryBuilder.then.mockImplementation((resolve) => 
+   *   resolve({ data: [{ id: 1 }], error: null })
+   * );
+   */
   const queryBuilder: MockSupabaseQueryBuilder = {
     select: jest.fn().mockReturnThis(),
     insert: jest.fn().mockReturnThis(),
@@ -68,6 +85,8 @@ export function createMockSupabaseClient() {
     single: jest.fn().mockReturnThis(),
     order: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
+    // Default response simulates empty SELECT query
+    // Override in specific tests for INSERT/UPDATE/DELETE behavior
     then: jest.fn().mockImplementation((resolve) => resolve({ data: [], error: null })),
   };
 
