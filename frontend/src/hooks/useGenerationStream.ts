@@ -113,6 +113,8 @@ export function useGenerationStream({
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [rawFacts, setRawFacts] = useState<FactUpdate[]>([]);
+  // worldState is managed externally, but we expose it for compatibility
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [worldState] = useState<WorldStateFact[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
@@ -226,7 +228,6 @@ export function useGenerationStream({
 
           try {
             const rawData = JSON.parse(event.data);
-            console.log('[useGenerationStream] Raw SSE event:', rawData);
             
             // Normalize the event to ensure consistent structure
             // Some events (like 'connected', 'ERROR') may not have a 'data' field
@@ -558,8 +559,8 @@ export function useGenerationStream({
               data.type === "agent_conflict" ||
               data.type === "agent_consensus"
             ) {
-              // These are handled specially in CinematicAgentPanel
-              console.log('[useGenerationStream] Cinematic event received:', data.type, data);
+              // These cinematic events are stored in messages array
+              // and filtered by CinematicAgentPanel
             }
 
             // ============================================
@@ -569,7 +570,7 @@ export function useGenerationStream({
             // This prevents duplicate messages from SSE reconnects/replays
             if (data.eventId) {
               if (seenEventIdsRef.current.has(data.eventId)) {
-                console.log('[useGenerationStream] Skipping duplicate event:', data.eventId);
+                // Skip duplicate event silently
                 return;
               }
               seenEventIdsRef.current.add(data.eventId);
