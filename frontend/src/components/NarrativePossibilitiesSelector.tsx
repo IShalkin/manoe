@@ -105,7 +105,7 @@ export function NarrativePossibilitiesSelector({
           const isSelected = selectedId === possibility.id;
           const isExpanded = expandedId === possibility.id;
           const isRecommended = recommendation?.preferred_id === possibility.id;
-          const toneColors = TONE_COLORS[possibility.estimated_tone] ?? TONE_COLORS['dark'];
+          const toneColors = TONE_COLORS[possibility.estimated_tone] ?? TONE_COLORS['dark']!;
 
           return (
             <div
