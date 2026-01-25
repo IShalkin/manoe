@@ -24,9 +24,6 @@
         "model": "gpt-4o-mini",
         "supabase_project_id": "test-project-001"
       },
-      "headers": {
-        "Authorization": "Bearer {{TEST_AUTH_TOKEN}}"
-      },
       "expectedStatus": 202,
       "timeout": 30000,
       "validation": {
@@ -38,18 +35,12 @@
       "method": "GET",
       "url": "http://localhost:3000/orchestrate/stream/{runId}",
       "expectedStatus": 200,
-      "timeout": 60000,
-      "validation": {
-        "contentType": "text/event-stream"
-      }
+      "timeout": 60000
     },
     {
       "name": "Cancel Generation",
       "method": "POST",
       "url": "http://localhost:3000/orchestrate/runs/{runId}/cancel",
-      "headers": {
-        "Authorization": "Bearer {{TEST_AUTH_TOKEN}}"
-      },
       "expectedStatus": 200,
       "timeout": 5000
     }

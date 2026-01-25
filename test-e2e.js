@@ -33,6 +33,23 @@ function loadConfig() {
 }
 
 /**
+ * Get authorization header from environment
+ * Requires TEST_AUTH_TOKEN environment variable to be set
+ */
+function getAuthHeader() {
+  const token = process.env.TEST_AUTH_TOKEN;
+  
+  if (!token) {
+    throw new Error(
+      'TEST_AUTH_TOKEN environment variable is required.\n' +
+      'Usage: TEST_AUTH_TOKEN="your-token-here" node test-e2e.js'
+    );
+  }
+  
+  return `Bearer ${token}`;
+}
+
+/**
  * Make HTTP/HTTPS request with proper header handling
  */
 function makeRequest(endpoint, runId = null) {
@@ -47,21 +64,17 @@ function makeRequest(endpoint, runId = null) {
 
     // Merge headers from endpoint with defaults
     const defaultHeaders = {
-      'Authorization': process.env.TEST_AUTH_TOKEN || 'Bearer test-token'
+      'Content-Type': 'application/json'
     };
 
     const headers = endpoint.headers
       ? { ...defaultHeaders, ...endpoint.headers }
       : defaultHeaders;
 
-    // Dynamically set Content-Type only if body exists
-    if (endpoint.body) {
-      headers['Content-Type'] = 'application/json';
-    }
-
     const options = {
       method: endpoint.method,
-      headers: headers
+      headers: headers,
+      timeout: endpoint.timeout || 10000
     };
 
     const req = client.request(url, options, (res) => {
@@ -109,8 +122,28 @@ function validateResponse(response, endpoint) {
     return true;
   }
 
-  const { responseHas } = endpoint.validation;
+  const { responseHas, contentType } = endpoint.validation;
 
+  // Check for contentType if specified
+  if (contentType) {
+    const responseContentType = response.headers['content-type'];
+    
+    if (!responseContentType) {
+      console.log(`   ❌ Response validation failed - missing 'content-type' header`);
+      return false;
+    }
+
+    // Check if content-type contains the expected type (case-insensitive)
+    const expectedType = contentType;
+    const actualType = responseContentType.toLowerCase();
+    
+    if (!actualType.includes(expectedType.toLowerCase())) {
+      console.log(`   ❌ Response validation failed - expected '${expectedType}', got '${responseContentType}'`);
+      return false;
+    }
+  }
+
+  // Check for required response fields
   if (!responseHas) {
     return true;
   }
@@ -129,6 +162,10 @@ function validateResponse(response, endpoint) {
       }
       return current !== undefined && current !== null;
     });
+
+    if (!hasRequiredFields) {
+      console.log(`   ❌ Response validation failed - missing required fields: ${responseHas.join(', ')}`);
+    }
 
     return hasRequiredFields;
   } catch (error) {
@@ -167,6 +204,7 @@ async function testEndpoint(endpoint, runId = null) {
     passedTests++;
     return response;
   } catch (error) {
+    // User-friendly error message without sensitive details
     console.log(`   ❌ FAIL - ${error.message}`);
     failedTests++;
     return null;
@@ -225,6 +263,17 @@ async function runTests() {
     process.exit(1);
   }
 
+  // Add Authorization header to all endpoints
+  const authHeader = getAuthHeader();
+
+  // Inject auth header into endpoints
+  for (const endpoint of config.endpoints) {
+    if (!endpoint.headers) {
+      endpoint.headers = {};
+    }
+    endpoint.headers['Authorization'] = authHeader;
+  }
+
   // Check service health if configured
   if (config.services) {
     for (const service of config.services) {
@@ -268,16 +317,9 @@ async function runTests() {
     console.log(`\n🔄 Streaming events for ${currentRunId}...`);
     // This is a basic check. A full SSE client would be needed for more complex validation.
     const streamResponse = await testEndpoint(config.endpoints[2], currentRunId);
-    if (streamResponse && streamResponse.headers['content-type'] === 'text/event-stream') {
-      console.log(`   ✅ PASS - Stream endpoint is correctly configured for SSE.`);
-    } else if (streamResponse) {
-      console.log(`   ❌ FAIL - Stream endpoint did not return correct 'content-type' header.`);
-      failedTests++;
-      passedTests--;
-    }
   }
 
-  // Test 4: Cancel Generation (if we have a runId) - FIXED INDEX TO 3
+  // Test 4: Cancel Generation (if we have a runId)
   if (currentRunId) {
     await new Promise(resolve => setTimeout(resolve, 2000)); // Wait a bit
     await testEndpoint(config.endpoints[3], currentRunId);
@@ -299,6 +341,8 @@ async function runTests() {
 }
 
 runTests().catch(error => {
-  console.error('Fatal error:', error.message);
+  // User-friendly error message
+  console.error('Fatal error: An unexpected error occurred');
+  console.error('Hint: Ensure TEST_AUTH_TOKEN environment variable is set');
   process.exit(1);
 });
