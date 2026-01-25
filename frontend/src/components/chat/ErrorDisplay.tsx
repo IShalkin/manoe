@@ -10,7 +10,7 @@ export interface ErrorDisplayProps {
   resumeFromPhase: string | null;
   canResume: boolean;
   isLoadingResumeState: boolean;
-  onResume?: (runId: string, fromPhase: string) => void;
+  onResume?: ((runId: string, fromPhase: string) => void) | undefined;
   onResumeInterrupted: () => void;
 }
 

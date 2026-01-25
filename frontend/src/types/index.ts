@@ -14,7 +14,7 @@ export interface LLMModel {
 export interface ProviderConfig {
   provider: LLMProvider;
   apiKey: string;
-  isValid?: boolean;
+  isValid?: boolean | undefined;
 }
 
 export interface AgentConfig {

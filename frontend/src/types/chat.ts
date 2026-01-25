@@ -258,7 +258,7 @@ export interface DiagnosticWeakestLinkResult {
   scene_number: number;
   weakest_link: string;
   severity: string;
-  evidence?: string;
+  evidence?: string | undefined;
   revision_issues: string;
 }
 
@@ -272,11 +272,11 @@ export interface DiagnosticState {
     cliches_found: string[];
     evidence_quotes: string[];
     weakness_candidates: Array<{ dimension: string; score: number; reason: string }>;
-  };
+  } | undefined;
   weakest_link?: {
     dimension: string;
     severity: string;
     evidence: string;
     revision_issues: string;
-  };
+  } | undefined;
 }

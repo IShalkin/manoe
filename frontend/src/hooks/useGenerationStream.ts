@@ -39,7 +39,8 @@ function sanitizeErrorMessage(rawError: string): string {
   
   if (hasSensitiveInfo) {
     // Extract just the first meaningful line if possible
-    const firstLine = rawError.split('\n')[0].trim();
+    const lines = rawError.split('\n');
+    const firstLine = lines[0]?.trim();
     if (firstLine && firstLine.length < 200 && !sensitivePatterns.some(p => p.test(firstLine))) {
       return firstLine;
     }
@@ -420,21 +421,25 @@ export function useGenerationStream({
                 evidence_quotes: (data.data.evidence_quotes as string[]) || [],
                 weakness_candidates: (data.data.weakness_candidates as Array<{ dimension: string; score: number; reason: string }>) || [],
               };
-              setDiagnosticResults(prev => ({
-                ...prev,
-                [result.scene_number]: {
-                  ...prev[result.scene_number],
-                  status: 'analyzing_weakness',
-                  rubric: {
-                    overall_score: result.overall_score,
-                    dimensions: result.dimensions,
-                    didacticism_detected: result.didacticism_detected,
-                    cliches_found: result.cliches_found,
-                    evidence_quotes: result.evidence_quotes,
-                    weakness_candidates: result.weakness_candidates,
+              setDiagnosticResults(prev => {
+                const existing = prev[result.scene_number];
+                return {
+                  ...prev,
+                  [result.scene_number]: {
+                    scene_number: result.scene_number,
+                    status: 'analyzing_weakness' as const,
+                    rubric: {
+                      overall_score: result.overall_score,
+                      dimensions: result.dimensions,
+                      didacticism_detected: result.didacticism_detected,
+                      cliches_found: result.cliches_found,
+                      evidence_quotes: result.evidence_quotes,
+                      weakness_candidates: result.weakness_candidates,
+                    },
+                    weakest_link: existing?.weakest_link,
                   },
-                },
-              }));
+                };
+              });
               callbacksRef.current.onDiagnosticRubricComplete?.(result);
             }
 
@@ -446,19 +451,23 @@ export function useGenerationStream({
                 evidence: data.data.evidence as string | undefined,
                 revision_issues: data.data.revision_issues as string,
               };
-              setDiagnosticResults(prev => ({
-                ...prev,
-                [result.scene_number]: {
-                  ...prev[result.scene_number],
-                  status: 'revision_sent',
-                  weakest_link: {
-                    dimension: result.weakest_link,
-                    severity: result.severity,
-                    evidence: result.evidence || '',
-                    revision_issues: result.revision_issues,
+              setDiagnosticResults(prev => {
+                const existing = prev[result.scene_number];
+                return {
+                  ...prev,
+                  [result.scene_number]: {
+                    scene_number: result.scene_number,
+                    status: 'revision_sent' as const,
+                    rubric: existing?.rubric,
+                    weakest_link: {
+                      dimension: result.weakest_link,
+                      severity: result.severity,
+                      evidence: result.evidence ?? '',
+                      revision_issues: result.revision_issues,
+                    },
                   },
-                },
-              }));
+                };
+              });
               setActiveDiagnosticScene(null);
               callbacksRef.current.onDiagnosticWeakestLink?.(result);
             }
@@ -511,12 +520,14 @@ export function useGenerationStream({
               const phaseCompleteEvents = allMessages.filter(m => m.type === 'phase_complete' && m.data.result);
               if (phaseCompleteEvents.length > 0) {
                 const genesisComplete = phaseCompleteEvents.find(m => m.data.phase === 'genesis');
-                const phaseComplete = genesisComplete || phaseCompleteEvents[phaseCompleteEvents.length - 1];
-                callbacksRef.current.onComplete?.({
-                  narrative_possibility: phaseComplete.data.result as Record<string, unknown>,
-                  agents: agentOutputs,
-                });
-                return;
+                const phaseComplete = genesisComplete ?? phaseCompleteEvents[phaseCompleteEvents.length - 1];
+                if (phaseComplete) {
+                  callbacksRef.current.onComplete?.({
+                    narrative_possibility: phaseComplete.data.result as Record<string, unknown>,
+                    agents: agentOutputs,
+                  });
+                  return;
+                }
               }
               
               // Try generation_complete result_summary
@@ -532,9 +543,10 @@ export function useGenerationStream({
               const writerMessages = allMessages.filter(
                 m => m.type === 'agent_message' && m.data.agent === 'Writer' && (m.data.content as string)?.trim()
               );
-              if (writerMessages.length > 0) {
+              const lastWriterMsg = writerMessages[writerMessages.length - 1];
+              if (writerMessages.length > 0 && lastWriterMsg) {
                 callbacksRef.current.onComplete?.({
-                  story: writerMessages[writerMessages.length - 1].data.content as string,
+                  story: lastWriterMsg.data.content as string,
                   agents: agentOutputs,
                 });
                 return;

@@ -31,19 +31,19 @@ export interface ProjectResult {
     main_conflict?: string;
     potential_characters?: string[];
     thematic_elements?: string[];
-  };
-  characters?: unknown[];
-  outline?: unknown;
-  error?: string;
+  } | undefined;
+  characters?: unknown[] | undefined;
+  outline?: unknown | undefined;
+  error?: string | undefined;
   agentOutputs?: {
     [agentName: string]: string;
-  };
+  } | undefined;
   edits?: {
     [agentName: string]: AgentEdit;
-  };
+  } | undefined;
   locks?: {
     [agentName: string]: boolean;
-  };
+  } | undefined;
 }
 
 interface DbProject {

@@ -19,7 +19,7 @@ export interface AgentStatusGridProps {
   editState: EditState | null;
   lockedAgents: Record<string, boolean>;
   runId: string | null;
-  projectId?: string;
+  projectId?: string | undefined;
   messages: unknown[];
   getAgentContent: (agent: string) => string;
   getDisplayMessage: (state: AgentState) => AgentMessage | null;
@@ -69,28 +69,31 @@ export function AgentStatusGrid({
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {AGENTS.map(agent => (
-        <AgentCard
-          key={agent}
-          agent={agent as AgentName}
-          state={agentStates[agent]}
-          activeAgent={activeAgent}
-          isCancelled={isCancelled}
-          isComplete={isComplete}
-          editState={editState}
-          isLocked={lockedAgents[agent] || false}
-          runId={runId}
-          projectId={projectId}
-          getAgentContent={getAgentContent}
-          getDisplayMessage={getDisplayMessage}
-          onStartEdit={onStartEdit}
-          onCancelEdit={onCancelEdit}
-          onApplyEdit={onApplyEdit}
-          onEditContentChange={onEditContentChange}
-          onToggleLock={onToggleLock}
-          onOpenSceneModal={agent === 'Writer' ? onOpenSceneModal : undefined}
-        />
-      ))}
+      {AGENTS.map(agent => {
+        const state = agentStates[agent] ?? { status: 'idle' as const, messages: [], lastUpdate: '' };
+        return (
+          <AgentCard
+            key={agent}
+            agent={agent as AgentName}
+            state={state}
+            activeAgent={activeAgent}
+            isCancelled={isCancelled}
+            isComplete={isComplete}
+            editState={editState}
+            isLocked={lockedAgents[agent] ?? false}
+            runId={runId}
+            projectId={projectId}
+            getAgentContent={getAgentContent}
+            getDisplayMessage={getDisplayMessage}
+            onStartEdit={onStartEdit}
+            onCancelEdit={onCancelEdit}
+            onApplyEdit={onApplyEdit}
+            onEditContentChange={onEditContentChange}
+            onToggleLock={onToggleLock}
+            onOpenSceneModal={agent === 'Writer' ? onOpenSceneModal : undefined}
+          />
+        );
+      })}
     </div>
   );
 }

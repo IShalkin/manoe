@@ -48,8 +48,8 @@ export function ConversationTimeline({
             <div className="space-y-4">
               {filteredMessages.map((msg, idx) => {
                 const agent = msg.data.agent || 'System';
-                const color = AGENT_COLORS[agent] || AGENT_COLORS.System;
-                const textColor = AGENT_TEXT_COLORS[agent] || AGENT_TEXT_COLORS.System;
+                const color = AGENT_COLORS[agent] ?? AGENT_COLORS['System'];
+                const textColor = AGENT_TEXT_COLORS[agent] ?? AGENT_TEXT_COLORS['System'];
                 const content = msg.data.content || '';
                 const round = msg.data.round || 1;
                 

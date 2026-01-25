@@ -87,6 +87,7 @@ export function WorldStatePanel({ facts, currentScene }: WorldStatePanelProps) {
             if (!categoryFacts || categoryFacts.length === 0) return null;
 
             const colors = CATEGORY_COLORS[category];
+            if (!colors) return null;
 
             return (
               <div key={category} className="space-y-1">

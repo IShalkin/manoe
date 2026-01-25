@@ -20,9 +20,9 @@ const CONFLICT_TYPE_LABELS: Record<string, string> = {
 
 interface NarrativePossibilitiesSelectorProps {
   possibilities: NarrativePossibility[];
-  recommendation?: NarrativePossibilitiesRecommendation;
+  recommendation?: NarrativePossibilitiesRecommendation | undefined;
   onSelect: (possibility: NarrativePossibility) => void;
-  isLoading?: boolean;
+  isLoading?: boolean | undefined;
 }
 
 export function NarrativePossibilitiesSelector({
@@ -105,7 +105,7 @@ export function NarrativePossibilitiesSelector({
           const isSelected = selectedId === possibility.id;
           const isExpanded = expandedId === possibility.id;
           const isRecommended = recommendation?.preferred_id === possibility.id;
-          const toneColors = TONE_COLORS[possibility.estimated_tone] || TONE_COLORS.dark;
+          const toneColors = TONE_COLORS[possibility.estimated_tone] ?? TONE_COLORS['dark']!;
 
           return (
             <div
@@ -163,7 +163,7 @@ export function NarrativePossibilitiesSelector({
                     {possibility.estimated_tone}
                   </span>
                   <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700/50 text-slate-400 border border-slate-600">
-                    {CONFLICT_TYPE_LABELS[possibility.conflict_type] || possibility.conflict_type}
+                    {CONFLICT_TYPE_LABELS[possibility.conflict_type] ?? possibility.conflict_type}
                   </span>
                 </div>
 

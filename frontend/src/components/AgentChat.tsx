@@ -169,7 +169,8 @@ export function AgentChat({
             setIsPlaying(false);
             return null;
           }
-          return rounds[nextIdx];
+          const nextRound = rounds[nextIdx];
+          return nextRound ?? null;
         });
       }, 3000);
     }

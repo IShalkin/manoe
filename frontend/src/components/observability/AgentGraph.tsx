@@ -34,15 +34,15 @@ const AGENT_COLORS: Record<string, { bg: string; border: string; text: string; g
 
 // Custom node component for agents
 function AgentNode({ data }: NodeProps<{ label: string; isActive: boolean }>) {
-  const colors = AGENT_COLORS[data.label] || AGENT_COLORS.Writer;
+  const colors = AGENT_COLORS[data.label] ?? AGENT_COLORS['Writer'];
   const isActive = data.isActive;
 
   return (
     <div
       className={`
         px-4 py-3 rounded-lg border-2 transition-all duration-300
-        ${colors.bg} ${colors.border}
-        ${isActive ? `shadow-lg ${colors.glow} scale-110` : 'opacity-70'}
+        ${colors?.bg ?? ''} ${colors?.border ?? ''}
+        ${isActive ? `shadow-lg ${colors?.glow ?? ''} scale-110` : 'opacity-70'}
       `}
     >
       {/* Top/Bottom handles for vertical connections */}
@@ -54,11 +54,11 @@ function AgentNode({ data }: NodeProps<{ label: string; isActive: boolean }>) {
       <div className="flex items-center gap-2">
         {isActive && (
           <span className="relative flex h-2 w-2">
-            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${colors.text.replace('text-', 'bg-')} opacity-75`} />
-            <span className={`relative inline-flex rounded-full h-2 w-2 ${colors.text.replace('text-', 'bg-')}`} />
+            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${(colors?.text ?? '').replace('text-', 'bg-')} opacity-75`} />
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${(colors?.text ?? '').replace('text-', 'bg-')}`} />
           </span>
         )}
-        <span className={`font-semibold ${colors.text}`}>{data.label}</span>
+        <span className={`font-semibold ${colors?.text ?? ''}`}>{data.label}</span>
       </div>
     </div>
   );

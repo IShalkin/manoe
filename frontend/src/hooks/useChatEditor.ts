@@ -22,9 +22,9 @@ export interface RegenerateParams {
 export interface UseChatEditorProps {
   runId: string | null;
   messages: AgentMessage[];
-  projectResult?: ProjectResult | null;
-  onUpdateResult?: (result: ProjectResult) => void;
-  onRegenerate?: (params: RegenerateParams) => void;
+  projectResult?: ProjectResult | null | undefined;
+  onUpdateResult?: ((result: ProjectResult) => void) | undefined;
+  onRegenerate?: ((params: RegenerateParams) => void) | undefined;
 }
 
 export interface UseChatEditorReturn {
@@ -122,14 +122,16 @@ export function useChatEditor({
       m => m.type === 'agent_message' && normalizeAgentName(m.data.agent as string) === agent && m.data.content?.trim()
     );
     if (agentMessages.length > 0) {
-      return agentMessages[agentMessages.length - 1].data.content || '';
+      const lastMsg = agentMessages[agentMessages.length - 1];
+      return lastMsg?.data.content ?? '';
     }
     // Look for agent_thought events
     const thoughtMessages = messages.filter(
       m => m.type === 'agent_thought' && normalizeAgentName(m.data.agent as string) === agent && m.data.thought
     );
     if (thoughtMessages.length > 0) {
-      return thoughtMessages[thoughtMessages.length - 1].data.thought as string || '';
+      const lastThought = thoughtMessages[thoughtMessages.length - 1];
+      return (lastThought?.data.thought as string) ?? '';
     }
     return '';
   }, [messages, projectResult]);

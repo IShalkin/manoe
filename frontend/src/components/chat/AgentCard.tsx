@@ -29,7 +29,7 @@ export interface AgentCardProps {
   editState: EditState | null;
   isLocked: boolean;
   runId: string | null;
-  projectId?: string;
+  projectId?: string | undefined;
   getAgentContent: (agent: string) => string;
   getDisplayMessage: (state: AgentState) => AgentMessage | null;
   onStartEdit: (agent: string) => void;
@@ -37,7 +37,7 @@ export interface AgentCardProps {
   onApplyEdit: () => void;
   onEditContentChange: (content: string) => void;
   onToggleLock: (agent: string) => void;
-  onOpenSceneModal?: () => void;
+  onOpenSceneModal?: (() => void) | undefined;
 }
 
 export function AgentCard({

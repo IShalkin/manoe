@@ -34,6 +34,13 @@ class MockEventSource {
 
 global.EventSource = MockEventSource as any
 
+// Helper to get connection with type assertion (safe in tests after waitFor)
+function getConnection(index = 0): MockEventSource {
+  const es = MockEventSource.connections[index]
+  if (!es) throw new Error(`No connection at index ${index}`)
+  return es
+}
+
 describe('useGenerationStream', () => {
   beforeEach(() => {
     MockEventSource.connections = []
@@ -59,7 +66,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onopen?.()
 
     await waitFor(() => {
@@ -74,7 +81,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({ type: 'phase_start', data: { phase: 'profiling' } })
     }))
@@ -91,7 +98,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({ type: 'agent_start', data: { agent: 'Architect' } })
     }))
@@ -108,7 +115,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({
         type: 'agent_dialogue',
@@ -122,7 +129,7 @@ describe('useGenerationStream', () => {
 
     await waitFor(() => {
       expect(result.current.messages.length).toBe(1)
-      expect(result.current.messages[0].type).toBe('agent_dialogue')
+      expect(result.current.messages[0]?.type).toBe('agent_dialogue')
     })
   })
 
@@ -133,7 +140,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({ type: 'agent_start', data: { agent: 'Architect' } })
     }))
@@ -158,7 +165,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({
         type: 'new_developments_collected',
@@ -173,8 +180,8 @@ describe('useGenerationStream', () => {
 
     await waitFor(() => {
       expect(result.current.rawFacts.length).toBe(2)
-      expect(result.current.rawFacts[0].subject).toBe('Alice')
-      expect(result.current.rawFacts[1].category).toBe('world')
+      expect(result.current.rawFacts[0]?.subject).toBe('Alice')
+      expect(result.current.rawFacts[1]?.category).toBe('world')
     })
   })
 
@@ -189,7 +196,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({ type: 'generation_complete', data: {} })
     }))
@@ -213,7 +220,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({ type: 'generation_error', data: { error: 'Test error' } })
     }))
@@ -232,7 +239,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
 
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({
@@ -254,7 +261,7 @@ describe('useGenerationStream', () => {
       expect(result.current.messages.length).toBe(1)
     })
 
-    expect(result.current.messages[0].data.message).toBe('First message')
+    expect(result.current.messages[0]?.data?.['message']).toBe('First message')
   })
 
   it('should call onMessage callback', async () => {
@@ -268,7 +275,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({
         type: 'agent_dialogue',
@@ -295,7 +302,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onopen?.()
 
     await waitFor(() => {
@@ -318,7 +325,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
 
     unmount()
 
@@ -332,7 +339,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({
         type: 'agent_thought',
@@ -350,7 +357,7 @@ describe('useGenerationStream', () => {
       expect(result.current.messages.length).toBe(1)
     })
 
-    expect(result.current.messages[0].data).toEqual({
+    expect(result.current.messages[0]?.data).toEqual({
       agent: 'Architect',
       thought: 'Thinking about the world',
       sentiment: 'curious'
@@ -364,7 +371,7 @@ describe('useGenerationStream', () => {
       expect(MockEventSource.connections.length).toBe(1)
     })
 
-    const es = MockEventSource.connections[0]
+    const es = getConnection()
     es.onmessage?.(new MessageEvent('message', {
       data: JSON.stringify({
         type: 'agent_dialogue',
@@ -379,7 +386,7 @@ describe('useGenerationStream', () => {
       expect(result.current.messages.length).toBe(1)
     })
 
-    expect(result.current.messages[0].data).toEqual({
+    expect(result.current.messages[0]?.data).toEqual({
       from: 'Architect',
       to: 'Profiler',
       message: 'How are you?',
