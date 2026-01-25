@@ -16,7 +16,33 @@ export function MarkdownContent({ content, className = '' }: MarkdownContentProp
     <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
       <ReactMarkdown
         rehypePlugins={[rehypeSanitize]}
+        transformLinkUri={(href) => {
+          const value = (href || '').trim();
+          // Allow in-page anchors
+          if (value.startsWith('#')) return value;
+
+          // Allow only http(s) and mailto; block javascript:, data:, vbscript:, etc.
+          if (/^(https?:|mailto:)/i.test(value)) return value;
+
+          return '';
+        }}
+        transformImageUri={(src) => {
+          const value = (src || '').trim();
+          // Allow only http(s); block data: and other protocols
+          if (/^https?:/i.test(value)) return value;
+          return '';
+        }}
         components={{
+          a: ({ children, href }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className="text-cyan-300 hover:text-cyan-200 underline underline-offset-2"
+            >
+              {children}
+            </a>
+          ),
           p: ({ children }) => <p className="mb-2 last:mb-0 text-slate-300 leading-relaxed">{children}</p>,
           strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
           em: ({ children }) => <em className="text-slate-400">{children}</em>,
