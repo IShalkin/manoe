@@ -4,16 +4,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      deploy_target:
-        description: 'Deployment target'
-        required: false
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - api-gateway
-          - orchestrator
 
 jobs:
   deploy:
@@ -35,85 +25,32 @@ jobs:
             git checkout main
             git pull origin main
             
-            DEPLOY_TARGET="${{ github.event.inputs.deploy_target || 'all' }}"
-            echo "Deployment target: $DEPLOY_TARGET"
+            echo "=== Deploying API Gateway ==="
             
-            # Function to deploy api-gateway
-            deploy_api_gateway() {
-              echo "=== Deploying API Gateway ==="
-              
-              # Build new image first
-              docker compose -f docker-compose.vps.yml build api-gateway
-              
-              # Remove orphan container if exists (created outside compose)
-              if docker ps -a --format '{{.Names}}' | grep -q '^manoe-api-gateway$'; then
-                echo "Removing existing container..."
-                docker stop manoe-api-gateway 2>/dev/null || true
-                docker rm -f manoe-api-gateway 2>/dev/null || true
+            # Build new image first
+            docker compose -f docker-compose.vps.yml build api-gateway
+            
+            # Remove orphan container if exists (created outside compose)
+            if docker ps -a --format '{{.Names}}' | grep -q '^manoe-api-gateway$'; then
+              echo "Removing existing container..."
+              docker stop manoe-api-gateway 2>/dev/null || true
+              docker rm -f manoe-api-gateway 2>/dev/null || true
+            fi
+            
+            # Start new container
+            docker compose -f docker-compose.vps.yml up -d api-gateway
+            
+            echo "Waiting for API Gateway to be healthy..."
+            for i in {1..12}; do
+              if docker exec manoe-api-gateway curl -f http://localhost:3000/api/health 2>/dev/null; then
+                echo "API Gateway health check passed!"
+                echo "=== Deployment completed successfully! ==="
+                exit 0
               fi
-              
-              # Start new container
-              docker compose -f docker-compose.vps.yml up -d api-gateway
-              
-              echo "Waiting for API Gateway to be healthy..."
-              for i in {1..12}; do
-                if docker exec manoe-api-gateway curl -f http://localhost:3000/api/health 2>/dev/null; then
-                  echo "API Gateway health check passed!"
-                  return 0
-                fi
-                echo "Attempt $i/12 failed, retrying in 5s..."
-                sleep 5
-              done
-              
-              echo "ERROR: API Gateway health check failed after 60s!"
-              docker logs manoe-api-gateway --tail 50
-              exit 1
-            }
+              echo "Attempt $i/12 failed, retrying in 5s..."
+              sleep 5
+            done
             
-            # Function to deploy orchestrator
-            deploy_orchestrator() {
-              echo "=== Deploying Orchestrator ==="
-              
-              # Build new image first
-              docker compose -f docker-compose.vps.yml build orchestrator
-              
-              # Remove orphan container if exists (created outside compose)
-              if docker ps -a --format '{{.Names}}' | grep -q '^manoe-orchestrator$'; then
-                echo "Removing existing container..."
-                docker stop manoe-orchestrator 2>/dev/null || true
-                docker rm -f manoe-orchestrator 2>/dev/null || true
-              fi
-              
-              # Start new container
-              docker compose -f docker-compose.vps.yml up -d orchestrator
-              
-              echo "Waiting for Orchestrator to be healthy..."
-              for i in {1..12}; do
-                if docker exec manoe-orchestrator curl -f http://localhost:8001/health 2>/dev/null; then
-                  echo "Orchestrator health check passed!"
-                  return 0
-                fi
-                echo "Attempt $i/12 failed, retrying in 5s..."
-                sleep 5
-              done
-              
-              echo "ERROR: Orchestrator health check failed after 60s!"
-              docker logs manoe-orchestrator --tail 50
-              exit 1
-            }
-            
-            # Deploy based on target
-            case "$DEPLOY_TARGET" in
-              "api-gateway")
-                deploy_api_gateway
-                ;;
-              "orchestrator")
-                deploy_orchestrator
-                ;;
-              "all"|*)
-                deploy_api_gateway
-                deploy_orchestrator
-                ;;
-            esac
-            
-            echo "=== Deployment completed successfully! ==="
+            echo "ERROR: API Gateway health check failed after 60s!"
+            docker logs manoe-api-gateway --tail 50
+            exit 1
