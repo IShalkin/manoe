@@ -394,11 +394,11 @@ flowchart TB
             AgentChat.tsx (orchestrator)
             SettingsModal.tsx"]
             FE_Chat["components/chat/
-            ChatHeader, AgentCard,
-            AgentStatusGrid, ConversationTimeline,
-            EditConfirmModal, SceneSelectModal,
-            MotifLayerPanel, CheckpointsPanel,
-            DiagnosticPanel, ErrorDisplay..."]
+            ChatHeader, RoundSwitcher, ResultSection,
+            ConversationTimeline, AgentCard, AgentStatusGrid,
+            EditConfirmModal, SceneSelectModal, MotifLayerPanel,
+            CheckpointsPanel, DiagnosticPanel, ErrorDisplay,
+            MarkdownContent"]
             FE_Hooks["hooks/
             useGenerationStream, useProjects,
             useChatEditor, useFinalResult,
@@ -430,8 +430,8 @@ flowchart TB
 | File | Lines | Description |
 |------|-------|-------------|
 | `frontend/src/components/AgentChat.tsx` | ~350 | Thin orchestrator composing chat UI components |
-| `frontend/src/components/chat/*.tsx` | ~800 | Modular chat components (13 files) |
-| `frontend/src/hooks/use*.ts` | ~600 | Custom hooks for chat logic (7 files) |
+| `frontend/src/components/chat/*.tsx` | ~1490 | Modular chat components (13 files) |
+| `frontend/src/hooks/use{ChatEditor,FinalResult,GenerationControls,AgentStates}.ts` | ~708 | New chat hooks (4 files) |
 | `api-gateway/src/services/StorytellerOrchestrator.ts` | 1435 | Main orchestration logic |
 | `api-gateway/src/models/AgentModels.ts` | - | 9 agents, 12 phases definitions |
 | `api-gateway/src/models/LLMModels.ts` | - | 6 LLM provider configurations |
@@ -808,6 +808,8 @@ manoe/
 │   │   ├── hooks/               # Custom hooks
 │   │   │   ├── useGenerationStream.ts  # SSE connection
 │   │   │   ├── useProjects.ts          # Project CRUD
+│   │   │   ├── useSettings.ts          # Settings management
+│   │   │   ├── useAuth.ts              # Authentication
 │   │   │   ├── useChatEditor.ts        # Edit/lock logic
 │   │   │   ├── useFinalResult.ts       # Result extraction
 │   │   │   ├── useGenerationControls.ts # Stop/resume
