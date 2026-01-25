@@ -3,14 +3,12 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useSettings } from '../hooks/useSettings';
 import { useProjects, StoredProject, ProjectResult } from '../hooks/useProjects';
 import { useGenerationStream } from '../hooks/useGenerationStream';
-import { AgentChat, RegenerationConstraints } from '../components/AgentChat';
+import { AgentChat } from '../components/AgentChat';
 import { WorldStatePanel } from '../components/observability';
 import { CinematicAgentPanel } from '../components/cinematic/CinematicAgentPanel';
-import { orchestratorFetch, getOrchestratorUrl } from '../lib/api';
+import { orchestratorFetch } from '../lib/api';
 import type { NarrativePossibility } from '../types';
-
-// Multi-agent orchestrator URL (separate subdomain)
-const ORCHESTRATOR_URL = getOrchestratorUrl();
+import type { RegenerationConstraints } from '../types/chat';
 
 export function GenerationPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -35,11 +33,71 @@ export function GenerationPage() {
   const [selectedNarrative, setSelectedNarrative] = useState<NarrativePossibility | null>(null);
   const [isGlassBrainMode, setIsGlassBrainMode] = useState(true);
 
-  // Glass Brain: SSE stream for observability panels
+  // Handle generation complete - update project status
+  const handleGenerationComplete = useCallback(async (result?: import('../types/chat').GenerationResult) => {
+    if (!project) return;
+    try {
+      if (result?.error) {
+        await failGeneration(project.id, result.error);
+      } else {
+        await completeGeneration(project.id, {
+          narrativePossibility: result?.narrative_possibility,
+          agentOutputs: result?.agents,
+        });
+      }
+    } catch (e) {
+      console.error('[GenerationPage] Failed to update project:', e);
+    }
+  }, [project, failGeneration, completeGeneration]);
+
+  // Handle narrative possibility selection (branching mode)
+  const handleNarrativeSelection = useCallback((possibility: NarrativePossibility) => {
+    setSelectedNarrative(possibility);
+    setRunId(null);
+  }, []);
+
+  // Unified SSE stream for all components
   const {
+    // Connection state
+    isConnected,
+    currentPhase,
+    activeAgent,
+    messages,
+    error: sseError,
+    isComplete,
+    isCancelled,
+    
+    // World state
     rawFacts,
+    
+    // Narrative Possibilities
+    narrativePossibilities,
+    narrativeRecommendation,
+    
+    // Checkpoints
+    checkpointResults,
+    activeCheckpoint,
+    
+    // Motif Layer
+    motifLayerResult,
+    isMotifPlanningActive,
+    
+    // Diagnostics
+    diagnosticResults,
+    activeDiagnosticScene,
+    
+    // Interruption
+    isInterrupted,
+    
+    // Methods
+    reconnect,
   } = useGenerationStream({
     runId,
+    onComplete: handleGenerationComplete,
+    onNarrativePossibilities: (possibilities) => {
+      // Hook already stores these, but we can trigger UI updates here if needed
+      console.log('[GenerationPage] Narrative possibilities received:', possibilities.length);
+    },
   });
 
   // Load project data
@@ -486,70 +544,101 @@ export function GenerationPage() {
               <div className="flex-1 min-w-[400px] flex flex-col overflow-hidden">
                 <AgentChat
                   runId={runId}
-                  orchestratorUrl={ORCHESTRATOR_URL}
                   projectId={project?.id}
+                  
+                  // SSE Data
+                  messages={messages}
+                  isConnected={isConnected}
+                  currentPhase={currentPhase}
+                  activeAgent={activeAgent}
+                  isComplete={isComplete}
+                  isCancelled={isCancelled}
+                  error={sseError}
+                  
+                  // Narrative Possibilities
+                  narrativePossibilities={narrativePossibilities}
+                  narrativeRecommendation={narrativeRecommendation}
+                  
+                  // Checkpoints
+                  checkpointResults={checkpointResults}
+                  activeCheckpoint={activeCheckpoint}
+                  
+                  // Motif Layer
+                  motifLayerResult={motifLayerResult}
+                  isMotifPlanningActive={isMotifPlanningActive}
+                  
+                  // Diagnostics
+                  diagnosticResults={diagnosticResults}
+                  activeDiagnosticScene={activeDiagnosticScene}
+                  
+                  // Interruption
+                  isInterrupted={isInterrupted}
+                  
+                  // Project data
                   projectResult={project?.result}
+                  
+                  // Callbacks
                   onUpdateResult={handleUpdateResult}
                   onRegenerate={handleRegenerate}
                   onResume={handleResume}
-                  onNarrativePossibilitySelected={async (possibility) => {
-                    setSelectedNarrative(possibility);
-                    setRunId(null);
-                  }}
-                  onComplete={async (result) => {
-                    if (project) {
-                      try {
-                        if (result.error) {
-                          await failGeneration(project.id, result.error);
-                        } else {
-                          await completeGeneration(project.id, {
-                            narrativePossibility: result.narrative_possibility,
-                            agentOutputs: result.agents,
-                          });
-                        }
-                      } catch (e) {
-                        console.error('[GenerationPage] Failed to update project:', e);
-                      }
-                    }
-                  }}
+                  onNarrativePossibilitySelected={handleNarrativeSelection}
+                  onReconnect={reconnect}
                 />
               </div>
               
               {/* Right: Cinematic Agent Panel (30%) */}
               <div className="w-[30%] min-w-[300px] border-l border-slate-700 h-full overflow-hidden">
-                <CinematicAgentPanel runId={runId} />
+                <CinematicAgentPanel
+                  messages={messages}
+                  currentPhase={currentPhase}
+                  activeAgent={activeAgent}
+                  isConnected={isConnected}
+                />
               </div>
             </div>
           ): (
             // Simple mode: just AgentChat
             <AgentChat
               runId={runId}
-              orchestratorUrl={ORCHESTRATOR_URL}
               projectId={project?.id}
+              
+              // SSE Data
+              messages={messages}
+              isConnected={isConnected}
+              currentPhase={currentPhase}
+              activeAgent={activeAgent}
+              isComplete={isComplete}
+              isCancelled={isCancelled}
+              error={sseError}
+              
+              // Narrative Possibilities
+              narrativePossibilities={narrativePossibilities}
+              narrativeRecommendation={narrativeRecommendation}
+              
+              // Checkpoints
+              checkpointResults={checkpointResults}
+              activeCheckpoint={activeCheckpoint}
+              
+              // Motif Layer
+              motifLayerResult={motifLayerResult}
+              isMotifPlanningActive={isMotifPlanningActive}
+              
+              // Diagnostics
+              diagnosticResults={diagnosticResults}
+              activeDiagnosticScene={activeDiagnosticScene}
+              
+              // Interruption
+              isInterrupted={isInterrupted}
+              
+              // Project data
               projectResult={project?.result}
+              
+              // Callbacks
               onUpdateResult={handleUpdateResult}
               onRegenerate={handleRegenerate}
               onResume={handleResume}
-              onNarrativePossibilitySelected={async (possibility) => {
-                setSelectedNarrative(possibility);
-                setRunId(null);
-              }}
-              onComplete={async (result) => {
-                if (project) {
-                  try {
-                    if (result.error) {
-                      await failGeneration(project.id, result.error);
-                    } else {
-                      await completeGeneration(project.id, {
-                        narrativePossibility: result.narrative_possibility,
-                        agentOutputs: result.agents,
-                      });
-                    }
-                  } catch (e) {
-                    console.error('[GenerationPage] Failed to update project:', e);
-                  }
-                }
-              }}
+              onNarrativePossibilitySelected={handleNarrativeSelection}
+              onReconnect={reconnect}
             />
           )
         ) : (
