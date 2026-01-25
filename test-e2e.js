@@ -2,18 +2,39 @@
 
 /**
  * MANOE E2E Test Runner
- * Tests the MANOE Multi-Agent Narrative Orchestration Engine
+ * Tests MANOE Multi-Agent Narrative Orchestration Engine
  */
 
 const http = require('http');
 const https = require('https');
-
-const config = require('./testsprite-config.json');
+const fs = require('fs');
+const path = require('path');
 
 let totalTests = 0;
 let passedTests = 0;
 let failedTests = 0;
 
+/**
+ * Load configuration with error handling
+ */
+function loadConfig() {
+  const configPath = path.join(__dirname, 'testsprite-config.json');
+  
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Configuration file not found: ${configPath}`);
+  }
+
+  try {
+    const configData = fs.readFileSync(configPath, 'utf8');
+    return JSON.parse(configData);
+  } catch (error) {
+    throw new Error(`Failed to load configuration: ${error.message}`);
+  }
+}
+
+/**
+ * Make HTTP/HTTPS request with proper header handling
+ */
 function makeRequest(endpoint, runId = null) {
   return new Promise((resolve, reject) => {
     const url = runId && endpoint.url.includes('{runId}')
@@ -24,12 +45,20 @@ function makeRequest(endpoint, runId = null) {
     const isHttps = urlObj.protocol === 'https:';
     const client = isHttps ? https : http;
 
+    // Merge headers from endpoint with defaults
+    const defaultHeaders = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer test-token'
+    };
+    
+    const headers = endpoint.headers 
+      ? { ...defaultHeaders, ...endpoint.headers }
+      : defaultHeaders;
+
     const options = {
       method: endpoint.method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer test-token'
-      }
+      headers: headers,
+      timeout: endpoint.timeout || 10000
     };
 
     const req = client.request(url, options, (res) => {
@@ -53,6 +82,11 @@ function makeRequest(endpoint, runId = null) {
       reject(error);
     });
 
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`Request timeout after ${options.timeout}ms`));
+    });
+
     if (endpoint.body) {
       req.write(JSON.stringify(endpoint.body));
     }
@@ -61,24 +95,75 @@ function makeRequest(endpoint, runId = null) {
   });
 }
 
+/**
+ * Validate response structure based on endpoint configuration
+ */
+function validateResponse(response, endpoint) {
+  if (!endpoint.validation) {
+    return true;
+  }
+
+  const { responseHas } = endpoint.validation;
+
+  if (!responseHas) {
+    return true;
+  }
+
+  try {
+    const data = JSON.parse(response.data);
+    const hasRequiredFields = responseHas.every(field => {
+      const fieldPath = field.split('.');
+      let current = data;
+      for (const key of fieldPath) {
+        if (current && typeof current === 'object' && key in current) {
+          current = current[key];
+        } else {
+          return false;
+        }
+      }
+      return current !== undefined && current !== null;
+    });
+
+    if (!hasRequiredFields) {
+      console.log(`   ❌ Response validation failed - missing required fields: ${responseHas.join(', ')}`);
+    }
+
+    return hasRequiredFields;
+  } catch (error) {
+    console.log(`   ❌ Response validation failed - could not parse JSON: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Test a single endpoint
+ */
 async function testEndpoint(endpoint, runId = null) {
   totalTests++;
   const testName = endpoint.name;
   console.log(`\n🧪 Test ${totalTests}: ${testName}`);
-  console.log(`   ${endpoint.method} ${endpoint.url}`);
+  console.log(`   ${endpoint.method} ${endpoint.url.replace('{runId}', runId || '<runId>')}`);
 
   try {
     const response = await makeRequest(endpoint, runId);
 
-    if (response.statusCode === endpoint.expectedStatus) {
-      console.log(`   ✅ PASS - Status: ${response.statusCode}`);
-      passedTests++;
-      return response;
-    } else {
+    // Validate HTTP status code
+    if (response.statusCode !== endpoint.expectedStatus) {
       console.log(`   ❌ FAIL - Expected ${endpoint.expectedStatus}, got ${response.statusCode}`);
       failedTests++;
       return null;
     }
+
+    // Validate response structure if configured
+    if (!validateResponse(response, endpoint)) {
+      console.log(`   ❌ FAIL - Response validation failed`);
+      failedTests++;
+      return null;
+    }
+
+    console.log(`   ✅ PASS - Status: ${response.statusCode}`);
+    passedTests++;
+    return response;
   } catch (error) {
     console.log(`   ❌ FAIL - Error: ${error.message}`);
     failedTests++;
@@ -86,16 +171,71 @@ async function testEndpoint(endpoint, runId = null) {
   }
 }
 
+/**
+ * Check service health
+ */
+async function checkService(service) {
+  console.log(`\n🔍 Checking ${service.name}...`);
+  
+  try {
+    const urlObj = new URL(service.checkUrl);
+    const isHttps = urlObj.protocol === 'https:';
+    const client = isHttps ? https : http;
+
+    return new Promise((resolve) => {
+      const req = client.request(service.checkUrl, { method: 'GET', timeout: 5000 }, (res) => {
+        const status = res.statusCode === 200 ? '✅ OK' : `❌ ${res.statusCode}`;
+        console.log(`   ${status}`);
+        resolve(res.statusCode === 200);
+      });
+
+      req.on('error', () => {
+        console.log(`   ❌ Not reachable`);
+        resolve(false);
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        console.log(`   ❌ Timeout`);
+        resolve(false);
+      });
+
+      req.end();
+    });
+  } catch (error) {
+    console.log(`   ❌ Error: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Run all tests
+ */
 async function runTests() {
   console.log('🚀 Starting MANOE E2E Tests');
-  console.log('=' .repeat(50));
+  console.log('='.repeat(50));
+
+  let config;
+  try {
+    config = loadConfig();
+  } catch (error) {
+    console.error(`\n❌ Failed to load configuration: ${error.message}`);
+    process.exit(1);
+  }
+
+  // Check service health if configured
+  if (config.services) {
+    for (const service of config.services) {
+      await checkService(service);
+    }
+  }
 
   let currentRunId = null;
 
   // Test 1: Health Check
   const healthResponse = await testEndpoint(config.endpoints[0]);
   if (!healthResponse) {
-    console.log('\n❌ Health check failed. Make sure the API Gateway is running.');
+    console.log('\n❌ Health check failed. Make sure API Gateway is running.');
     console.log('   Run: docker-compose up -d');
     process.exit(1);
   }
@@ -108,6 +248,8 @@ async function runTests() {
       currentRunId = result.runId;
       if (currentRunId) {
         console.log(`   📝 Run ID: ${currentRunId}`);
+      } else {
+        console.log(`   ⚠️  Run ID not found in response`);
       }
     } catch (e) {
       console.log(`   ⚠️  Could not parse response: ${e.message}`);
@@ -120,9 +262,7 @@ async function runTests() {
     // Note: SSE streaming would require EventSource or similar
     // For now, we'll skip actual streaming test
     console.log(`   ⏭️  Skipping SSE streaming test (requires EventSource)`);
-    console.log(`   ✅ PASS - Run ID generated successfully`);
-    passedTests++;
-    totalTests++;
+    console.log(`   ℹ️  Note: This test should be implemented with EventSource or SSE library`);
   }
 
   // Test 4: Cancel Generation (if we have a runId)

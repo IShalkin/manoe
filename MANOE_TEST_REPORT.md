@@ -178,10 +178,11 @@ TestSprite MCP server has been successfully configured in:
    # Edit .env with your API keys
    ```
 
-3. **Run E2E Tests:**
-   ```bash
-   node /tmp/manoe/test-e2e.js
-   ```
+ 3. **Run E2E Tests:**
+    ```bash
+    cd /path/to/manoe
+    node test-e2e.js
+    ```
 
 4. **Run with Coverage:**
    ```bash
