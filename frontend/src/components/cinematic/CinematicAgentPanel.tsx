@@ -8,11 +8,15 @@
 import { useMemo } from "react";
 import { AgentAvatar } from "./AgentAvatar";
 import { DialogueBubble } from "./DialogueBubble";
-import { useGenerationStream } from "../../hooks/useGenerationStream";
 import { AgentType } from "../../types/agent";
+import type { AgentMessage } from "../../types/chat";
 
 interface CinematicAgentPanelProps {
-  runId: string | null;
+  // SSE Data from parent (GenerationPage)
+  messages: AgentMessage[];
+  currentPhase: string;
+  activeAgent: string | null;
+  isConnected: boolean;
 }
 
 const ALL_AGENTS: AgentType[] = [
@@ -27,10 +31,12 @@ const ALL_AGENTS: AgentType[] = [
   "archivist",
 ];
 
-export function CinematicAgentPanel({ runId }: CinematicAgentPanelProps) {
-  const { messages, currentPhase, activeAgent, isConnected } = useGenerationStream({
-    runId,
-  });
+export function CinematicAgentPanel({ 
+  messages,
+  currentPhase,
+  activeAgent,
+  isConnected,
+}: CinematicAgentPanelProps) {
 
   // Filter cinematic events
   const cinematicMessages = useMemo(() => {
