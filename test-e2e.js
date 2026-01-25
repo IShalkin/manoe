@@ -319,7 +319,11 @@ async function runTests() {
 
   // Test 4: Cancel Generation (if we have a runId)
   if (currentRunId) {
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait a bit
+    // Wait for generation to start before testing cancellation
+    // NOTE: This is a simple delay. In production, you should poll
+    // the status endpoint or monitor SSE events to detect when
+    // generation actually starts before testing cancellation.
+    await new Promise(resolve => setTimeout(resolve, 5000));
     await testEndpoint(config.endpoints[3], currentRunId);
   }
 
@@ -339,8 +343,8 @@ async function runTests() {
 }
 
 runTests().catch(error => {
-  // User-friendly error message
   console.error('Fatal error: An unexpected error occurred');
+  console.error('Error details:', error.message);
   console.error('Hint: Ensure TEST_AUTH_TOKEN environment variable is set');
   process.exit(1);
 });

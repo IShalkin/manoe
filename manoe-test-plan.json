@@ -27,8 +27,7 @@
           "url": "http://localhost:3000/orchestrate/generate",
           "method": "POST",
           "headers": {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer test-token"
+            "Content-Type": "application/json"
           },
           "body": {
             "seed_idea": "What if a detective could see the last 10 seconds of a murder victim's life?",
