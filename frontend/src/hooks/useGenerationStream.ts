@@ -14,6 +14,46 @@ import type {
 // Re-export AgentMessage for convenience
 export type { AgentMessage } from '../types/chat';
 
+/**
+ * Sanitize error messages to prevent exposing internal details (stack traces, etc.)
+ * Returns a user-friendly error message while logging the full error for debugging
+ */
+function sanitizeErrorMessage(rawError: string): string {
+  // Log full error for debugging (won't appear in production builds typically)
+  console.error('[useGenerationStream] Raw error:', rawError);
+  
+  // Check for common error patterns that shouldn't be shown to users
+  const sensitivePatterns = [
+    /at\s+\w+\s+\(/i,           // Stack trace patterns
+    /^\s*at\s+/m,               // Stack trace lines
+    /Error:\s*\n/,              // Multi-line errors
+    /Traceback/i,               // Python tracebacks
+    /line\s+\d+/i,              // Line number references
+    /\.py:\d+/,                 // Python file references
+    /\.ts:\d+/,                 // TypeScript file references
+    /\.js:\d+/,                 // JavaScript file references
+    /internal\s+server/i,       // Internal server errors
+  ];
+  
+  const hasSensitiveInfo = sensitivePatterns.some(pattern => pattern.test(rawError));
+  
+  if (hasSensitiveInfo) {
+    // Extract just the first meaningful line if possible
+    const firstLine = rawError.split('\n')[0].trim();
+    if (firstLine && firstLine.length < 200 && !sensitivePatterns.some(p => p.test(firstLine))) {
+      return firstLine;
+    }
+    return 'An error occurred during generation. Please try again.';
+  }
+  
+  // Truncate very long error messages
+  if (rawError.length > 300) {
+    return rawError.substring(0, 297) + '...';
+  }
+  
+  return rawError;
+}
+
 export interface FactUpdate {
   subject: string;
   change: string;
@@ -521,7 +561,8 @@ export function useGenerationStream({
             // Error Events
             // ============================================
             if (data.type === 'generation_error' || data.type === 'ERROR') {
-              const errorMsg = (data.data.error as string) || 'Unknown error';
+              const rawError = (data.data.error as string) || 'Unknown error';
+              const errorMsg = sanitizeErrorMessage(rawError);
               const interrupted = data.data.status === 'interrupted';
               
               if (interrupted) {

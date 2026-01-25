@@ -114,10 +114,11 @@ export function GenerationPage() {
     }
   }, [projectId, projects, getProject, runId]);
 
-  // Map agent names to phases for phase-based regeneration
-  // Phase taxonomy aligned with backend orchestrator phases
+  // Map agent names to backend phase identifiers for phase-based regeneration
+  // NOTE: These are LOWERCASE backend API phase names, distinct from AGENT_TO_PHASE in chat.ts
+  // which uses CAPITALIZED display names for the UI
   // Backend phases: genesis → characters → worldbuilding → outlining → motif_layer → advanced_planning → drafting → polish
-  const AGENT_TO_PHASE: Record<string, string> = {
+  const AGENT_TO_BACKEND_PHASE: Record<string, string> = {
     'Architect': 'genesis',
     'Profiler': 'characters',
     'Worldbuilder': 'worldbuilding',
@@ -152,7 +153,7 @@ export function GenerationPage() {
       }
 
       // Determine the phase to start from based on the edited agent
-      const startFromPhase = AGENT_TO_PHASE[constraints.editedAgent] || 'genesis';
+      const startFromPhase = AGENT_TO_BACKEND_PHASE[constraints.editedAgent] || 'genesis';
       
       // Build edited content object with the agent's edited content
       const editedContent: Record<string, unknown> = {};
