@@ -391,11 +391,18 @@ flowchart TB
             GenerationPage.tsx
             DashboardPage.tsx"]
             FE_Comp["components/
-            AgentChat.tsx
+            AgentChat.tsx (orchestrator)
             SettingsModal.tsx"]
+            FE_Chat["components/chat/
+            ChatHeader, RoundSwitcher, ResultSection,
+            ConversationTimeline, AgentCard, AgentStatusGrid,
+            EditConfirmModal, SceneSelectModal, MotifLayerPanel,
+            CheckpointsPanel, DiagnosticPanel, ErrorDisplay,
+            MarkdownContent"]
             FE_Hooks["hooks/
-            useGenerationStream.ts
-            useProjects.ts"]
+            useGenerationStream, useProjects,
+            useChatEditor, useFinalResult,
+            useGenerationControls, useAgentStates"]
         end
         
         subgraph GW["api-gateway/ - ts.ed"]
@@ -422,7 +429,9 @@ flowchart TB
 
 | File | Lines | Description |
 |------|-------|-------------|
-| `frontend/src/components/AgentChat.tsx` | 2534 | Agent cards with real-time updates |
+| `frontend/src/components/AgentChat.tsx` | ~350 | Thin orchestrator composing chat UI components |
+| `frontend/src/components/chat/*.tsx` | ~1490 | Modular chat components (13 files) |
+| `frontend/src/hooks/use{ChatEditor,FinalResult,GenerationControls,AgentStates}.ts` | ~708 | New chat hooks (4 files) |
 | `api-gateway/src/services/StorytellerOrchestrator.ts` | 1435 | Main orchestration logic |
 | `api-gateway/src/models/AgentModels.ts` | - | 9 agents, 12 phases definitions |
 | `api-gateway/src/models/LLMModels.ts` | - | 6 LLM provider configurations |
@@ -778,11 +787,33 @@ manoe/
 ├── frontend/                    # React + TypeScript + Vite Frontend
 │   ├── src/
 │   │   ├── components/          # UI components
-│   │   │   ├── AgentChat.tsx    # Agent cards and regeneration modals
+│   │   │   ├── AgentChat.tsx    # Thin orchestrator (~350 lines)
+│   │   │   ├── chat/            # Modular chat components
+│   │   │   │   ├── ChatHeader.tsx
+│   │   │   │   ├── RoundSwitcher.tsx
+│   │   │   │   ├── ResultSection.tsx
+│   │   │   │   ├── ConversationTimeline.tsx
+│   │   │   │   ├── AgentCard.tsx
+│   │   │   │   ├── AgentStatusGrid.tsx
+│   │   │   │   ├── EditConfirmModal.tsx
+│   │   │   │   ├── SceneSelectModal.tsx
+│   │   │   │   ├── MotifLayerPanel.tsx
+│   │   │   │   ├── CheckpointsPanel.tsx
+│   │   │   │   ├── DiagnosticPanel.tsx
+│   │   │   │   ├── ErrorDisplay.tsx
+│   │   │   │   └── MarkdownContent.tsx
 │   │   │   ├── Layout.tsx       # App layout
 │   │   │   └── SettingsModal.tsx
 │   │   ├── contexts/            # React contexts (Auth, Settings)
-│   │   ├── hooks/               # Custom hooks (useProjects, useSettings)
+│   │   ├── hooks/               # Custom hooks
+│   │   │   ├── useGenerationStream.ts  # SSE connection
+│   │   │   ├── useProjects.ts          # Project CRUD
+│   │   │   ├── useSettings.ts          # Settings management
+│   │   │   ├── useAuth.ts              # Authentication
+│   │   │   ├── useChatEditor.ts        # Edit/lock logic
+│   │   │   ├── useFinalResult.ts       # Result extraction
+│   │   │   ├── useGenerationControls.ts # Stop/resume
+│   │   │   └── useAgentStates.ts       # Agent state computation
 │   │   ├── pages/
 │   │   │   ├── GenerationPage.tsx  # Main generation UI
 │   │   │   ├── DashboardPage.tsx
