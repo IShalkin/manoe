@@ -38,16 +38,24 @@ jobs:
             DEPLOY_TARGET="${{ github.event.inputs.deploy_target || 'all' }}"
             echo "Deployment target: $DEPLOY_TARGET"
             
-            # Function to deploy api-gateway with retry loop
+            # Function to deploy api-gateway
             deploy_api_gateway() {
               echo "=== Deploying API Gateway ==="
+              
+              # Build new image first
               docker compose -f docker-compose.vps.yml build api-gateway
-              # Force remove old container (handles both compose and standalone containers)
-              docker stop manoe-api-gateway 2>/dev/null || true
-              docker rm -f manoe-api-gateway 2>/dev/null || true
+              
+              # Remove orphan container if exists (created outside compose)
+              if docker ps -a --format '{{.Names}}' | grep -q '^manoe-api-gateway$'; then
+                echo "Removing existing container..."
+                docker stop manoe-api-gateway 2>/dev/null || true
+                docker rm -f manoe-api-gateway 2>/dev/null || true
+              fi
+              
+              # Start new container
               docker compose -f docker-compose.vps.yml up -d api-gateway
               
-              echo "Waiting for API Gateway to start..."
+              echo "Waiting for API Gateway to be healthy..."
               for i in {1..12}; do
                 if docker exec manoe-api-gateway curl -f http://localhost:3000/api/health 2>/dev/null; then
                   echo "API Gateway health check passed!"
@@ -62,16 +70,24 @@ jobs:
               exit 1
             }
             
-            # Function to deploy orchestrator with retry loop
+            # Function to deploy orchestrator
             deploy_orchestrator() {
               echo "=== Deploying Orchestrator ==="
+              
+              # Build new image first
               docker compose -f docker-compose.vps.yml build orchestrator
-              # Force remove old container (handles both compose and standalone containers)
-              docker stop manoe-orchestrator 2>/dev/null || true
-              docker rm -f manoe-orchestrator 2>/dev/null || true
+              
+              # Remove orphan container if exists (created outside compose)
+              if docker ps -a --format '{{.Names}}' | grep -q '^manoe-orchestrator$'; then
+                echo "Removing existing container..."
+                docker stop manoe-orchestrator 2>/dev/null || true
+                docker rm -f manoe-orchestrator 2>/dev/null || true
+              fi
+              
+              # Start new container
               docker compose -f docker-compose.vps.yml up -d orchestrator
               
-              echo "Waiting for Orchestrator to start..."
+              echo "Waiting for Orchestrator to be healthy..."
               for i in {1..12}; do
                 if docker exec manoe-orchestrator curl -f http://localhost:8001/health 2>/dev/null; then
                   echo "Orchestrator health check passed!"
