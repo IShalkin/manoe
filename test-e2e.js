@@ -19,7 +19,7 @@ let failedTests = 0;
  */
 function loadConfig() {
   const configPath = path.join(__dirname, 'testsprite-config.json');
-  
+
   if (!fs.existsSync(configPath)) {
     throw new Error(`Configuration file not found: ${configPath}`);
   }
@@ -47,18 +47,21 @@ function makeRequest(endpoint, runId = null) {
 
     // Merge headers from endpoint with defaults
     const defaultHeaders = {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer test-token'
+      'Authorization': process.env.TEST_AUTH_TOKEN || 'Bearer test-token'
     };
-    
-    const headers = endpoint.headers 
+
+    const headers = endpoint.headers
       ? { ...defaultHeaders, ...endpoint.headers }
       : defaultHeaders;
 
+    // Dynamically set Content-Type only if body exists
+    if (endpoint.body) {
+      headers['Content-Type'] = 'application/json';
+    }
+
     const options = {
       method: endpoint.method,
-      headers: headers,
-      timeout: endpoint.timeout || 10000
+      headers: headers
     };
 
     const req = client.request(url, options, (res) => {
@@ -82,10 +85,13 @@ function makeRequest(endpoint, runId = null) {
       reject(error);
     });
 
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error(`Request timeout after ${options.timeout}ms`));
-    });
+    // Set timeout from endpoint configuration
+    if (endpoint.timeout) {
+      req.setTimeout(endpoint.timeout, () => {
+        req.abort();
+        reject(new Error(`Request timeout after ${endpoint.timeout}ms`));
+      });
+    }
 
     if (endpoint.body) {
       req.write(JSON.stringify(endpoint.body));
@@ -124,13 +130,9 @@ function validateResponse(response, endpoint) {
       return current !== undefined && current !== null;
     });
 
-    if (!hasRequiredFields) {
-      console.log(`   ❌ Response validation failed - missing required fields: ${responseHas.join(', ')}`);
-    }
-
     return hasRequiredFields;
   } catch (error) {
-    console.log(`   ❌ Response validation failed - could not parse JSON: ${error.message}`);
+    console.log(`   ❌ Response validation failed - could not parse JSON`);
     return false;
   }
 }
@@ -165,7 +167,7 @@ async function testEndpoint(endpoint, runId = null) {
     passedTests++;
     return response;
   } catch (error) {
-    console.log(`   ❌ FAIL - Error: ${error.message}`);
+    console.log(`   ❌ FAIL - ${error.message}`);
     failedTests++;
     return null;
   }
@@ -176,7 +178,7 @@ async function testEndpoint(endpoint, runId = null) {
  */
 async function checkService(service) {
   console.log(`\n🔍 Checking ${service.name}...`);
-  
+
   try {
     const urlObj = new URL(service.checkUrl);
     const isHttps = urlObj.protocol === 'https:';
@@ -195,7 +197,7 @@ async function checkService(service) {
       });
 
       req.on('timeout', () => {
-        req.destroy();
+        req.abort();
         console.log(`   ❌ Timeout`);
         resolve(false);
       });
@@ -249,26 +251,36 @@ async function runTests() {
       if (currentRunId) {
         console.log(`   📝 Run ID: ${currentRunId}`);
       } else {
-        console.log(`   ⚠️  Run ID not found in response`);
+        console.log(`   ❌ FAIL - Run ID not found in response`);
+        failedTests++;
+        passedTests--;
       }
     } catch (e) {
-      console.log(`   ⚠️  Could not parse response: ${e.message}`);
+      console.log(`   ❌ FAIL - Could not get runId from response: ${e.message}`);
+      failedTests++;
+      passedTests--;
+      currentRunId = null;
     }
   }
 
   // Test 3: Stream Events (if we have a runId)
   if (currentRunId) {
     console.log(`\n🔄 Streaming events for ${currentRunId}...`);
-    // Note: SSE streaming would require EventSource or similar
-    // For now, we'll skip actual streaming test
-    console.log(`   ⏭️  Skipping SSE streaming test (requires EventSource)`);
-    console.log(`   ℹ️  Note: This test should be implemented with EventSource or SSE library`);
+    // This is a basic check. A full SSE client would be needed for more complex validation.
+    const streamResponse = await testEndpoint(config.endpoints[2], currentRunId);
+    if (streamResponse && streamResponse.headers['content-type'] === 'text/event-stream') {
+      console.log(`   ✅ PASS - Stream endpoint is correctly configured for SSE.`);
+    } else if (streamResponse) {
+      console.log(`   ❌ FAIL - Stream endpoint did not return correct 'content-type' header.`);
+      failedTests++;
+      passedTests--;
+    }
   }
 
-  // Test 4: Cancel Generation (if we have a runId)
+  // Test 4: Cancel Generation (if we have a runId) - FIXED INDEX TO 3
   if (currentRunId) {
     await new Promise(resolve => setTimeout(resolve, 2000)); // Wait a bit
-    await testEndpoint(config.endpoints[2], currentRunId);
+    await testEndpoint(config.endpoints[3], currentRunId);
   }
 
   console.log('\n' + '='.repeat(50));
@@ -287,6 +299,6 @@ async function runTests() {
 }
 
 runTests().catch(error => {
-  console.error('Fatal error:', error);
+  console.error('Fatal error:', error.message);
   process.exit(1);
 });

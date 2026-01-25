@@ -19,10 +19,13 @@
         "seed_idea": "What if a detective could see the last 10 seconds of a murder victim's life?",
         "moral_compass": "ambiguous",
         "target_audience": "Adult thriller readers",
-        "themes": "justice,memory,truth",
+        "themes": "justice,truth",
         "provider": "openai",
         "model": "gpt-4o-mini",
         "supabase_project_id": "test-project-001"
+      },
+      "headers": {
+        "Authorization": "Bearer {{TEST_AUTH_TOKEN}}"
       },
       "expectedStatus": 202,
       "timeout": 30000,
@@ -37,37 +40,20 @@
       "expectedStatus": 200,
       "timeout": 60000,
       "validation": {
-        "streamEvents": ["generation_started", "phase_start", "agent_complete", "generation_complete"]
+        "contentType": "text/event-stream"
       }
     },
     {
       "name": "Cancel Generation",
       "method": "POST",
       "url": "http://localhost:3000/orchestrate/runs/{runId}/cancel",
+      "headers": {
+        "Authorization": "Bearer {{TEST_AUTH_TOKEN}}"
+      },
       "expectedStatus": 200,
       "timeout": 5000
     }
   ],
-  "databaseChecks": [
-    {
-      "name": "Supabase Connection",
-      "type": "supabase",
-      "query": "SELECT COUNT(*) FROM projects",
-      "expectedMinRows": 0
-    },
-    {
-      "name": "Qdrant Collection Check",
-      "type": "qdrant",
-      "collection": "manoe_world_bible_v1_1536",
-      "expectedStatus": 200
-    }
-  ],
-  "environment": {
-    "REDIS_URL": "redis://localhost:6379",
-    "QDRANT_URL": "http://localhost:6333",
-    "SUPABASE_URL": "https://your-project.supabase.co",
-    "OPENAI_API_KEY": "sk-test-key-placeholder"
-  },
   "services": [
     {
       "name": "Redis",
