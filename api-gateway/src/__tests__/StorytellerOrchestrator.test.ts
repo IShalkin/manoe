@@ -16,7 +16,7 @@
  * - Run integration tests that use actual orchestrator instances
  * - Review these tests when modifying orchestrator helper methods
  * 
- * NOTE: extractStringValue() here checks 'name', 'description', 'value' fields.
+ * NOTE: extractStringValue() here checks common narrative fields.
  * Production code may check additional fields like 'theme', 'type', 'structure'.
  * Keep field lists synchronized when extending either implementation.
  */
@@ -110,7 +110,6 @@ function extractStringValue(field: unknown): string {
     if (obj.description && typeof obj.description === 'string') return obj.description;
     if (obj.type && typeof obj.type === 'string') return obj.type;
     if (obj.structure && typeof obj.structure === 'string') return obj.structure;
-    if (obj.value && typeof obj.value === 'string') return obj.value;
     return JSON.stringify(field);
   }
   return '';
@@ -336,8 +335,8 @@ describe('StorytellerOrchestrator', () => {
       expect(extractStringValue({ structure: 'three-act' })).toBe('three-act');
     });
 
-    it('should extract value from object', () => {
-      expect(extractStringValue({ value: 'mystery' })).toBe('mystery');
+    it('should stringify unknown object fields', () => {
+      expect(extractStringValue({ value: 'mystery' })).toBe(JSON.stringify({ value: 'mystery' }));
     });
 
     it('should prioritize name over description', () => {
