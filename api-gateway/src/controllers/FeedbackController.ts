@@ -12,6 +12,7 @@
 import { Controller, Post, BodyParams } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
+
 import { LangfuseService } from "../services/LangfuseService";
 import { MetricsService } from "../services/MetricsService";
 
@@ -65,7 +66,7 @@ export class FeedbackController {
   async submitFeedback(
     @BodyParams() body: FeedbackRequest
   ): Promise<FeedbackResponse> {
-    const { runId, projectId, agentName, feedbackType, sceneNumber, comment } = body;
+    const { runId, agentName, feedbackType, sceneNumber, comment } = body;
 
     if (!runId || !agentName || !feedbackType) {
       return {
@@ -123,7 +124,7 @@ export class FeedbackController {
   async recordRegeneration(
     @BodyParams() body: RegenerationFeedbackRequest
   ): Promise<FeedbackResponse> {
-    const { runId, projectId, agentName, sceneNumber, reason } = body;
+    const { runId, agentName, sceneNumber, reason } = body;
 
     if (!runId || !agentName) {
       return {

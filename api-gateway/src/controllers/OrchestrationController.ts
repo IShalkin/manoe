@@ -21,7 +21,6 @@ import {
   Summary, 
   Tags, 
   Example,
-  Title,
   Groups,
   Required,
   Property,
@@ -30,7 +29,7 @@ import {
 import { Inject } from "@tsed/di";
 import { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { StorytellerOrchestrator, GenerationOptions, RunStatus, LLMConfiguration } from "../services/StorytellerOrchestrator";
+import { StorytellerOrchestrator, GenerationOptions, RunStatus } from "../services/StorytellerOrchestrator";
 import { RedisStreamsService } from "../services/RedisStreamsService";
 import { LLMProvider, GenerationPhase } from "../models/LLMModels";
 

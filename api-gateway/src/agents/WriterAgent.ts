@@ -5,7 +5,7 @@
  * Active in: Drafting, Revision, Polish phases
  */
 
-import { AgentType, KeyConstraint } from "../models/AgentModels";
+import { AgentType } from "../models/AgentModels";
 import { GenerationPhase } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService, AGENT_PROMPTS } from "../services/LangfuseService";

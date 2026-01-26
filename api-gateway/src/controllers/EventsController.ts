@@ -1,6 +1,5 @@
 import { Controller, Get, PathParams, Res, Req } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
-import { Inject } from "@tsed/di";
 import { Request, Response } from "express";
 import Redis from "ioredis";
 

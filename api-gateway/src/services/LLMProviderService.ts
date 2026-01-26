@@ -11,7 +11,7 @@
  * - Venice AI (Dolphin Mistral, Llama 4 Maverick)
  */
 
-import { Service, Inject, Opts, OnInit } from "@tsed/di";
+import { Service, Inject } from "@tsed/di";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -21,7 +21,6 @@ import {
   CompletionOptions,
   ChatMessage,
   MessageRole,
-  TokenUsage,
 } from "../models/LLMModels";
 import { MetricsService } from "./MetricsService";
 

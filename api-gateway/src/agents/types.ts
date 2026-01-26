@@ -5,7 +5,6 @@
  */
 
 import { GenerationState, AgentType, RawFact } from "../models/AgentModels";
-import { GenerationPhase } from "../models/LLMModels";
 
 /**
  * LLM Configuration for generation

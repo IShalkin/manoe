@@ -1,5 +1,5 @@
 import { Controller, Get, QueryParams } from "@tsed/common";
-import { Description, Returns, Summary, Tags } from "@tsed/schema";
+import { Description, Summary, Tags } from "@tsed/schema";
 
 // Model definitions matching the Python orchestrator
 const OPENAI_MODELS = {
