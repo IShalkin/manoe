@@ -106,11 +106,14 @@ function extractStringValue(field: unknown): string {
   if (typeof field === 'object' && field !== null) {
     const obj = field as Record<string, unknown>;
     if (obj.name && typeof obj.name === 'string') return obj.name;
+    if (obj.theme && typeof obj.theme === 'string') return obj.theme;
     if (obj.description && typeof obj.description === 'string') return obj.description;
+    if (obj.type && typeof obj.type === 'string') return obj.type;
+    if (obj.structure && typeof obj.structure === 'string') return obj.structure;
     if (obj.value && typeof obj.value === 'string') return obj.value;
     return JSON.stringify(field);
   }
-  return String(field);
+  return '';
 }
 
 /**
@@ -155,6 +158,16 @@ function addSeedConstraints(
     state.keyConstraints.push({
       key: 'tone',
       value: extractStringValue(narrative.tone),
+      sceneNumber: 0,
+      timestamp,
+      immutable: true,
+    });
+  }
+
+  if (narrative.arc) {
+    state.keyConstraints.push({
+      key: 'narrative_arc',
+      value: extractStringValue(narrative.arc),
       sceneNumber: 0,
       timestamp,
       immutable: true,
@@ -311,6 +324,18 @@ describe('StorytellerOrchestrator', () => {
       expect(extractStringValue({ description: 'A story about...' })).toBe('A story about...');
     });
 
+    it('should extract theme from object', () => {
+      expect(extractStringValue({ theme: 'coming of age' })).toBe('coming of age');
+    });
+
+    it('should extract type from object', () => {
+      expect(extractStringValue({ type: 'mystery' })).toBe('mystery');
+    });
+
+    it('should extract structure from object', () => {
+      expect(extractStringValue({ structure: 'three-act' })).toBe('three-act');
+    });
+
     it('should extract value from object', () => {
       expect(extractStringValue({ value: 'mystery' })).toBe('mystery');
     });
@@ -324,11 +349,11 @@ describe('StorytellerOrchestrator', () => {
     });
 
     it('should handle numbers', () => {
-      expect(extractStringValue(42)).toBe('42');
+      expect(extractStringValue(42)).toBe('');
     });
 
     it('should handle null', () => {
-      expect(extractStringValue(null)).toBe('null');
+      expect(extractStringValue(null)).toBe('');
     });
   });
 
@@ -356,16 +381,18 @@ describe('StorytellerOrchestrator', () => {
           genre: 'noir',
           premise: 'Detective solves murder',
           tone: 'dark and gritty',
+          arc: 'rise and fall',
         },
       };
       addSeedConstraints(state, 'seed');
 
-      expect(state.keyConstraints).toHaveLength(4);
+      expect(state.keyConstraints).toHaveLength(5);
       expect(state.keyConstraints.map((c) => c.key)).toEqual([
         'seed_idea',
         'genre',
         'premise',
         'tone',
+        'narrative_arc',
       ]);
     });
 
