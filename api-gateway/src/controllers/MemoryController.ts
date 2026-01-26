@@ -1,5 +1,5 @@
 import { Controller, Get, PathParams, QueryParams } from "@tsed/common";
-import { Description, Returns, Summary, Tags } from "@tsed/schema";
+import { Description, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { SupabaseService } from "../services/SupabaseService";
 import {

@@ -3,16 +3,34 @@ module.exports = {
   testEnvironment: 'node',
   rootDir: __dirname,
 
-  // Tests are stored at repo root, but dependencies are installed in api-gateway/
-  roots: ['<rootDir>/../tests'],
-  testMatch: ['**/*.test.ts'],
-
-  // Ensure Node can resolve packages from api-gateway/node_modules for root-level tests
-  modulePaths: ['<rootDir>/node_modules'],
+  // Tests are co-located in src/__tests__/
+  roots: ['<rootDir>/src'],
+  testMatch: ['**/__tests__/**/*.test.ts'],
 
   moduleFileExtensions: ['ts', 'js', 'json'],
-  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts', '!src/index.ts'],
+
+  // Setup files for shared mocks
+  setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts'],
+
+  // Coverage configuration with thresholds
+  collectCoverageFrom: [
+    'src/**/*.ts',
+    '!src/**/*.d.ts',
+    '!src/index.ts',
+    '!src/__tests__/**',
+  ],
   coverageDirectory: 'coverage',
-  coverageReporters: ['text', 'lcov'],
+  coverageReporters: ['text', 'lcov', 'html'],
+
+  // Coverage thresholds - match current test coverage
+  coverageThreshold: {
+    global: {
+      branches: 10,
+      functions: 9,
+      lines: 10,
+      statements: 10,
+    },
+  },
+
   verbose: true,
 };

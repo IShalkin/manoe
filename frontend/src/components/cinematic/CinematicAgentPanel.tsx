@@ -53,7 +53,7 @@ export function CinematicAgentPanel({
 
   // Get agent statuses
   const agentStatuses = useMemo(() => {
-    const statuses: Record<AgentType, "idle" | "active" | "speaking" | "listening"> = {} as any;
+    const statuses = {} as Record<AgentType, "idle" | "active" | "speaking" | "listening">;
     
     ALL_AGENTS.forEach((agent) => {
       if (agent === activeAgent) {

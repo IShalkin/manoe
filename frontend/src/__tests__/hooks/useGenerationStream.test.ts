@@ -32,7 +32,7 @@ class MockEventSource {
   }
 }
 
-global.EventSource = MockEventSource as any
+global.EventSource = MockEventSource as unknown as typeof EventSource
 
 // Helper to get connection with type assertion (safe in tests after waitFor)
 function getConnection(index = 0): MockEventSource {

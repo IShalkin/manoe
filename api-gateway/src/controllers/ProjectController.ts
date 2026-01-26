@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, PathParams, BodyParams, QueryParams } from "@tsed/common";
+import { Controller, Get, Post, Delete, PathParams, BodyParams, QueryParams } from "@tsed/common";
 import { Description, Returns, Summary, Tags } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { JobQueueService } from "../services/JobQueueService";

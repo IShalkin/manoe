@@ -5,7 +5,6 @@ import {
   SupabaseDraftSchema,
   SupabaseValidationError,
 } from "../schemas/SupabaseSchemas";
-import { z } from "zod";
 
 describe("SupabaseSchemas - Character Schema", () => {
   it("should pass valid character data", () => {

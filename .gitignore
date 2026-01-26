@@ -17,6 +17,8 @@ dist.tar.gz
 api-gateway/dist/
 api-gateway/node_modules/
 
+api-gateway/coverage/
+
 # Python
 __pycache__/
 *.py[cod]

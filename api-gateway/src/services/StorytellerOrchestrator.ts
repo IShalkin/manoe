@@ -24,20 +24,15 @@ import {
 } from "../models/LLMModels";
 import {
   AgentType,
-  AgentMessage,
   MessageType,
   GenerationState,
   KeyConstraint,
   RawFact,
-  AGENT_CONFIGS,
-  PHASE_CONFIGS,
-  getPhaseConfig,
-  getNextPhase,
 } from "../models/AgentModels";
 import { LLMProviderService } from "./LLMProviderService";
 import { RedisStreamsService } from "./RedisStreamsService";
 import { QdrantMemoryService } from "./QdrantMemoryService";
-import { LangfuseService, AGENT_PROMPTS, PHASE_PROMPTS } from "./LangfuseService";
+import { LangfuseService, AGENT_PROMPTS } from "./LangfuseService";
 import { SupabaseService, Character, Draft } from "./SupabaseService";
 import { MetricsService } from "./MetricsService";
 import { AgentFactory } from "../agents/AgentFactory";
