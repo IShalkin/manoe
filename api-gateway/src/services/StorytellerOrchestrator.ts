@@ -957,6 +957,14 @@ export class StorytellerOrchestrator {
       // Without this, Scene 2 would use Scene 1's outline data due to stale state
       state.currentSceneOutline = undefined;
     }
+
+    // Final Archivist flush: the per-scene trigger only fires on multiples of 3,
+    // so when the scene count isn't divisible by 3 the trailing scenes' raw facts
+    // were never consolidated. Run a final pass over any unprocessed scenes.
+    if (!this.shouldStop(runId) && scenes.length > state.lastArchivistScene) {
+      await this.runArchivistCheck(runId, options, scenes.length);
+      state.lastArchivistScene = scenes.length;
+    }
   }
 
   /**

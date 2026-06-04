@@ -7,6 +7,8 @@ import {
   SupabaseWorldbuildingSchema,
   SupabaseDraftSchema,
 } from "../schemas/SupabaseSchemas";
+import { normalizeCharacterForStorage } from "../utils/schemaNormalizers";
+import { camelToSnakeCase } from "../utils/stringUtils";
 
 interface Project {
   id: string;
@@ -332,8 +334,6 @@ export class SupabaseService {
   ): Promise<Character> {
     const startTime = Date.now();
     const client = this.getClient();
-    const { normalizeCharacterForStorage } = await import("../utils/schemaNormalizers");
-    const { camelToSnakeCase } = await import("../utils/stringUtils");
 
     // Normalize LLM field names to DB field names and stringify objects
     const normalizedChar = normalizeCharacterForStorage(character as Record<string, unknown>);

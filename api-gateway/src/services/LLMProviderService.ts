@@ -537,9 +537,9 @@ export class LLMProviderService {
     if (trimmedKey && trimmedKey.length > 10) {
       // Reject common placeholder keys (case-insensitive)
       const lowerKey = trimmedKey.toLowerCase();
-      const isPlaceholder = LLMProviderService.PLACEHOLDER_KEYS.some(
-        (placeholder) => lowerKey === placeholder || lowerKey.includes(placeholder)
-      );
+      // Exact match only: a real key can legitimately contain substrings like
+      // "xxx" or "placeholder", so substring matching would reject valid keys.
+      const isPlaceholder = LLMProviderService.PLACEHOLDER_KEYS.includes(lowerKey);
       if (!isPlaceholder) {
         return trimmedKey;
       }
@@ -760,20 +760,60 @@ export class LLMProviderService {
       generationConfig,
     });
 
-    const response = result.response;
-    const content = response.text() ?? "";
+    const parsed = LLMProviderService.parseGeminiResponse(result.response);
 
     return {
-      content,
+      content: parsed.content,
       model: options.model,
       provider: LLMProvider.GEMINI,
-      usage: {
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-      },
-      finishReason: "stop",
+      usage: parsed.usage,
+      finishReason: parsed.finishReason,
     };
+  }
+
+  /**
+   * Parse a Gemini SDK response into content, token usage and finish reason.
+   *
+   * - Reads real token counts from usageMetadata (previously hardcoded to 0,
+   *   which zeroed all Gemini cost/token metrics).
+   * - Guards response.text(), which THROWS when the response was blocked for
+   *   safety (empty candidates). In that case we return empty content and the
+   *   block/finish reason instead of crashing the calling agent.
+   */
+  static parseGeminiResponse(response: unknown): {
+    content: string;
+    usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+    finishReason: string;
+  } {
+    const r = (response ?? {}) as {
+      text?: () => string;
+      candidates?: Array<{ finishReason?: string }>;
+      promptFeedback?: { blockReason?: string };
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        totalTokenCount?: number;
+      };
+    };
+
+    let content = "";
+    try {
+      content = r.text?.() ?? "";
+    } catch {
+      // Safety-blocked or otherwise empty — text() throws. Treat as no content.
+      content = "";
+    }
+
+    const usage = {
+      promptTokens: r.usageMetadata?.promptTokenCount ?? 0,
+      completionTokens: r.usageMetadata?.candidatesTokenCount ?? 0,
+      totalTokens: r.usageMetadata?.totalTokenCount ?? 0,
+    };
+
+    const finishReason =
+      r.candidates?.[0]?.finishReason ?? r.promptFeedback?.blockReason ?? "stop";
+
+    return { content, usage, finishReason };
   }
 
   /**
@@ -937,27 +977,48 @@ export class LLMProviderService {
    * Check if an error is retryable (rate limit, server error, timeout)
    */
   isRetryableError(error: unknown): boolean {
+    // Prefer the numeric HTTP status when the SDK exposes one. Provider SDKs
+    // (OpenAI/Anthropic) surface rate limits and server errors via `status`
+    // even when the message text has no digits or keywords.
+    const status = this.getErrorStatus(error);
+    if (typeof status === "number") {
+      return status === 429 || (status >= 500 && status <= 599);
+    }
+
     if (error instanceof Error) {
       const message = error.message.toLowerCase();
-      
+
       // Rate limit errors
-      if (message.includes("rate limit") || message.includes("429")) {
+      if (message.includes("rate limit") || /\b429\b/.test(message)) {
         return true;
       }
-      
-      // Server errors
-      if (message.includes("500") || message.includes("502") || 
-          message.includes("503") || message.includes("504")) {
+
+      // Server errors — match HTTP codes as whole tokens so that incidental
+      // numbers (e.g. "at most 500 characters") don't trigger a retry.
+      if (/\b(500|502|503|504)\b/.test(message)) {
         return true;
       }
-      
+
       // Timeout errors
       if (message.includes("timeout") || message.includes("timed out")) {
         return true;
       }
     }
-    
+
     return false;
+  }
+
+  /**
+   * Extract a numeric HTTP status from a provider error, if present.
+   * Different SDKs use `status` or `statusCode`.
+   */
+  private getErrorStatus(error: unknown): number | undefined {
+    if (error && typeof error === "object") {
+      const e = error as { status?: unknown; statusCode?: unknown };
+      if (typeof e.status === "number") return e.status;
+      if (typeof e.statusCode === "number") return e.statusCode;
+    }
+    return undefined;
   }
 
   /**
