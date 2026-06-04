@@ -355,6 +355,25 @@ export class GenerationState {
   @Property()
   isCompleted: boolean = false;
 
+  /**
+   * Cooperative cancellation flag. Set by cancelRun(); observed by shouldStop()
+   * at phase/scene boundaries so the run loop unwinds cleanly instead of being
+   * abruptly deleted from activeRuns mid-flight.
+   */
+  @Optional()
+  @Property()
+  isCancelled?: boolean;
+
+  /**
+   * True while the run loop is awaiting an agent / LLM call, false between
+   * safe boundaries (phase/scene). gracefulShutdown() waits on this so it does
+   * not snapshot a torn, half-written state. NOTE: this is cooperative only —
+   * a single in-flight LLM call still cannot be interrupted mid-call.
+   */
+  @Optional()
+  @Property()
+  inFlight?: boolean;
+
   @Property()
   error?: string;
 

@@ -44,6 +44,13 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "claude-3-5-haiku": { input: 0.001, output: 0.005 },
   "claude-opus-4": { input: 0.015, output: 0.075 },
   "claude-sonnet-4": { input: 0.003, output: 0.015 },
+  // Bedrock Claude (MANOE corporate provider). Exact key so inference-profile
+  // ids like "us.anthropic.claude-opus-4-8" resolve here after region/vendor
+  // prefix stripping (would also match "claude-opus-4" via the startsWith
+  // fallback, but an explicit key is clearer and survives table reordering).
+  // NOTE: PUBLIC Anthropic Claude Opus rates -- corporate Bedrock contract
+  // rates may differ; infra to confirm actual negotiated pricing.
+  "claude-opus-4-8": { input: 0.015, output: 0.075 },
   // Google models
   "gemini-1.5-pro": { input: 0.00125, output: 0.005 },
   "gemini-1.5-flash": { input: 0.000075, output: 0.0003 },
@@ -427,9 +434,21 @@ export class MetricsService {
   private normalizeModelName(model: string): string {
     // Remove provider prefix if present (e.g., "anthropic/claude-3-5-haiku" -> "claude-3-5-haiku")
     const baseName = model.includes("/") ? model.split("/").pop()! : model;
-    
+
+    // Strip Bedrock inference-profile region + vendor prefix.
+    // Bedrock model ids look like "us.anthropic.claude-opus-4-8" (also
+    // "eu.", "global.", "apac.", or any 2-letter "xx." region). These never
+    // matched a MODEL_PRICING key, so they silently fell back to "default"
+    // pricing (~$0.001/$0.002 per 1K) instead of the real model rate.
+    // The "anthropic." anchor is required so we don't over-strip a legitimate
+    // model name that merely begins with two letters and a dot.
+    const withoutBedrockPrefix = baseName.replace(
+      /^(?:global|apac|[a-z]{2})\.anthropic\./,
+      ""
+    );
+
     // Remove date suffixes (e.g., "gpt-4o-2024-05-13" -> "gpt-4o")
-    const withoutDate = baseName.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+    const withoutDate = withoutBedrockPrefix.replace(/-\d{4}-\d{2}-\d{2}$/, "");
     
     // Check for exact match first
     if (MODEL_PRICING[withoutDate]) {

@@ -302,10 +302,16 @@ export class StorytellerOrchestrator {
     }
 
     try {
+      // Mark in-flight while running phase work; we clear it at each safe
+      // boundary below so gracefulShutdown() can tell when this run is at a
+      // checkpoint rather than mid agent/LLM call.
+      state.inFlight = true;
+
       // Phase 1: Genesis
       $log.info(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
       await this.runGenesisPhase(runId, options);
       $log.info(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
+      state.inFlight = false; // safe checkpoint
       const shouldStopAfterGenesis = this.shouldStop(runId);
       $log.info(`[StorytellerOrchestrator] runGeneration: shouldStop after Genesis = ${shouldStopAfterGenesis}, runId: ${runId}`);
       if (shouldStopAfterGenesis) {
@@ -315,23 +321,32 @@ export class StorytellerOrchestrator {
 
       // Phase 2: Characters
       $log.info(`[StorytellerOrchestrator] runGeneration: about to call runCharactersPhase, runId: ${runId}`);
+      state.inFlight = true;
       await this.runCharactersPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
       $log.info(`[StorytellerOrchestrator] runGeneration: runCharactersPhase completed, runId: ${runId}`);
       if (this.shouldStop(runId)) return;
 
       // Phase 3: Worldbuilding
+      state.inFlight = true;
       await this.runWorldbuildingPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
       if (this.shouldStop(runId)) return;
 
       // Phase 4: Outlining
+      state.inFlight = true;
       await this.runOutliningPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
       if (this.shouldStop(runId)) return;
 
       // Phase 5: Advanced Planning (optional)
+      state.inFlight = true;
       await this.runAdvancedPlanningPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
       if (this.shouldStop(runId)) return;
 
-      // Phase 6-9: Drafting → Critique → Revision → Polish (per scene)
+      // Phase 6-9: Drafting → Critique → Revision → Polish (per scene).
+      // runDraftingLoop manages its own per-scene inFlight checkpoints.
       await this.runDraftingLoop(runId, options);
       if (this.shouldStop(runId)) return;
 
@@ -351,6 +366,19 @@ export class StorytellerOrchestrator {
       });
     } catch (error) {
       await this.handleError(runId, error);
+    } finally {
+      const finalState = this.activeRuns.get(runId);
+      if (finalState) {
+        // The loop has unwound — this run is no longer mid agent/LLM call.
+        finalState.inFlight = false;
+      }
+      // Deferred cleanup for cooperatively-cancelled runs. cancelRun() leaves
+      // the cancelled state in activeRuns so in-flight code reads a coherent
+      // (cancelled) state and getRunStatus() stays meaningful; once the loop has
+      // unwound here we drop it to avoid leaking the state.
+      if (finalState?.isCancelled) {
+        this.activeRuns.delete(runId);
+      }
     }
   }
 
@@ -865,6 +893,9 @@ export class StorytellerOrchestrator {
     for (let sceneNum = 0; sceneNum < scenes.length; sceneNum++) {
       if (this.shouldStop(runId)) return;
 
+      // Mark in-flight for the duration of this scene's agent/LLM work; cleared
+      // at the end of the scene (a safe boundary) so gracefulShutdown can wait.
+      state.inFlight = true;
       state.currentScene = sceneNum + 1;
       const scene = scenes[sceneNum] as Record<string, unknown>;
       
@@ -956,6 +987,9 @@ export class StorytellerOrchestrator {
       // CRITICAL: Clear currentSceneOutline at the end of each scene to prevent state contamination
       // Without this, Scene 2 would use Scene 1's outline data due to stale state
       state.currentSceneOutline = undefined;
+
+      // Safe checkpoint between scenes: gracefulShutdown may snapshot here.
+      state.inFlight = false;
     }
 
     // Final Archivist flush: the per-scene trigger only fires on multiples of 3,
@@ -2416,6 +2450,10 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
       $log.info(`[StorytellerOrchestrator] shouldStop: state not found, returning true, runId: ${runId}`);
       return true;
     }
+    if (state.isCancelled) {
+      $log.info(`[StorytellerOrchestrator] shouldStop: isCancelled=true, returning true, runId: ${runId}`);
+      return true;
+    }
     if (state.isPaused) {
       $log.info(`[StorytellerOrchestrator] shouldStop: isPaused=true, returning true, runId: ${runId}`);
       return true;
@@ -2521,15 +2559,33 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
   }
 
   /**
-   * Cancel a run
+   * Cancel a run (cooperative).
+   *
+   * Previously this set state.error then IMMEDIATELY deleted the run from
+   * activeRuns. Any in-flight awaited work (draftScene/critiqueScene/…) that
+   * re-read activeRuns.get(runId) then saw `undefined` and silently returned,
+   * while getRunStatus(runId) returned null — so cancellation neither stopped
+   * the work cleanly nor surfaced a meaningful status, and leaked the state.
+   *
+   * Now we mark the run cancelled cooperatively and KEEP it in activeRuns:
+   *  - state.isCancelled (and state.error) make shouldStop() return true at the
+   *    next phase/scene boundary, so the loop unwinds itself.
+   *  - In-flight code that re-reads activeRuns still sees a COHERENT cancelled
+   *    state instead of undefined, and getRunStatus() returns a non-null status
+   *    reflecting the cancellation.
+   * Actual removal from activeRuns happens in runGeneration()'s finally, after
+   * the loop has observed the cancellation and unwound.
+   *
+   * LIMITATION: this is cooperative only. A single LLM call already in flight
+   * cannot be aborted mid-call — see the AbortSignal follow-up FLAG.
    */
   cancelRun(runId: string): boolean {
     const state = this.activeRuns.get(runId);
     if (!state) return false;
 
+    state.isCancelled = true;
     state.error = "Cancelled by user";
     state.updatedAt = new Date().toISOString();
-    this.activeRuns.delete(runId);
     return true;
   }
 
@@ -2595,14 +2651,21 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
       });
     }
 
-    // Wait for any in-flight LLM calls to complete (with timeout)
+    // Wait for any in-flight LLM calls to complete (with timeout).
+    //
+    // Previously this checked ONLY state.isPaused — which we set ourselves two
+    // lines above — so allSafe was true on the very first iteration and we never
+    // actually waited, risking a torn/half-written snapshot. We now wait on the
+    // per-run `inFlight` flag, which the run loop clears at each safe boundary
+    // (phase/scene). The timeout remains a backstop.
+    //
+    // LIMITATION: cooperative only. A single LLM call already in flight is not
+    // interrupted — we wait up to timeoutMs for it to finish, then snapshot
+    // regardless. True mid-call abort needs AbortSignal threading (see FLAG).
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
-      // Check if all runs have reached a safe checkpoint
-      const allSafe = activeRuns.every((state) => {
-        // A run is "safe" if it's paused and not in the middle of an LLM call
-        return state.isPaused;
-      });
+      // A run is "safe" if it has reached a boundary (not mid agent/LLM call).
+      const allSafe = activeRuns.every((state) => !state.inFlight);
 
       if (allSafe) break;
       await new Promise((resolve) => setTimeout(resolve, 100));

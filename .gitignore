@@ -1,19 +1,17 @@
-# Environment files (protect secrets)
-.env
-.env.*
-!.env.example
-**/.env
-**/.env.*
-!**/.env.example
 
-# Frontend
-frontend/node_modules/
-frontend/dist/
-frontend/dist.tar.gz
-node_modules/
-dist.tar.gz
+# Local-only Bedrock provider (kept out of remote by decision)
+.bedrock-local/
 
-# API Gateway build artifacts
+# AWS / Bedrock credentials & local config (never commit)
+.aws/
+**/.aws/
+aws.json
+*.pem
+!corp-ca-bundle.pem
+bedrock.env
+.bedrock.env
+**/bedrock.config.*
+tifacts
 api-gateway/dist/
 api-gateway/node_modules/
 
