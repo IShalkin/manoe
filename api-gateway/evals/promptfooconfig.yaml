@@ -1,0 +1,206 @@
+# =============================================================================
+# MANOE narrative-prompt evaluation harness (promptfoo)
+# =============================================================================
+# SCAFFOLD ONLY -- runnable, but NOT yet wired into the live orchestrator.
+#
+# Purpose: measure the *quality of MANOE's narrative prompts* (Writer/etc.)
+# using LLM-as-a-judge, so prompt edits can be compared before/after.
+#
+# This COMPLEMENTS, does not replace:
+#   - CriticAgent           (api-gateway/src/agents/CriticAgent.ts) -- in-pipeline
+#                            scene critique that drives the revision loop.
+#   - EvaluationService     (api-gateway/src/services/EvaluationService.ts) --
+#                            in-pipeline faithfulness/relevance LLM-as-judge that
+#                            writes scores to Langfuse/Prometheus at runtime.
+# Those grade *runtime output inside a run*. THIS harness grades *the prompt*
+# offline against a fixed golden set, as a regression gate for prompt changes.
+#
+# Run:  cd api-gateway/evals && npx promptfoo@latest eval
+# See README.md for env (AWS creds/region, NODE_EXTRA_CA_CERTS) and caveats.
+# Schema ref: https://promptfoo.dev/docs/configuration/reference/
+# =============================================================================
+
+description: "MANOE narrative-prompt quality eval (Writer DRAFTING prompt)"
+
+# -----------------------------------------------------------------------------
+# Providers
+# -----------------------------------------------------------------------------
+# Two distinct roles:
+#   1. The provider that RUNS the prompt under test (the "writer" model).
+#   2. The provider the llm-rubric assertions use to JUDGE the output.
+#      promptfoo defaults the grader to OpenAI; we override it to Bedrock below
+#      (see defaultTest.options.provider) so the whole thing runs on corp Bedrock.
+#
+# Bedrock notes (corporate env):
+#   - Region + credentials come from the standard AWS env / profile:
+#       AWS_REGION (US region, confirmed), AWS_ACCESS_KEY_ID,
+#       AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN (if using STS).
+#   - Provider id format: `bedrock:<modelId>`. US inference-profile IDs are
+#     prefixed `us.` e.g. `bedrock:us.anthropic.claude-opus-4-8`.
+#   - Zscaler MITM: the AWS SDK must trust the corp CA. Export
+#       NODE_EXTRA_CA_CERTS=C:\Users\shalkin\corp-ca-bundle.pem
+#     before running, OR set AWS_CA_BUNDLE to the same PEM. promptfoo is pure
+#     JS run via npx, so NODE_EXTRA_CA_CERTS is honored by the Node TLS stack.
+providers:
+  # Model UNDER TEST -- generates the scene we then grade.
+  - id: bedrock:us.anthropic.claude-sonnet-4-5
+    label: writer-under-test
+    config:
+      # region: us-east-1   # optional; otherwise taken from AWS_REGION
+      temperature: 0.8      # MANOE drafts at higher temp for prose variety
+      max_tokens: 2048
+
+# -----------------------------------------------------------------------------
+# Default test options -- the JUDGE/grader provider for llm-rubric.
+# -----------------------------------------------------------------------------
+# Use a cheaper/faster model as judge than the writer to keep eval cost down.
+# (Judge quality matters: too weak a judge gives noisy grades. Sonnet is a
+#  reasonable floor; bump to opus for calibration runs -- see README caveats.)
+defaultTest:
+  options:
+    provider: bedrock:us.anthropic.claude-haiku-4-5
+
+# -----------------------------------------------------------------------------
+# Prompts under test
+# -----------------------------------------------------------------------------
+# This is a REAL MANOE prompt: the Writer agent's DRAFTING fallback/user prompt,
+# transcribed from api-gateway/src/agents/WriterAgent.ts (getFallbackPrompt +
+# buildUserPrompt, DRAFTING branch, ~lines 124-130 and 276-297).
+# Vars are MANOE's actual template vars: {{keyConstraints}}, plus scene fields.
+# As the harness matures these should be pulled live from Langfuse
+# (AGENT_PROMPTS.WRITER = "manoe-writer-v1") instead of being inlined.
+prompts:
+  - |
+    You are the Writer, a skilled prose craftsman in an autonomous story
+    generation pipeline. Your role is to transform outlines into vivid,
+    engaging prose that brings the story to life. Maintain consistency with
+    established facts.
+
+    CRITICAL INSTRUCTION: You are an autonomous agent. DO NOT ask the user for
+    feedback. DO NOT offer options (A/B/C). Always execute the best option
+    immediately. Never output meta-commentary like "Here is the revised scene".
+    Just output the story content directly.
+
+    Write Scene {{sceneNum}}: "{{sceneTitle}}"
+
+    Scene outline:
+    {{sceneOutline}}
+
+    SCOPE CONTROL (CRITICAL):
+    - Cover ONLY what's in this scene outline - do not advance the plot beyond it.
+    - FORBIDDEN: depicting events/revelations/conflicts from later scenes.
+    - End condition: the last paragraph MUST land on the specified hook.
+
+    Requirements:
+    - Follow the emotional beat and conflict specified.
+    - Maintain character voices and consistency.
+    - Include sensory details and atmosphere.
+    - End with the specified hook (not before, not after).
+    - Target word count: {{wordCount}} words.
+
+    KEY CONSTRAINTS (MUST NOT VIOLATE):
+    {{keyConstraints}}
+
+# -----------------------------------------------------------------------------
+# Test cases -- each provides scene vars and asserts quality via llm-rubric.
+# -----------------------------------------------------------------------------
+# Quality dimensions graded (one rubric per dimension; see golden/ for the
+# intended input shape and how a real golden set should be built):
+#   - structure         : adheres to the outline (beat, hook, scope, word count)
+#   - consistency       : no character/world drift vs. constraints
+#   - show-don't-tell    : dramatizes via sensory detail, not exposition
+# (originality + impact are MANOE dimensions too; left as TODO rubrics below so
+#  this stays a focused scaffold rather than an exhaustive suite.)
+tests:
+  - description: "Coastal-town opening scene -- structure + show-don't-tell"
+    vars:
+      sceneNum: 1
+      sceneTitle: "The Lighthouse Keeper's Last Night"
+      wordCount: 600
+      sceneOutline: |
+        {
+          "title": "The Lighthouse Keeper's Last Night",
+          "beat": "Mara realizes the automation crew arrives at dawn to decommission her.",
+          "conflict": "duty vs. obsolescence",
+          "hook": "She lights the lamp one final time as headlights crest the hill.",
+          "characters": ["Mara"],
+          "setting": "a storm-battered lighthouse on the Cornish coast, 1971"
+        }
+      keyConstraints: |
+        - Mara is the only human character in this scene.
+        - The story is set in 1971: NO mobile phones, NO internet, NO modern tech.
+        - The lighthouse is on the Cornish coast.
+    assert:
+      - type: llm-rubric
+        value: >
+          STRUCTURE: Grade how well the scene follows its outline. It must (a)
+          dramatize the specified beat (Mara realizing she will be decommissioned
+          at dawn), (b) end on the specified hook (lighting the lamp as headlights
+          crest the hill), and (c) not advance into events beyond this scene.
+          Pass only if all three hold. Output PASS/FAIL with one sentence of reasoning.
+      - type: llm-rubric
+        value: >
+          SHOW-DON'T-TELL: Grade whether the prose dramatizes emotion and stakes
+          through concrete sensory detail, action, and subtext rather than naming
+          feelings outright (e.g. avoid "she felt sad/obsolete"). Reward physical
+          detail, atmosphere, and implication. FAIL if it mostly tells the reader
+          how to feel. Output PASS/FAIL with one sentence of reasoning.
+
+  - description: "Period-consistency stress test -- no anachronisms / no new characters"
+    vars:
+      sceneNum: 2
+      sceneTitle: "Word From the Mainland"
+      wordCount: 600
+      sceneOutline: |
+        {
+          "title": "Word From the Mainland",
+          "beat": "Mara receives the official decommission notice and reacts.",
+          "conflict": "acceptance vs. defiance",
+          "hook": "She folds the notice into a paper boat and sets it adrift.",
+          "characters": ["Mara"],
+          "setting": "the same lighthouse, the following morning, 1971"
+        }
+      keyConstraints: |
+        - Mara is the only named character; do NOT introduce new named characters.
+        - 1971 setting: the notice arrives by POST or radio, never by phone/email/app.
+        - Keep the Cornish coastal setting consistent with Scene 1.
+    assert:
+      - type: llm-rubric
+        value: >
+          CONSISTENCY: Grade for character and world consistency against the
+          KEY CONSTRAINTS. FAIL if it introduces any new named character, or uses
+          technology that does not exist in 1971 (mobile phone, internet, email,
+          app), or relocates the setting away from the Cornish coast. Otherwise PASS.
+          Output PASS/FAIL with one sentence of reasoning citing the violated
+          constraint if any.
+      # TODO (future dimensions, to complement OriginalityAgent / ImpactAgent):
+      #   - type: llm-rubric
+      #     value: "ORIGINALITY: penalize cliché phrasing and stock imagery ..."
+      #   - type: llm-rubric
+      #     value: "IMPACT: grade emotional resonance of the ending beat ..."
+
+  - description: "Hook-discipline test -- must stop exactly on the hook"
+    vars:
+      sceneNum: 3
+      sceneTitle: "Dawn Crew"
+      wordCount: 500
+      sceneOutline: |
+        {
+          "title": "Dawn Crew",
+          "beat": "The automation crew arrives; Mara meets them at the door.",
+          "conflict": "her composure vs. their efficiency",
+          "hook": "She hands the lead engineer the brass key without a word.",
+          "characters": ["Mara"],
+          "setting": "the lighthouse threshold at first light, 1971"
+        }
+      keyConstraints: |
+        - Mara is the only named character (the crew may be unnamed).
+        - 1971 setting; no modern technology beyond a service van and tools.
+        - Do NOT resolve what happens to Mara afterward -- stop on the hook.
+    assert:
+      - type: llm-rubric
+        value: >
+          STRUCTURE: The scene MUST end on the specified hook (Mara handing over
+          the brass key without a word) and MUST NOT continue past it to narrate
+          her fate afterward. FAIL if it resolves beyond the hook or omits the
+          hook. Output PASS/FAIL with one sentence of reasoning.
