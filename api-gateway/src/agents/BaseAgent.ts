@@ -82,21 +82,81 @@ export abstract class BaseAgent {
   }
 
   /**
+   * Extract the JSON payload from an LLM response.
+   *
+   * Pure, dependency-free helper so the parse logic is unit-testable in
+   * isolation. Returns the raw JSON *string* to parse, or null if nothing
+   * parseable was found.
+   *
+   * Fence selection: LLMs sometimes emit an explanatory ```json example```
+   * BEFORE the real answer in a second fence. The previous non-greedy regex
+   * matched the FIRST fence and parsed the example. We instead collect ALL
+   * fenced blocks and return the LAST one that JSON.parses successfully
+   * (the answer almost always comes after any example). If no fenced block
+   * parses, we fall back to the whole response string (also validated by a
+   * trial JSON.parse). If nothing parses, return null.
+   *
+   * Heuristic limitation: LAST-block selection has a known inverse failure —
+   * if the model emits its real ANSWER first and an illustrative EXAMPLE fence
+   * afterward, we return the example. This trade-off favors the far more common
+   * example-first/answer-last ordering. (Pinned by a test in
+   * BaseAgentParseJSON.test.ts so future changes are intentional.)
+   */
+  protected static extractJSON(response: string): string | null {
+    const fenceRegex = /```(?:json)?\s*([\s\S]*?)```/g;
+    const candidates: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = fenceRegex.exec(response)) !== null) {
+      candidates.push(match[1].trim());
+    }
+
+    // Prefer the LAST fenced block that parses to valid JSON.
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      try {
+        JSON.parse(candidates[i]);
+        return candidates[i];
+      } catch {
+        // try the next candidate
+      }
+    }
+
+    // No (parseable) fence — fall back to the whole string if it is JSON.
+    const trimmed = response.trim();
+    try {
+      JSON.parse(trimmed);
+      return trimmed;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Parse JSON from LLM response
-   * Handles markdown code blocks and various JSON formats
+   * Handles markdown code blocks and various JSON formats.
+   *
+   * Total by contract (never throws) — callers pass the result straight to
+   * Zod validation. On parse failure we return a sentinel that is BOTH
+   * - detectable downstream (`__parseError: true`), so a parse failure is no
+   *   longer mistaken for "required field missing" by Zod, AND
+   * - backward compatible (`raw: response` is preserved) so any caller that
+   *   inspected `.raw` still works.
    */
   protected parseJSON(response: string): Record<string, unknown> {
-    try {
-      // Try to extract JSON from markdown code blocks
-      const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[1].trim());
+    const json = BaseAgent.extractJSON(response);
+    if (json !== null) {
+      try {
+        return JSON.parse(json);
+      } catch (error) {
+        // extractJSON already validated parseability; reaching here means the
+        // payload changed shape unexpectedly. Fall through to the sentinel.
+        console.warn(`[${this.agentType}] Failed to parse extracted JSON:`, error);
       }
-      return JSON.parse(response);
-    } catch (error) {
-      console.warn(`[${this.agentType}] Failed to parse JSON response:`, error);
-      return { raw: response };
+    } else {
+      console.warn(
+        `[${this.agentType}] Failed to parse JSON response (no parseable JSON found)`
+      );
     }
+    return { __parseError: true, raw: response };
   }
 
   /**
@@ -105,6 +165,16 @@ export abstract class BaseAgent {
    */
   protected parseJSONArray(response: string): Record<string, unknown>[] {
     const parsed = this.parseJSON(response);
+    // Propagate parseJSON's failure contract: on a parse failure `parsed` is the
+    // sentinel `{ __parseError: true, raw }`. Wrapping it as `[parsed]` would
+    // leak a fake "character" object downstream (ProfilerAgent's catch path
+    // emits it to the frontend). Return [] instead — the sole caller validates
+    // against CharactersArraySchema (.min(1)), so an empty array still fails
+    // validation cleanly (no silent "0 characters = success"), while nothing
+    // malformed escapes.
+    if (parsed.__parseError === true) {
+      return [];
+    }
     if (Array.isArray(parsed)) {
       return parsed;
     }

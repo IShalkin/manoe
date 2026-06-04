@@ -1038,6 +1038,26 @@ export class LLMProviderService {
   }
 
   /**
+   * Compute the backoff delay for a transient-retry attempt using exponential
+   * backoff with full jitter. The exponential ceiling is
+   * `baseDelayMs * 2^attempt`; the returned value is uniformly sampled within
+   * `[0, ceiling]` so that many callers hitting a 429 simultaneously do not
+   * retry in lockstep (thundering herd). Math.random is acceptable here — this
+   * is production runtime code, not a workflow script.
+   */
+  static computeBackoffDelay(attempt: number, baseDelayMs: number): number {
+    const ceiling = baseDelayMs * Math.pow(2, attempt);
+    return Math.random() * ceiling;
+  }
+
+  /**
+   * Sleep helper — extracted so tests can stub the wait without real timers.
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
    * Create completion with automatic retry for transient errors
    * Also handles token limit errors and temperature unsupported errors with auto-discovery and caching
    */
@@ -1064,7 +1084,10 @@ export class LLMProviderService {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
-        // Handle temperature unsupported errors - learn and retry without temperature
+        // Handle temperature unsupported errors - learn and retry without temperature.
+        // This is a NON-transient corrective retry (happens at most once, guarded
+        // by temperatureRetried), so it must NOT consume a transient-retry slot —
+        // decrement attempt so the loop counter is unchanged by this corrective pass.
         if (isTemperatureUnsupportedError(error) && !temperatureRetried) {
           temperatureCache.markAsNoTemperatureSupport(options.model);
           console.log(`[LLMProviderService] Model ${options.model} doesn't support temperature, retrying without it`);
@@ -1072,9 +1095,12 @@ export class LLMProviderService {
           // which now consults the cache, so the retry will work without temperature
           options = { ...options, temperature: undefined };
           temperatureRetried = true;
+          attempt--;
           continue;
         }
 
+        // Token-limit corrective retry — likewise non-transient and single-shot,
+        // so it must not consume a transient-retry slot.
         if (this.isTokenLimitError(error) && !tokenLimitRetried) {
           const limitError = extractMaxOutputTokensFromError(options.provider, lastError);
           if (limitError) {
@@ -1082,16 +1108,17 @@ export class LLMProviderService {
             console.log(`[LLMProviderService] Retrying with discovered limit: ${limitError.allowed}`);
             options = { ...options, maxTokens: limitError.allowed };
             tokenLimitRetried = true;
+            attempt--;
             continue;
           }
         }
-        
+
         if (!this.isRetryableError(error) || attempt === maxRetries - 1) {
           throw lastError;
         }
 
-        const delay = baseDelayMs * Math.pow(2, attempt);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        const delay = LLMProviderService.computeBackoffDelay(attempt, baseDelayMs);
+        await this.sleep(delay);
       }
     }
 
