@@ -154,6 +154,8 @@ interface SceneDraft {
 
 @Service()
 export class StorytellerOrchestrator {
+  private static readonly APPROVAL_THRESHOLD = 7;
+
   private activeRuns: Map<string, GenerationState> = new Map();
   private pauseCallbacks: Map<string, () => boolean> = new Map();
   private isShuttingDown: boolean = false;
@@ -2327,11 +2329,15 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
    * Uses revision_needed flag from CriticAgent output
    */
   private isApproved(critique: Record<string, unknown>): boolean {
-    // Check revision_needed flag (inverted - if revision_needed is false, it's approved)
-    if (critique.revision_needed === false) return true;
-    // Fallback to old format
-    if (critique.approved === true) return true;
-    if (typeof critique.score === "number" && critique.score >= 8) return true;
+    const score = typeof critique.score === "number" && !isNaN(critique.score)
+      ? critique.score
+      : null;
+    // An explicit revision request always blocks approval.
+    if (critique.revision_needed === true) return false;
+    // Require a qualifying score (the unified bar) ...
+    if (score !== null && score >= StorytellerOrchestrator.APPROVAL_THRESHOLD) return true;
+    // ... or an explicit approval flag that isn't contradicted by a low score.
+    if (critique.approved === true && (score === null || score >= StorytellerOrchestrator.APPROVAL_THRESHOLD)) return true;
     return false;
   }
 
