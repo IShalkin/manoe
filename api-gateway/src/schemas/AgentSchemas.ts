@@ -141,7 +141,9 @@ export const OutlineSchema = z.object({
 }).passthrough();
 
 /**
- * Advanced Plan schema (from StrategistAgent - Advanced Planning phase)
+ * Advanced plan (Strategist, ADVANCED_PLANNING phase). motifs/subtext/etc are
+ * global records; emotionalBeats and sensory are keyed by scene number (string),
+ * which BaseAgent.buildAdvancedPlanBlock's pick() reads per scene.
  */
 export const AdvancedPlanSchema = z.object({
   motifs: z.record(z.unknown()).optional(),

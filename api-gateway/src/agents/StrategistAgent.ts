@@ -190,17 +190,31 @@ Output as JSON with "scenes" array. Example format:
     }
 
     if (phase === GenerationPhase.ADVANCED_PLANNING) {
-      return `Create advanced planning elements for the story:
+      return `Create advanced planning elements for the story.
 
-1. Motif layers - recurring symbols and their meanings
-2. Subtext design - what's unsaid but implied
-3. Emotional beat sheet - emotional journey per scene
-4. Sensory blueprints - key sensory moments
-5. Contradiction maps - internal character conflicts
-6. Deepening checkpoints - where to add depth
-7. Complexity checklists - ensuring narrative richness
+For the PER-SCENE categories (emotionalBeats, sensory), use the SCENE NUMBER as the key
+(as a string: "1", "2", ...). For the GLOBAL categories (motifs, subtext, contradictions,
+deepening, complexity), use descriptive keys.
 
-Output as JSON with each category as a key.`;
+Categories:
+1. motifs - recurring symbols mapped to their meanings (global)
+2. subtext - what's unsaid but implied (global)
+3. emotionalBeats - the emotional beat PER SCENE, keyed by scene number
+4. sensory - key sensory moments PER SCENE, keyed by scene number
+5. contradictions - internal character conflicts (global)
+6. deepening - where to add depth (global)
+7. complexity - narrative-richness checklist (global)
+
+Output as JSON, for example:
+{
+  "motifs": { "water": "rebirth", "shadow": "doubt" },
+  "subtext": { "Mara": "guilt she won't name" },
+  "emotionalBeats": { "1": "uneasy hope", "2": "dread" },
+  "sensory": { "1": "salt air, cold stone", "2": "smoke, distant bells" },
+  "contradictions": { "Mara": "wants freedom, fears being alone" },
+  "deepening": { "act1": "seed the betrayal" },
+  "complexity": { "check": "every scene turns on a value shift" }
+}`;
     }
 
     throw new Error(`StrategistAgent not configured for phase: ${phase}`);
