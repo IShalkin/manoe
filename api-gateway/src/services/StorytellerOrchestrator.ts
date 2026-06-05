@@ -971,7 +971,8 @@ export class StorytellerOrchestrator {
       // Polish the scene ONLY if it was approved AND score < 8
       // Skip Polish if Critic gave score >= 8 (scene is already high quality)
       // This saves time and money, and prevents Polish from degrading good content
-      // Note: >= 8 aligns with isApproved() threshold for consistency
+      // Note: this is a separate, HIGHER bar than the approval threshold (7) —
+      // a scene can be approved (score >= 7) and still get a polish pass if score < 8.
       const shouldSkipPolish = typeof approvedCritiqueScore === "number" && approvedCritiqueScore >= 8;
       if (sceneApproved && !shouldSkipPolish) {
         await this.polishScene(runId, options, sceneNum + 1);
