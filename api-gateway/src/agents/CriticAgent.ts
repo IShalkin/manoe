@@ -208,12 +208,27 @@ Key Constraints: ${variables.keyConstraints || "No constraints established yet."
       // Get scene outline for scope checking
       const sceneHook = sceneOutline.hook ?? sceneOutline.endHook ?? "";
 
+      // Slice 1a: give the Critic the context it needs to judge consistency.
+      const rosterBlock = ((state.characters ?? []) as Record<string, unknown>[])
+        .map((c) => {
+          const rec = c as Record<string, unknown>;
+          return `- ${String(rec.name ?? "?")}${rec.role ? ` (${String(rec.role)})` : ""}`;
+        })
+        .join("\n") || "No characters defined.";
+      const worldStateBlock = this.buildWorldStateBlock(state.worldState);
+
       return `Critique Scene ${sceneNum}:
 
 ${(draft as Record<string, unknown>).content}
 
 SCENE OUTLINE (for scope checking):
 ${JSON.stringify(sceneOutline, null, 2)}
+
+CHARACTER ROSTER (for consistency checking):
+${rosterBlock}
+
+WORLD STATE (authoritative — flag any contradiction, e.g. a character marked dead who acts):
+${worldStateBlock}
 
 WORD COUNT CHECK (CRITICAL):
 - Target word count: ${targetWordCount} words
@@ -223,7 +238,7 @@ ${wordCountRatio < 0.7 ? "⚠️ SCENE IS TOO SHORT - MUST REQUEST EXPANSION" : 
 
 Evaluate:
 1. Prose quality (clarity, flow, voice)
-2. Character consistency
+2. Character consistency (against the ROSTER and WORLD STATE above — a dead/absent character must not act)
 3. Emotional impact
 4. Pacing
 5. Dialogue authenticity
