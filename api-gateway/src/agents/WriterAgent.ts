@@ -272,8 +272,17 @@ ${autonomousInstruction}`;
 
       // Include retrieved context from Qdrant for hallucination prevention
       const retrievedContext = String(sceneOutline.retrievedContext ?? "");
+      // Slice 1a: always-on continuity + craft guidance (highest priority).
+      const worldStateBlock = this.buildWorldStateBlock(state.worldState);
+      const advancedPlanBlock = this.buildAdvancedPlanBlock(state.advancedPlan, sceneNum);
 
       return `Write Scene ${sceneNum}: "${sceneTitle}"
+
+WORLD STATE (authoritative continuity — do NOT contradict):
+${worldStateBlock}
+
+STORY CRAFT PLAN (weave these in):
+${advancedPlanBlock}
 
 Scene outline:
 ${JSON.stringify(sceneOutline, null, 2)}
