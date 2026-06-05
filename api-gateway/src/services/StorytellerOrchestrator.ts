@@ -865,6 +865,7 @@ export class StorytellerOrchestrator {
 
     const output = await agent.execute(context, options);
     const advancedPlan = output.content as Record<string, unknown>;
+    state.advancedPlan = advancedPlan;
     state.updatedAt = new Date().toISOString();
 
     await this.saveArtifact(runId, options.projectId, "advanced_plan", advancedPlan);

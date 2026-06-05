@@ -342,6 +342,15 @@ export class GenerationState {
   worldState?: WorldState;
 
   /**
+   * Advanced planning output (motifs, subtext, emotional beats, sensory blueprints).
+   * Produced by the Strategist in the ADVANCED_PLANNING phase and injected into
+   * the Writer/Critic prompts. Persisted here so it survives past its phase.
+   */
+  @Optional()
+  @Property()
+  advancedPlan?: Record<string, unknown>;
+
+  /**
    * Current scene outline being processed
    * Used to pass expansion mode context to WriterAgent
    */
