@@ -81,3 +81,37 @@ describe("WriterAgent DRAFTING prompt injects voice + synopsis + contract", () =
     expect(prompt).toContain("the rope snaps");
   });
 });
+
+describe("WriterAgent voice exemplars injection (DRAFTING)", () => {
+  function ctxWithVoiceExemplars(): AnyObj {
+    const c = draftContext();
+    const s = (c.state as AnyObj);
+    s.narratorVoice = { perspective: "3rd-limited", tone: "wry" };
+    s.rollingSynopsis = [{ sceneNumber: 1, summary: "Mara fled the city." }];
+    s.characters = [
+      { name: "Mara", role: "protagonist", voiceExemplars: ["I don't run. I relocate."] },
+      { name: "Off-stage", role: "supporting", voiceExemplars: ["Never appears."] },
+    ];
+    s.currentSceneContract = {
+      sceneNumber: 3,
+      goal: "find the boat",
+      conflict: "the tide",
+      hook: "the rope snaps",
+      charactersPresent: ["Mara"],
+      targetWords: 800,
+      activeMotifs: ["shadow"],
+      valueShiftEntering: -1,
+      valueShiftExitingTarget: 2,
+    };
+    return c;
+  }
+
+  it("includes the exemplar for the present character and excludes the absent one (standard draft)", () => {
+    const w = makeWriter() as unknown as AnyObj;
+    const prompt = (w.buildUserPrompt as (c: AnyObj, o: AnyObj, p: GenerationPhase) => string)(
+      ctxWithVoiceExemplars(), { projectId: "p" }, GenerationPhase.DRAFTING
+    );
+    expect(prompt).toContain("I don't run. I relocate.");
+    expect(prompt).not.toContain("Never appears.");
+  });
+});

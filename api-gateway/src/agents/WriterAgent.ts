@@ -173,6 +173,9 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
       const synopsisBlock = this.buildSynopsisBlock(state.rollingSynopsis, sceneNum);
       const sceneContractBlock = this.buildSceneContractBlock(state.currentSceneContract);
 
+      const presentCharacters = state.currentSceneContract?.charactersPresent ?? [];
+      const voiceExemplarsBlock = this.buildVoiceExemplarsBlock(state.characters, presentCharacters);
+
       // Check if this is a Proactive Beats Method request (generating scene in parts)
       if (sceneOutline.beatsMode === true) {
         const partIndex = Number(sceneOutline.partIndex ?? 1);
@@ -198,6 +201,9 @@ ${worldStateBlock}
 
 NARRATOR VOICE (write in this voice consistently):
 ${narratorVoiceBlock}
+
+CHARACTER VOICES (keep them distinct):
+${voiceExemplarsBlock}
 
 STORY SO FAR (prior scenes — for continuity, do not re-narrate):
 ${synopsisBlock}
@@ -309,6 +315,9 @@ ${worldStateBlock}
 
 NARRATOR VOICE (write in this voice consistently):
 ${narratorVoiceBlock}
+
+CHARACTER VOICES (keep them distinct):
+${voiceExemplarsBlock}
 
 STORY SO FAR (prior scenes — for continuity, do not re-narrate):
 ${synopsisBlock}
