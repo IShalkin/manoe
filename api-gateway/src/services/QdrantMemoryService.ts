@@ -230,6 +230,7 @@ export class QdrantMemoryService {
 
   // One-time warning flag so LOCAL-mode degradation is loud but not spammy
   private static localWarningEmitted = false;
+  private static localSearchWarningEmitted = false;
 
   /**
    * Deterministic pseudo-embedding derived from text.
@@ -393,6 +394,25 @@ export class QdrantMemoryService {
   }
 
   /**
+   * Slice 0: vector search is meaningless in LOCAL mode (deterministic noise
+   * vectors). Fail closed — callers get [] and fall back to structured state.
+   * Warns once so the degraded mode is visible rather than silent.
+   */
+  private retrievalDisabled(): boolean {
+    if (this.embeddingProvider === EmbeddingProvider.LOCAL) {
+      if (!QdrantMemoryService.localSearchWarningEmitted) {
+        QdrantMemoryService.localSearchWarningEmitted = true;
+        console.warn(
+          "[QdrantMemory] Embedding provider is LOCAL (noise vectors); vector retrieval is DISABLED. " +
+          "Continuity is served from structured state only. Set OPENAI_API_KEY or GEMINI_API_KEY to enable retrieval."
+        );
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Search for characters by semantic similarity
    */
   async searchCharacters(
@@ -400,6 +420,7 @@ export class QdrantMemoryService {
     query: string,
     limit: number = 3
   ): Promise<SearchResult<CharacterPayload>[]> {
+    if (this.retrievalDisabled()) return [];
     if (!this.client) return [];
 
     const startTime = Date.now();
@@ -598,6 +619,7 @@ export class QdrantMemoryService {
     query: string,
     limit: number = 5
   ): Promise<SearchResult<WorldbuildingPayload>[]> {
+    if (this.retrievalDisabled()) return [];
     if (!this.client) return [];
 
     const startTime = Date.now();
@@ -697,6 +719,7 @@ export class QdrantMemoryService {
     query: string,
     limit: number = 2
   ): Promise<SearchResult<ScenePayload>[]> {
+    if (this.retrievalDisabled()) return [];
     if (!this.client) return [];
 
     const startTime = Date.now();
