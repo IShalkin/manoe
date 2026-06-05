@@ -5,7 +5,7 @@
  * Provides common functionality for LLM calls, JSON parsing, and Langfuse tracing.
  */
 
-import { AgentType, GenerationState, MessageType, KeyConstraint } from "../models/AgentModels";
+import { AgentType, GenerationState, MessageType, KeyConstraint, WorldState } from "../models/AgentModels";
 import { GenerationPhase, ChatMessage, MessageRole, getMaxTokensForPhase, LLMProvider } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService } from "../services/LangfuseService";
@@ -195,6 +195,53 @@ export abstract class BaseAgent {
     return constraints
       .map((c) => `- ${c.key}: ${c.value} (Scene ${c.sceneNumber})`)
       .join("\n");
+  }
+
+  /**
+   * Render the evolving world state into a compact, always-on continuity block.
+   * Slice 1a: this is the highest-priority dynamic context — who is alive/dead,
+   * where they are, and the hard facts established so far.
+   */
+  protected buildWorldStateBlock(worldState?: WorldState): string {
+    if (!worldState) return "No world state tracked yet.";
+    const lines: string[] = [];
+    const chars = worldState.characters ?? [];
+    if (chars.length > 0) {
+      lines.push("Characters (current status):");
+      for (const c of chars) {
+        const loc = c.currentLocation ? `, at ${c.currentLocation}` : "";
+        lines.push(`- ${c.name} [${c.status}${loc}] (last seen scene ${c.lastSeenScene})`);
+      }
+    }
+    const facts = worldState.keyFacts ?? [];
+    if (facts.length > 0) {
+      lines.push("Established facts:");
+      for (const f of facts) lines.push(`- ${f}`);
+    }
+    return lines.length > 0 ? lines.join("\n") : "No world state tracked yet.";
+  }
+
+  /**
+   * Render the advanced-plan slice (motifs, subtext, emotional beat for this
+   * scene) into a craft-guidance block. The plan's internal shape is a loose
+   * record, so extraction is defensive: per-scene keys are used when present,
+   * else the whole sub-object is summarized.
+   */
+  protected buildAdvancedPlanBlock(plan: Record<string, unknown> | undefined, sceneNum: number): string {
+    if (!plan || Object.keys(plan).length === 0) return "No advanced plan available.";
+    const pick = (obj: unknown): unknown => {
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        const rec = obj as Record<string, unknown>;
+        return rec[String(sceneNum)] ?? rec[`scene${sceneNum}`] ?? rec;
+      }
+      return obj;
+    };
+    const parts: string[] = [];
+    if (plan.motifs) parts.push(`Motifs: ${JSON.stringify(plan.motifs)}`);
+    if (plan.subtext) parts.push(`Subtext: ${JSON.stringify(plan.subtext)}`);
+    if (plan.emotionalBeats) parts.push(`Emotional beat (this scene): ${JSON.stringify(pick(plan.emotionalBeats))}`);
+    if (plan.sensory) parts.push(`Sensory blueprint: ${JSON.stringify(pick(plan.sensory))}`);
+    return parts.length > 0 ? parts.join("\n") : "No advanced plan available.";
   }
 
   /**
