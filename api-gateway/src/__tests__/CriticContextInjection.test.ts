@@ -61,3 +61,24 @@ describe("CriticAgent CRITIQUE prompt injects roster + worldState", () => {
     expect(prompt).toContain("dead");
   });
 });
+
+describe("CriticAgent CRITIQUE prompt injects voice + synopsis + contract + rubric", () => {
+  function ctxWithExtras(): AnyObj {
+    const c = critiqueContext();
+    const s = (c.state as AnyObj);
+    s.narratorVoice = { perspective: "3rd-limited" };
+    s.rollingSynopsis = [{ sceneNumber: 1, summary: "Vex died in the tomb." }];
+    s.currentSceneContract = { sceneNumber: 2, goal: "duel", conflict: "swords", hook: "the blade falls", charactersPresent: ["Mara"], targetWords: 500, activeMotifs: ["fire"], valueShiftEntering: 0, valueShiftExitingTarget: 3 };
+    return c;
+  }
+  it("includes synopsis, narrator voice, contract, and rubric instructions", () => {
+    const c = makeCritic();
+    const prompt = (c.buildUserPrompt as (x: AnyObj, o: AnyObj, p: GenerationPhase) => string)(
+      ctxWithExtras(), { projectId: "p" }, GenerationPhase.CRITIQUE
+    );
+    expect(prompt).toContain("Vex died in the tomb");
+    expect(prompt).toContain("3rd-limited");
+    expect(prompt).toContain("beatDelivery");
+    expect(prompt).toContain("valueShiftDelivered");
+  });
+});
