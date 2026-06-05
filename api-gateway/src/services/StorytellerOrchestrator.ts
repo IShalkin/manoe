@@ -28,6 +28,7 @@ import {
   GenerationState,
   KeyConstraint,
   RawFact,
+  NarratorVoice,
 } from "../models/AgentModels";
 import { LLMProviderService } from "./LLMProviderService";
 import { RedisStreamsService } from "./RedisStreamsService";
@@ -329,6 +330,12 @@ export class StorytellerOrchestrator {
       await this.runCharactersPhase(runId, options);
       state.inFlight = false; // safe checkpoint
       $log.info(`[StorytellerOrchestrator] runGeneration: runCharactersPhase completed, runId: ${runId}`);
+      if (this.shouldStop(runId)) return;
+
+      // Phase 2.5: Narrator design (voice/POV) — depends on characters + narrative.
+      state.inFlight = true;
+      await this.runNarratorDesignPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
       if (this.shouldStop(runId)) return;
 
       // Phase 3: Worldbuilding
@@ -703,6 +710,32 @@ export class StorytellerOrchestrator {
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: publishing phase complete, runId: ${runId}`);
     await this.publishPhaseComplete(runId, GenerationPhase.CHARACTERS, state.characters);
     $log.info(`[StorytellerOrchestrator] runCharactersPhase: completed, runId: ${runId}`);
+  }
+
+  /**
+   * Narrator Design Phase (Slice 2) — derive narrator voice / POV / tone / style
+   * via the Profiler's NARRATOR_DESIGN prompt and persist it so every Writer and
+   * Critic call carries a consistent voice spec.
+   */
+  private async runNarratorDesignPhase(
+    runId: string,
+    options: GenerationOptions
+  ): Promise<void> {
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+
+    state.phase = GenerationPhase.NARRATOR_DESIGN;
+    await this.publishPhaseStart(runId, GenerationPhase.NARRATOR_DESIGN);
+
+    const agent = this.agentFactory.getAgent(AgentType.PROFILER);
+    const context: AgentContext = { runId, state, projectId: options.projectId };
+
+    const output = await agent.execute(context, options);
+    state.narratorVoice = output.content as Record<string, unknown> as unknown as NarratorVoice;
+    state.updatedAt = new Date().toISOString();
+
+    await this.saveArtifact(runId, options.projectId, "narrator_voice", state.narratorVoice);
+    await this.publishPhaseComplete(runId, GenerationPhase.NARRATOR_DESIGN, state.narratorVoice);
   }
 
   /**
