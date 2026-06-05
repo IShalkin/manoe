@@ -23,6 +23,7 @@ function makeState(runId: string, sceneCount: number): AnyObj {
     outline: { scenes }, characters: [], drafts: new Map(), critiques: new Map(),
     revisionCount: new Map(), messages: [], maxRevisions: 2, keyConstraints: [],
     rawFactsLog: [], lastArchivistScene: 0, isPaused: false, isCompleted: false,
+    rollingSynopsis: [], valueShifts: new Map(),
     startedAt: "", updatedAt: "",
   };
 }

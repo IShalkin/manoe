@@ -425,6 +425,11 @@ export class GenerationState {
   @Property()
   currentSceneOutline?: Record<string, unknown>;
 
+  /** Assembled per-scene contract (Slice 2). Set by runDraftingLoop per scene. */
+  @Optional()
+  @Property()
+  currentSceneContract?: SceneContract;
+
   @Property()
   isPaused: boolean = false;
 

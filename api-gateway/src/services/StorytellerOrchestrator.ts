@@ -42,6 +42,7 @@ import { safeParseWordCount } from "../utils/schemaNormalizers";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
 import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
+import { assembleSceneContract } from "./StoryStateAssembler";
 
 /**
  * Simple rate limiter for concurrent async operations
@@ -935,6 +936,9 @@ export class StorytellerOrchestrator {
       // at the end of the scene (a safe boundary) so gracefulShutdown can wait.
       state.inFlight = true;
       state.currentScene = sceneNum + 1;
+      // Slice 2: assemble the per-scene contract from blackboard regions and
+      // stash it on state so Writer/Critic can read it without re-assembling.
+      state.currentSceneContract = assembleSceneContract(state, sceneNum + 1);
       const scene = scenes[sceneNum] as Record<string, unknown>;
       
       // Use safeParseWordCount to handle string values like "1,900" and prevent NaN
@@ -973,11 +977,13 @@ export class StorytellerOrchestrator {
       let revisionCount = 0;
       let sceneApproved = false;
       let approvedCritiqueScore: number | undefined;
+      let lastCritique: Record<string, unknown> | undefined;
       while (revisionCount < state.maxRevisions) {
         if (this.shouldStop(runId)) return;
 
         // Critique
         const critique = await this.critiqueScene(runId, options, sceneNum + 1);
+        lastCritique = critique;
         if (this.shouldStop(runId)) return;
 
         // Check if revision needed
@@ -1029,6 +1035,27 @@ export class StorytellerOrchestrator {
         }
         console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions (final score ${finalScore ?? "n/a"})`);
         await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "flagged_subthreshold", finalScore);
+      }
+
+      // Slice 2: thread the achieved value-shift (scene N exit → N+1 entry) and
+      // append a rolling-synopsis entry for the finalized scene.
+      // valueShiftDelivered comes from the last in-loop critique (the final
+      // score-only re-critique for sub-threshold scenes is intentionally not used here).
+      const achievedShift = lastCritique && typeof lastCritique.valueShiftDelivered === "number"
+        ? (lastCritique.valueShiftDelivered as number)
+        : 0;
+      state.valueShifts.set(sceneNum + 1, achievedShift);
+
+      try {
+        const finalDraft = state.drafts.get(sceneNum + 1) as Record<string, unknown> | undefined;
+        const finalText = String(finalDraft?.content ?? "");
+        if (finalText.trim().length > 0) {
+          const archivist = this.agentFactory.getAgent(AgentType.ARCHIVIST) as ArchivistAgent;
+          const summary = await archivist.summarizeScene(runId, options, sceneNum + 1, finalText);
+          if (summary) state.rollingSynopsis.push({ sceneNumber: sceneNum + 1, summary });
+        }
+      } catch (synopsisError) {
+        $log.warn(`[StorytellerOrchestrator] runDraftingLoop: synopsis generation failed for scene ${sceneNum + 1}, continuing anyway, runId: ${runId}`, synopsisError);
       }
 
       // CRITICAL: Clear currentSceneOutline at the end of each scene to prevent state contamination

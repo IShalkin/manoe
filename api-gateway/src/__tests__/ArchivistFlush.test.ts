@@ -49,6 +49,8 @@ function makeState(runId: string, sceneCount: number): AnyObj {
     lastArchivistScene: 0,
     isPaused: false,
     isCompleted: false,
+    rollingSynopsis: [],
+    valueShifts: new Map(),
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
