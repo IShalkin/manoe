@@ -205,6 +205,7 @@ For each character include:
 7. Visual signature and mannerisms
 8. Voice and speech patterns
 9. Relationships to other characters
+10. voiceExemplars: an array of 3-5 SHORT characteristic lines this character would actually say (their rhythm, idiolect, what they deflect or leave unsaid). Distinct enough that a reader could tell two characters apart by line alone. NOT description of their voice - actual quoted lines.
 
 IMPORTANT: Characters MUST match the genre, tone, and setting described above.
 Create at least 3-5 main characters.

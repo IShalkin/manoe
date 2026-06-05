@@ -82,6 +82,10 @@ export const CharacterSchema = z.object({
   backstory: z.string().optional(),
   visual: z.string().optional(),
   voice: z.string().optional(),
+  // 3-5 characteristic spoken lines per character (rhythm, idiolect, what they
+  // leave unsaid). Seeded by the Profiler, editable by the author, injected per
+  // scene by the Writer for present characters only.
+  voiceExemplars: z.array(z.string()).optional(),
   // Accept string, array, or object for relationships (LLM returns various formats)
   relationships: z.union([
     z.string(),

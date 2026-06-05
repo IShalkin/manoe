@@ -27,7 +27,7 @@ jest.mock("../services/LangfuseService", () => ({
 }));
 
 import { ProfilerAgent } from "../agents/ProfilerAgent";
-import { ValidationError } from "../schemas/AgentSchemas";
+import { ValidationError, CharacterSchema } from "../schemas/AgentSchemas";
 import { GenerationPhase } from "../models/LLMModels";
 import { AgentContext, GenerationOptions } from "../agents/types";
 
@@ -123,5 +123,36 @@ describe("ProfilerAgent CHARACTERS validation", () => {
     // Valid path emits exactly one agent_message with the characters.
     const messages = emitted.filter((e) => e.type === "agent_message");
     expect(messages).toHaveLength(1);
+  });
+});
+
+describe("CharacterSchema voiceExemplars", () => {
+  it("accepts an array of exemplar lines", () => {
+    const result = CharacterSchema.safeParse({
+      name: "Mara",
+      role: "protagonist",
+      voiceExemplars: [
+        "I don't run. I relocate.",
+        "Ask me again and I'll forget you asked.",
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.voiceExemplars).toHaveLength(2);
+    }
+  });
+
+  it("is optional (absent is valid)", () => {
+    const result = CharacterSchema.safeParse({ name: "Vex", role: "antagonist" });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects non-string exemplar entries", () => {
+    const result = CharacterSchema.safeParse({
+      name: "Mara",
+      role: "protagonist",
+      voiceExemplars: [42],
+    });
+    expect(result.success).toBe(false);
   });
 });
