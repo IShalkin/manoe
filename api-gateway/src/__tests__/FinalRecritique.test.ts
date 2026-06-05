@@ -61,4 +61,79 @@ describe("runDraftingLoop final re-critique", () => {
     expect(finals[0].status).toBe("flagged_subthreshold");
     expect(finals[0].score).toBe(5);
   });
+
+  it("finalizes as flagged_subthreshold with undefined score when the final critique has no numeric score", async () => {
+    const orch = new StorytellerOrchestrator();
+    const o = orch as unknown as AnyObj;
+    const runId = "run-2";
+    const state = makeState(runId, 1);
+    o.activeRuns = new Map([[runId, state]]);
+
+    o.draftScene = jest.fn(async (_r: string, _o: AnyObj, n: number) => {
+      (state.drafts as Map<number, AnyObj>).set(n, { wordCount: 500, content: "x" });
+    });
+    o.draftSceneWithBeats = jest.fn(async () => {});
+    o.expandScene = jest.fn(async () => {});
+    // Never approves; final critique returns no usable numeric score.
+    o.critiqueScene = jest.fn(async () => ({ revision_needed: true }));
+    o.reviseScene = jest.fn(async () => {});
+    o.polishScene = jest.fn(async () => {});
+    o.runArchivistCheck = jest.fn(async () => {});
+    o.publishEvent = jest.fn(async () => {});
+
+    const finals: AnyObj[] = [];
+    o.emitSceneFinal = jest.fn(async (_r: string, _p: string, n: number, status: string, score?: number) => {
+      finals.push({ n, status, score });
+    });
+
+    await (o.runDraftingLoop as (r: string, opts: AnyObj) => Promise<void>)(runId, { projectId: "proj-1" });
+
+    expect(finals).toHaveLength(1);
+    expect(finals[0].status).toBe("flagged_subthreshold");
+    expect(finals[0].score).toBeUndefined();
+  });
+
+  it("skips the final critique when the run is stopping", async () => {
+    const orch = new StorytellerOrchestrator();
+    const o = orch as unknown as AnyObj;
+    const runId = "run-3";
+    const state = makeState(runId, 1);
+    o.activeRuns = new Map([[runId, state]]);
+
+    o.draftScene = jest.fn(async (_r: string, _o: AnyObj, n: number) => {
+      (state.drafts as Map<number, AnyObj>).set(n, { wordCount: 500, content: "x" });
+    });
+    o.draftSceneWithBeats = jest.fn(async () => {});
+    o.expandScene = jest.fn(async () => {});
+
+    // shouldStop returns false during the revision loop (so it runs and exhausts),
+    // then true afterward (so the FINAL critique is skipped).
+    // The loop checks shouldStop multiple times; count critique calls to assert
+    // no EXTRA final critique happens once stop is signalled.
+    let critiqueCalls = 0;
+    o.critiqueScene = jest.fn(async () => { critiqueCalls++; return { revision_needed: true, score: 5 }; });
+    o.reviseScene = jest.fn(async () => {});
+    o.polishScene = jest.fn(async () => {});
+    o.runArchivistCheck = jest.fn(async () => {});
+    o.publishEvent = jest.fn(async () => {});
+    o.emitSceneFinal = jest.fn(async () => {});
+
+    // shouldStop: false until the in-loop work is done, then true.
+    // Return false for the first N calls (enough for the 2-revision loop), true after.
+    // Call sequence for 1 scene, maxRevisions=2:
+    //   call 1: top of for-loop
+    //   call 2: after draftScene
+    //   call 3: top of while (revision 0)
+    //   call 4: after critiqueScene #1
+    //   call 5: top of while (revision 1)
+    //   call 6: after critiqueScene #2
+    //   call 7: final critique guard — must return true to skip it
+    let stopCalls = 0;
+    o.shouldStop = jest.fn(() => { stopCalls++; return stopCalls > 6; });
+
+    await (o.runDraftingLoop as (r: string, opts: AnyObj) => Promise<void>)(runId, { projectId: "proj-1" });
+
+    // 2 in-loop critiques happened; the final critique must NOT have run (stop signalled).
+    expect(critiqueCalls).toBe(2);
+  });
 });
