@@ -49,6 +49,7 @@ describe("CriticAgent CRITIQUE prompt injects roster + worldState", () => {
       critiqueContext(), { projectId: "p" }, GenerationPhase.CRITIQUE
     );
     expect(prompt).toContain("Mara");
+    expect(prompt).toContain("(lead)");
   });
 
   it("includes the worldState block so a dead-character contradiction is checkable", () => {

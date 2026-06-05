@@ -209,11 +209,8 @@ Key Constraints: ${variables.keyConstraints || "No constraints established yet."
       const sceneHook = sceneOutline.hook ?? sceneOutline.endHook ?? "";
 
       // Slice 1a: give the Critic the context it needs to judge consistency.
-      const rosterBlock = ((state.characters ?? []) as Record<string, unknown>[])
-        .map((c) => {
-          const rec = c as Record<string, unknown>;
-          return `- ${String(rec.name ?? "?")}${rec.role ? ` (${String(rec.role)})` : ""}`;
-        })
+      const rosterBlock = (state.characters ?? [])
+        .map((c) => `- ${String(c.name ?? "?")}${c.role ? ` (${String(c.role)})` : ""}`)
         .join("\n") || "No characters defined.";
       const worldStateBlock = this.buildWorldStateBlock(state.worldState);
 
