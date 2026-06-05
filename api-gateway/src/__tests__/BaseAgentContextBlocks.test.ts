@@ -86,3 +86,58 @@ describe("BaseAgent.buildAdvancedPlanBlock", () => {
     expect(out).toContain("dripping water");
   });
 });
+
+describe("BaseAgent.buildNarratorVoiceBlock", () => {
+  it("renders voice/perspective/tone/style", () => {
+    const p = probe();
+    const out = (p.buildNarratorVoiceBlock as (v: unknown) => string)(
+      { voice: "wry", perspective: "3rd-limited", tone: "melancholy", style: "spare" }
+    );
+    expect(out).toContain("3rd-limited");
+    expect(out).toContain("wry");
+  });
+  it("placeholder when undefined", () => {
+    const p = probe();
+    expect((p.buildNarratorVoiceBlock as (v: unknown) => string)(undefined)).toMatch(/no narrator/i);
+  });
+});
+
+describe("BaseAgent.buildSynopsisBlock", () => {
+  it("renders only entries before the current scene, in order", () => {
+    const p = probe();
+    const entries = [
+      { sceneNumber: 1, summary: "Mara leaves home." },
+      { sceneNumber: 2, summary: "Mara meets Vex." },
+      { sceneNumber: 3, summary: "FUTURE - must not appear." },
+    ];
+    const out = (p.buildSynopsisBlock as (e: unknown, n: number) => string)(entries, 3);
+    expect(out).toContain("Mara leaves home");
+    expect(out).toContain("Mara meets Vex");
+    expect(out).not.toContain("FUTURE");
+  });
+  it("placeholder for scene 1 / empty", () => {
+    const p = probe();
+    expect((p.buildSynopsisBlock as (e: unknown, n: number) => string)([], 1)).toMatch(/no prior scenes/i);
+  });
+});
+
+describe("BaseAgent.buildSceneContractBlock", () => {
+  it("renders goal/conflict/hook/value-shift/motifs", () => {
+    const p = probe();
+    const contract = {
+      sceneNumber: 4, goal: "escape the tower", conflict: "the guard", hook: "the door slams",
+      charactersPresent: ["Mara"], targetWords: 1500, activeMotifs: ["shadow"],
+      valueShiftEntering: -2, valueShiftExitingTarget: 3,
+    };
+    const out = (p.buildSceneContractBlock as (c: unknown) => string)(contract);
+    expect(out).toContain("escape the tower");
+    expect(out).toContain("the door slams");
+    expect(out).toContain("shadow");
+    expect(out).toMatch(/-2/);
+    expect(out).toMatch(/3/);
+  });
+  it("placeholder when undefined", () => {
+    const p = probe();
+    expect((p.buildSceneContractBlock as (c: unknown) => string)(undefined)).toMatch(/no scene contract/i);
+  });
+});

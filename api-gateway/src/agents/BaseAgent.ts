@@ -5,7 +5,7 @@
  * Provides common functionality for LLM calls, JSON parsing, and Langfuse tracing.
  */
 
-import { AgentType, GenerationState, MessageType, KeyConstraint, WorldState } from "../models/AgentModels";
+import { AgentType, GenerationState, MessageType, KeyConstraint, WorldState, NarratorVoice, SynopsisEntry, SceneContract } from "../models/AgentModels";
 import { GenerationPhase, ChatMessage, MessageRole, getMaxTokensForPhase, LLMProvider } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService } from "../services/LangfuseService";
@@ -242,6 +242,38 @@ export abstract class BaseAgent {
     if (plan.emotionalBeats) parts.push(`Emotional beat (this scene): ${JSON.stringify(pick(plan.emotionalBeats))}`);
     if (plan.sensory) parts.push(`Sensory blueprint: ${JSON.stringify(pick(plan.sensory))}`);
     return parts.length > 0 ? parts.join("\n") : "No advanced plan available.";
+  }
+
+  /** Render narrator voice/POV design into a compact, always-on style block. */
+  protected buildNarratorVoiceBlock(voice?: NarratorVoice): string {
+    if (!voice || Object.keys(voice).length === 0) return "No narrator voice specified — use a consistent, natural narrative voice.";
+    const parts: string[] = [];
+    if (voice.perspective) parts.push(`POV: ${voice.perspective}`);
+    if (voice.voice) parts.push(`Voice: ${voice.voice}`);
+    if (voice.tone) parts.push(`Tone: ${voice.tone}`);
+    if (voice.style) parts.push(`Style: ${voice.style}`);
+    return parts.length > 0 ? parts.join("\n") : "No narrator voice specified — use a consistent, natural narrative voice.";
+  }
+
+  /** Render the rolling synopsis of scenes strictly BEFORE sceneNum (never the future). */
+  protected buildSynopsisBlock(entries: SynopsisEntry[] | undefined, sceneNum: number): string {
+    const prior = (entries ?? []).filter((e) => e.sceneNumber < sceneNum).sort((a, b) => a.sceneNumber - b.sceneNumber);
+    if (prior.length === 0) return "No prior scenes (this is the opening).";
+    return prior.map((e) => `Scene ${e.sceneNumber}: ${e.summary}`).join("\n");
+  }
+
+  /** Render the per-scene contract (goal/conflict/hook/value-shift/motifs). */
+  protected buildSceneContractBlock(contract?: SceneContract): string {
+    if (!contract) return "No scene contract available — follow the scene outline.";
+    const lines = [
+      `Goal: ${contract.goal || "(unspecified)"}`,
+      `Conflict: ${contract.conflict || "(unspecified)"}`,
+      `Required end hook: ${contract.hook || "(unspecified)"}`,
+      `Characters present: ${(contract.charactersPresent ?? []).join(", ") || "(unspecified)"}`,
+      `Active motifs to touch: ${(contract.activeMotifs ?? []).join(", ") || "(none)"}`,
+      `Emotional charge: enter at ${contract.valueShiftEntering}, end near ${contract.valueShiftExitingTarget} (the scene must shift the charge, not hold it flat).`,
+    ];
+    return lines.join("\n");
   }
 
   /**
