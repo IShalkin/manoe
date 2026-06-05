@@ -643,15 +643,17 @@ export class LLMProviderService {
     };
   }
 
+  /** Seam for tests: build the Anthropic client. */
+  private makeAnthropicClient(apiKey: string): Anthropic {
+    return new Anthropic({ apiKey, timeout: 120000 });
+  }
+
   /**
    * Anthropic Claude completion
    */
   private async anthropicCompletion(options: CompletionOptions): Promise<LLMResponse> {
     const apiKey = this.getApiKey(LLMProvider.ANTHROPIC, options.apiKey);
-    const client = new Anthropic({
-      apiKey,
-      timeout: 120000, // 2 minute timeout
-    });
+    const client = this.makeAnthropicClient(apiKey);
 
     // Extract system message
     let systemMessage = "";
@@ -677,11 +679,23 @@ export class LLMProviderService {
     const requestedMaxTokens = options.maxTokens ?? 4096;
     const cappedMaxTokens = capMaxTokensToModelLimit(options.model, requestedMaxTokens);
 
+    // Slice 1b: send the (stable) system prompt as a cache_control ephemeral
+    // block so repeated Writer/Critic prefixes are billed as cache reads.
+    // The stable messages endpoint accepts cache_control at runtime, but the
+    // @anthropic-ai/sdk@0.32 stable TextBlockParam type omits it (it lives on
+    // the beta types), so we describe the block locally and cast at assignment.
+    type CachedTextBlock = Anthropic.TextBlockParam & {
+      cache_control: { type: "ephemeral" };
+    };
+    const systemBlocks: CachedTextBlock[] | undefined = systemMessage
+      ? [{ type: "text" as const, text: systemMessage, cache_control: { type: "ephemeral" as const } }]
+      : undefined;
+
     // Build request options - only include temperature for models that support it
     const requestOptions: Anthropic.MessageCreateParams = {
       model: options.model,
       max_tokens: cappedMaxTokens,
-      system: systemMessage,
+      system: systemBlocks as Anthropic.MessageCreateParams["system"],
       messages: chatMessages,
     };
 
@@ -705,6 +719,8 @@ export class LLMProviderService {
         promptTokens: response.usage?.input_tokens ?? 0,
         completionTokens: response.usage?.output_tokens ?? 0,
         totalTokens: (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0),
+        cacheCreationTokens: (response.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ?? 0,
+        cacheReadTokens: (response.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ?? 0,
       },
       finishReason: response.stop_reason ?? "stop",
     };
