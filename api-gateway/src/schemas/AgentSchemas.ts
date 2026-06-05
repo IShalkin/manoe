@@ -160,6 +160,8 @@ export const CritiqueSchema = z.object({
   approved: z.boolean().optional(),
   score: z.number().min(1).max(10).optional(),
   revision_needed: z.boolean().optional(),
+  wordCountCompliance: z.boolean().optional(),
+  scopeAdherence: z.boolean().optional(),
   strengths: z.array(z.string()).optional(),
   issues: z.array(z.string()).optional(),
   revisionRequests: z.array(z.string()).optional(),
