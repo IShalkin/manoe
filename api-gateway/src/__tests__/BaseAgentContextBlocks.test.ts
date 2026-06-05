@@ -61,4 +61,28 @@ describe("BaseAgent.buildAdvancedPlanBlock", () => {
     const out = (p.buildAdvancedPlanBlock as (pl: unknown, n: number) => string)(undefined, 1);
     expect(out).toMatch(/no advanced plan/i);
   });
+
+  it("picks the per-scene emotional beat by numeric key", () => {
+    const p = probe();
+    const plan = { emotionalBeats: { "3": "rising dread", "4": "relief" } };
+    const out = (p.buildAdvancedPlanBlock as (pl: unknown, n: number) => string)(plan, 3);
+    expect(out).toContain("rising dread");
+    expect(out).not.toContain("relief");
+  });
+
+  it("picks the per-scene emotional beat by scene-prefixed key", () => {
+    const p = probe();
+    const plan = { emotionalBeats: { scene3: "longing", scene4: "anger" } };
+    const out = (p.buildAdvancedPlanBlock as (pl: unknown, n: number) => string)(plan, 3);
+    expect(out).toContain("longing");
+    expect(out).not.toContain("anger");
+  });
+
+  it("falls back to the whole sub-object when no per-scene key matches", () => {
+    const p = probe();
+    const plan = { sensory: { palette: "cold blues", sound: "dripping water" } };
+    const out = (p.buildAdvancedPlanBlock as (pl: unknown, n: number) => string)(plan, 7);
+    expect(out).toContain("cold blues");
+    expect(out).toContain("dripping water");
+  });
 });
