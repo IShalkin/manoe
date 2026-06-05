@@ -60,3 +60,24 @@ describe("WriterAgent DRAFTING prompt injects continuity + plan", () => {
     expect(prompt).toContain("doubt");
   });
 });
+
+describe("WriterAgent DRAFTING prompt injects voice + synopsis + contract", () => {
+  function ctxWithExtras(): AnyObj {
+    const c = draftContext();
+    const s = (c.state as AnyObj);
+    s.narratorVoice = { perspective: "3rd-limited", tone: "wry" };
+    s.rollingSynopsis = [{ sceneNumber: 1, summary: "Mara fled the city." }, { sceneNumber: 2, summary: "Mara reached the harbor." }];
+    s.currentSceneContract = { sceneNumber: 3, goal: "find the boat", conflict: "the tide", hook: "the rope snaps", charactersPresent: ["Mara"], targetWords: 800, activeMotifs: ["shadow"], valueShiftEntering: -1, valueShiftExitingTarget: 2 };
+    return c;
+  }
+  it("includes narratorVoice, prior synopsis, and contract goal/hook", () => {
+    const w = makeWriter() as unknown as AnyObj;
+    const prompt = (w.buildUserPrompt as (c: AnyObj, o: AnyObj, p: GenerationPhase) => string)(
+      ctxWithExtras(), { projectId: "p" }, GenerationPhase.DRAFTING
+    );
+    expect(prompt).toContain("3rd-limited");
+    expect(prompt).toContain("Mara reached the harbor");
+    expect(prompt).toContain("find the boat");
+    expect(prompt).toContain("the rope snaps");
+  });
+});

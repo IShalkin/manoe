@@ -169,6 +169,9 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
       // (standard, beats first-part, beats continuation, expansion).
       const worldStateBlock = this.buildWorldStateBlock(state.worldState);
       const advancedPlanBlock = this.buildAdvancedPlanBlock(state.advancedPlan, sceneNum);
+      const narratorVoiceBlock = this.buildNarratorVoiceBlock(state.narratorVoice);
+      const synopsisBlock = this.buildSynopsisBlock(state.rollingSynopsis, sceneNum);
+      const sceneContractBlock = this.buildSceneContractBlock(state.currentSceneContract);
 
       // Check if this is a Proactive Beats Method request (generating scene in parts)
       if (sceneOutline.beatsMode === true) {
@@ -192,6 +195,15 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
 
 WORLD STATE (authoritative continuity — do NOT contradict):
 ${worldStateBlock}
+
+NARRATOR VOICE (write in this voice consistently):
+${narratorVoiceBlock}
+
+STORY SO FAR (prior scenes — for continuity, do not re-narrate):
+${synopsisBlock}
+
+SCENE CONTRACT (deliver exactly this):
+${sceneContractBlock}
 
 STORY CRAFT PLAN (weave these in):
 ${advancedPlanBlock}
@@ -294,6 +306,15 @@ ${autonomousInstruction}`;
 
 WORLD STATE (authoritative continuity — do NOT contradict):
 ${worldStateBlock}
+
+NARRATOR VOICE (write in this voice consistently):
+${narratorVoiceBlock}
+
+STORY SO FAR (prior scenes — for continuity, do not re-narrate):
+${synopsisBlock}
+
+SCENE CONTRACT (deliver exactly this):
+${sceneContractBlock}
 
 STORY CRAFT PLAN (weave these in):
 ${advancedPlanBlock}
