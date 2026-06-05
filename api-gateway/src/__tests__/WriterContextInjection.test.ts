@@ -115,3 +115,13 @@ describe("WriterAgent voice exemplars injection (DRAFTING)", () => {
     expect(prompt).not.toContain("Never appears.");
   });
 });
+
+describe("WriterAgent craft block (system prompt)", () => {
+  it("the fallback system prompt carries anti-on-the-nose craft guidance", () => {
+    const writer = makeWriter();
+    const sys = (writer as unknown as { getFallbackPrompt(v: Record<string, string>): string })
+      .getFallbackPrompt({ keyConstraints: "none" });
+    expect(sys.toLowerCase()).toContain("subtext");
+    expect(sys.toLowerCase()).toContain("on-the-nose");
+  });
+});
