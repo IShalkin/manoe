@@ -2761,6 +2761,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           drafts: Object.fromEntries(state.drafts),
           critiques: Object.fromEntries(state.critiques),
           revisionCount: Object.fromEntries(state.revisionCount),
+          valueShifts: Object.fromEntries(state.valueShifts),
         };
 
         await this.supabase.saveRunArtifact({
@@ -2819,6 +2820,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
         const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
         const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
+        const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
 
         const state: GenerationState = {
           ...(savedState as unknown as GenerationState),
@@ -2830,6 +2832,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           ),
           revisionCount: new Map(
             Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
+          ),
+          valueShifts: new Map(
+            Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
           ),
           isPaused: true, // Keep paused until explicitly resumed
         };
@@ -2892,6 +2897,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
           const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
           const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
+          const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
 
           const state: GenerationState = {
             ...(savedState as unknown as GenerationState),
@@ -2905,6 +2911,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
             ),
             revisionCount: new Map(
               Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
+            ),
+            valueShifts: new Map(
+              Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
             ),
             isPaused: true, // Keep paused until explicitly resumed
           };
