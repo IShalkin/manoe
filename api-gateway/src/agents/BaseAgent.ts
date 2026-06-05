@@ -277,6 +277,34 @@ export abstract class BaseAgent {
   }
 
   /**
+   * Render per-character voice exemplars for the characters present in this
+   * scene only (token budget + contrast: voices distinguish in opposition).
+   * Returns a safe placeholder when no present character has exemplars.
+   */
+  protected buildVoiceExemplarsBlock(characters: unknown, present: string[]): string {
+    if (!Array.isArray(characters) || characters.length === 0) {
+      return "No voice exemplars available — give each character a distinct rhythm and idiolect.";
+    }
+    const presentSet = new Set(present.map((n) => n.trim().toLowerCase()));
+    const blocks: string[] = [];
+    for (const char of characters) {
+      if (typeof char !== "object" || char === null) continue;
+      const rec = char as Record<string, unknown>;
+      const name = typeof rec.name === "string" ? rec.name.trim() : "";
+      if (!name || (presentSet.size > 0 && !presentSet.has(name.toLowerCase()))) continue;
+      const exemplars = Array.isArray(rec.voiceExemplars)
+        ? rec.voiceExemplars.filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+        : [];
+      if (exemplars.length === 0) continue;
+      blocks.push(`${name}:\n${exemplars.map((e) => `  "${e}"`).join("\n")}`);
+    }
+    if (blocks.length === 0) {
+      return "No voice exemplars available — give each character a distinct rhythm and idiolect.";
+    }
+    return `These are the characters' baseline voices (drift is allowed as the arc demands). Make them sound DIFFERENT from each other:\n${blocks.join("\n")}`;
+  }
+
+  /**
    * Validate output against Zod schema
    * Logs validation errors to Langfuse and throws ValidationError
    */
