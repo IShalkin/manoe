@@ -981,11 +981,19 @@ export class StorytellerOrchestrator {
         // This ensures frontend always has a canonical source of truth for each scene
         // Without this, frontend falls back to collecting all Writer messages which causes duplication
         console.log(`[Orchestrator] Scene ${sceneNum + 1} has high score (${approvedCritiqueScore}), skipping polish`);
-        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "skipped_high_score");
+        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "skipped_high_score", approvedCritiqueScore);
       } else {
-        // Scene not approved after max revisions - still emit final event for frontend
-        console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions, skipping polish`);
-        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "not_approved");
+        // Not approved after max revisions: run ONE final score-only critique so
+        // the accepted text carries a recorded score and an explicit flag, instead
+        // of being silently accepted. This does not consume a revision slot.
+        let finalScore: number | undefined;
+        if (!this.shouldStop(runId)) {
+          const finalCritique = await this.critiqueScene(runId, options, sceneNum + 1);
+          const s = finalCritique.score;
+          if (typeof s === "number" && !isNaN(s)) finalScore = s;
+        }
+        console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions (final score ${finalScore ?? "n/a"})`);
+        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "flagged_subthreshold", finalScore);
       }
 
       // CRITICAL: Clear currentSceneOutline at the end of each scene to prevent state contamination
@@ -1803,7 +1811,8 @@ export class StorytellerOrchestrator {
     runId: string,
     projectId: string,
     sceneNum: number,
-    polishStatus: string
+    polishStatus: string,
+    score?: number
   ): Promise<void> {
     const state = this.activeRuns.get(runId);
     if (!state) return;
@@ -1832,6 +1841,7 @@ export class StorytellerOrchestrator {
     await this.publishEvent(runId, "scene_polish_complete", {
       sceneNum,
       polishStatus,
+      score,
       finalContent,
       wordCount: finalWordCount,
     });
