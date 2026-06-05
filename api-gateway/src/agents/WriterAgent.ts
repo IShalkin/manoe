@@ -165,6 +165,11 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
       const sceneOutline = state.currentSceneOutline ?? (scenes[sceneNum - 1] as Record<string, unknown>) ?? {};
       const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
 
+      // Slice 2: always-on continuity + craft guidance for ALL drafting paths
+      // (standard, beats first-part, beats continuation, expansion).
+      const worldStateBlock = this.buildWorldStateBlock(state.worldState);
+      const advancedPlanBlock = this.buildAdvancedPlanBlock(state.advancedPlan, sceneNum);
+
       // Check if this is a Proactive Beats Method request (generating scene in parts)
       if (sceneOutline.beatsMode === true) {
         const partIndex = Number(sceneOutline.partIndex ?? 1);
@@ -184,6 +189,12 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
         if (isFirstPart) {
           // First part: Start the scene fresh
           return `Write Part 1 of ${partsTotal} for Scene ${sceneNum}: "${sceneTitle}"
+
+WORLD STATE (authoritative continuity — do NOT contradict):
+${worldStateBlock}
+
+STORY CRAFT PLAN (weave these in):
+${advancedPlanBlock}
 
 Scene outline:
 ${JSON.stringify(sceneOutline, null, 2)}
@@ -214,6 +225,9 @@ ${autonomousInstruction}`;
             : `This is Part ${partIndex} of ${partsTotal}. End at a natural transition point for the next part.`;
 
           return `Continue Scene ${sceneNum}: "${sceneTitle}" - Part ${partIndex} of ${partsTotal}
+
+WORLD STATE (authoritative continuity — do NOT contradict):
+${worldStateBlock}
 
 CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
 
@@ -250,6 +264,9 @@ ${autonomousInstruction}`;
         
         return `Continue Scene ${sceneNum}: "${sceneTitle}"
 
+WORLD STATE (authoritative continuity — do NOT contradict):
+${worldStateBlock}
+
 CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
 
 The scene ends with:
@@ -272,9 +289,6 @@ ${autonomousInstruction}`;
 
       // Include retrieved context from Qdrant for hallucination prevention
       const retrievedContext = String(sceneOutline.retrievedContext ?? "");
-      // Slice 1a: always-on continuity + craft guidance (highest priority).
-      const worldStateBlock = this.buildWorldStateBlock(state.worldState);
-      const advancedPlanBlock = this.buildAdvancedPlanBlock(state.advancedPlan, sceneNum);
 
       return `Write Scene ${sceneNum}: "${sceneTitle}"
 
