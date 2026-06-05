@@ -272,6 +272,49 @@ export interface WorldState {
   keyFacts: string[];
 }
 
+/** A single rolling-synopsis entry — one compact recap per finalized scene. */
+export interface SynopsisEntry {
+  sceneNumber: number;
+  summary: string; // ~50-80 words
+}
+
+/** Narrator voice / POV design produced by the Profiler's NARRATOR_DESIGN phase. */
+export interface NarratorVoice {
+  voice?: string;
+  perspective?: string; // e.g. "1st", "3rd-limited", "3rd-omni"
+  tone?: string;
+  style?: string;
+}
+
+/**
+ * STORY-level blackboard view (semantic memory). Assembled from existing state
+ * regions by StoryStateAssembler — NOT a new agent output. Stable per run.
+ */
+export interface StoryBible {
+  premise: string;
+  themes: string[];
+  genreConventions: string[];
+  narratorVoice?: NarratorVoice;
+  worldRules: string[];
+  roster: { name: string; role: string }[];
+}
+
+/**
+ * SCENE-level blackboard view (working set). Assembled per scene from the scene
+ * outline + advancedPlan slice + threaded value-shift.
+ */
+export interface SceneContract {
+  sceneNumber: number;
+  goal: string;
+  conflict: string;
+  hook: string;
+  charactersPresent: string[];
+  targetWords: number;
+  activeMotifs: string[];
+  valueShiftEntering: number;       // == previous scene's achieved exit (0 for scene 1)
+  valueShiftExitingTarget: number;  // intended charge at scene end
+}
+
 /**
  * Generation state tracking
  */
@@ -349,6 +392,30 @@ export class GenerationState {
   @Optional()
   @Property()
   advancedPlan?: Record<string, unknown>;
+
+  /**
+   * Per-scene rolling synopsis (~50-80 words each), appended after each scene
+   * finalizes. Injected (entries < current scene) into Writer/Critic prompts.
+   */
+  @Optional()
+  @Property()
+  rollingSynopsis: SynopsisEntry[] = [];
+
+  /**
+   * Narrator voice / POV design from the NARRATOR_DESIGN phase. Rides every
+   * Writer/Critic prompt so voice is consistent and checkable.
+   */
+  @Optional()
+  @Property()
+  narratorVoice?: NarratorVoice;
+
+  /**
+   * Achieved value-shift (emotional charge) at the END of each scene, recorded
+   * by the Critic. Scene N's exit becomes scene N+1's entering charge — the one
+   * threaded number of the story model.
+   */
+  @Property()
+  valueShifts: Map<number, number> = new Map();
 
   /**
    * Current scene outline being processed

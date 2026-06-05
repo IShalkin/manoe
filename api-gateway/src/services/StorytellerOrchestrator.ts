@@ -217,6 +217,8 @@ export class StorytellerOrchestrator {
       maxRevisions: 2,
       keyConstraints: [],
       rawFactsLog: [],
+      rollingSynopsis: [],
+      valueShifts: new Map(),
       lastArchivistScene: 0,
       isPaused: false,
       isCompleted: false,
