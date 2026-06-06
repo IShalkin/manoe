@@ -151,7 +151,7 @@ export class KeyConstraint {
   value: string;
 
   @Optional()
-  @Enum(AgentType)
+  @Property()
   source?: AgentType;
 
   @Required()
@@ -184,7 +184,7 @@ export class RawFact {
   fact: string;
 
   @Required()
-  @Enum(AgentType)
+  @Property()
   source: AgentType;
 
   @Required()
