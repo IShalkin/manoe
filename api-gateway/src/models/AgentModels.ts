@@ -313,6 +313,12 @@ export interface SceneContract {
   activeMotifs: string[];
   valueShiftEntering: number;       // == previous scene's achieved exit (0 for scene 1)
   valueShiftExitingTarget: number;  // intended charge at scene end
+  /**
+   * Per-scene status (power) trajectory — Johnstone's status play, distinct from
+   * the McKee value-shift above. How power between present characters moves
+   * across the scene. Filled by the Strategist's advanced plan; optional.
+   */
+  statusShift?: string;
 }
 
 /**

@@ -56,6 +56,12 @@ export function assembleSceneContract(state: GenerationState, sceneNum: number):
   const valueShifts = state.valueShifts instanceof Map ? state.valueShifts : new Map<number, number>();
   const entering = sceneNum > 1 ? (valueShifts.get(sceneNum - 1) ?? 0) : 0;
 
+  const statusShiftsObj = (plan.statusShifts && typeof plan.statusShifts === "object" && !Array.isArray(plan.statusShifts))
+    ? (plan.statusShifts as AnyObj)
+    : {};
+  const rawStatus = statusShiftsObj[String(sceneNum)] ?? statusShiftsObj[`scene${sceneNum}`];
+  const statusShift = typeof rawStatus === "string" && rawStatus.trim() ? rawStatus : undefined;
+
   return {
     sceneNumber: sceneNum,
     goal: typeof scene.goal === "string" ? scene.goal : "",
@@ -66,5 +72,6 @@ export function assembleSceneContract(state: GenerationState, sceneNum: number):
     activeMotifs,
     valueShiftEntering: entering,
     valueShiftExitingTarget: entering + 3, // default intent: move the charge meaningfully
+    statusShift,
   };
 }

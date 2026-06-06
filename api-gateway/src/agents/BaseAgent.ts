@@ -273,6 +273,9 @@ export abstract class BaseAgent {
       `Active motifs to touch: ${(contract.activeMotifs ?? []).join(", ") || "(none)"}`,
       `Emotional charge: enter at ${contract.valueShiftEntering}, end near ${contract.valueShiftExitingTarget} (the scene must shift the charge, not hold it flat).`,
     ];
+    if (contract.statusShift && contract.statusShift.trim()) {
+      lines.push(`Status (power) shift: ${contract.statusShift} (who holds power should move across the scene).`);
+    }
     return lines.join("\n");
   }
 

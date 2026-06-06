@@ -204,6 +204,7 @@ Categories:
 5. contradictions - internal character conflicts (global)
 6. deepening - where to add depth (global)
 7. complexity - narrative-richness checklist (global)
+8. statusShifts - the PER-SCENE power trajectory between characters (Johnstone status play), keyed by scene number. Describe who holds power at the start and how it moves by the end. Distinct from emotional beat.
 
 Output as JSON, for example:
 {
@@ -213,7 +214,8 @@ Output as JSON, for example:
   "sensory": { "1": "salt air, cold stone", "2": "smoke, distant bells" },
   "contradictions": { "Mara": "wants freedom, fears being alone" },
   "deepening": { "act1": "seed the betrayal" },
-  "complexity": { "check": "every scene turns on a value shift" }
+  "complexity": { "check": "every scene turns on a value shift" },
+  "statusShifts": { "1": "Mara enters supplicant, leaves holding the leverage", "2": "Vex dominant throughout, cracks at the end" }
 }`;
     }
 

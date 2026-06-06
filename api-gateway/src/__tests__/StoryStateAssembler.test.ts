@@ -56,4 +56,19 @@ describe("assembleSceneContract", () => {
     const c = assembleSceneContract(state as never, 1);
     expect(c.valueShiftEntering).toBe(0);
   });
+
+  it("reads the per-scene statusShift from advancedPlan.statusShifts", () => {
+    const s = {
+      outline: { scenes: [{ title: "A", goal: "g1", characters: ["Mara"] }] },
+      advancedPlan: { statusShifts: { "1": "Mara enters low, ends dominant" } },
+      valueShifts: new Map<number, number>(),
+    } as unknown as AnyObj;
+    const c = assembleSceneContract(s as never, 1);
+    expect(c.statusShift).toBe("Mara enters low, ends dominant");
+  });
+
+  it("leaves statusShift undefined when not planned", () => {
+    const c = assembleSceneContract(state as never, 1);
+    expect(c.statusShift).toBeUndefined();
+  });
 });

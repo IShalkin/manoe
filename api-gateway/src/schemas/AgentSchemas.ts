@@ -154,6 +154,9 @@ export const AdvancedPlanSchema = z.object({
   subtext: z.record(z.unknown()).optional(),
   emotionalBeats: z.record(z.unknown()).optional(),
   sensory: z.record(z.unknown()).optional(),
+  // Per-scene status (power) trajectory, keyed by scene number (string). Johnstone
+  // status play — distinct from emotional value-shift. Read per scene by the assembler.
+  statusShifts: z.record(z.unknown()).optional(),
   contradictions: z.record(z.unknown()).optional(),
   deepening: z.record(z.unknown()).optional(),
   complexity: z.record(z.unknown()).optional(),
