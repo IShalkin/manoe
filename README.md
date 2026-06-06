@@ -36,7 +36,7 @@ docker compose -f docker-compose.vps.yml up -d --build
 - **Real-Time Streaming**: SSE via Redis for live progress updates
 - **Vector Memory**: Qdrant for narrative consistency and context
 - **Observability**: Langfuse tracing, Prometheus metrics, Grafana dashboards
-- **Complete CI/CD**: GitHub Actions with automated builds, comprehensive test suite (270 cases), and linting
+- **Complete CI/CD**: GitHub Actions with automated builds, comprehensive test suite (577 cases across 51 suites), and linting
 - **Production-Ready**: Docker containerization, security features, deployment scripts
 
 ## System Architecture
@@ -473,6 +473,8 @@ flowchart TB
 | `agent_start` | agentName, phase | Agent activated |
 | `agent_complete` | agentName, output | Agent output ready |
 | `new_developments_collected` | constraints | Archivist update |
+| `scene_spiced` | sceneNum, amplified, finalContent, wordCount | Intimate-scene amplification ready (opt-in, see below) |
+| `scene_spice_complete` | sceneNum, amplified | Spice pass ran but amplified nothing |
 | `generation_complete` | totalPhases, duration | All phases done |
 | `heartbeat` | timestamp | Keep-alive (15s interval) |
 
@@ -532,8 +534,8 @@ Generates detailed planning artifacts including contradiction maps, emotional be
 ### Phase 6: Drafting (Writer Agent)
 The Writer drafts scenes using "Show, Don't Tell" principles. Each scene is written with full context from Qdrant memory including relevant characters, worldbuilding elements, and previous scenes for continuity.
 
-### Phase 7: Polish (Editor Agent)
-The Editor refines the draft with iterative quality checks, validating pacing, originality, dialogue, and subtext. This phase involves up to 2 revision rounds per scene until quality standards are met.
+### Phase 7: Critique & Polish
+After drafting, the Critic scores each scene (threshold 7/10) and the Writer revises (up to 2 iterations) until it passes. The Originality and Impact agents then run as quality gates, followed by a final polish pass that validates pacing, dialogue, and subtext.
 
 ## Key Features
 
@@ -567,6 +569,24 @@ MANOE maintains a dynamic world state that tracks changes throughout the narrati
 2. The Archivist agent runs every 3 scenes and outputs a `worldStateDiff` with changes
 3. Diffs are applied to the world state, maintaining a consistent view of the story world
 4. The world state is available to agents for context during drafting and revision
+
+### Dialogue Depth & Spice Rewrite
+
+MANOE includes craft enhancements that push dialogue toward subtext and (optionally) amplify intimate scenes.
+
+**Dialogue depth (always on):**
+- **Voice exemplars** - the Profiler seeds each character with 3-5 short characteristic lines (their rhythm, idiolect, what they deflect or leave unsaid). The Writer injects these into every drafting prompt so characters stay distinguishable by voice alone.
+- **Anti-on-the-nose craft block** - the Writer's system prompt steers prose away from stating emotions directly, toward conflict under the surface and what is left unsaid.
+- **Status shift** - each scene carries an optional `statusShift` (Johnstone power axis: who gains/loses standing), tracked distinctly from the McKee `valueShift` charge.
+
+**Spice rewrite (opt-in, default off):**
+Provide a `spiceConfig` on the generate request to enable a terminal amplification pass for intimate scenes:
+1. When `spiceConfig` is set, the Writer tags intimate fragments inline with `{{SPICE style="..."}}…{{/SPICE}}` markers.
+2. A fail-safe parser extracts and **de-tags** those fragments from the prose *before any quality gate runs*; the soft (clean) text is the canon that the Critic, Originality, and Impact gates evaluate.
+3. *After* all gates pass, an amplification pass rewrites the tagged fragments via the configured (typically uncensored OpenRouter) model and stores the result separately in `spicedContent`, a `spiced_scene_*` artifact, and a `scene_spiced` SSE event.
+4. **Graceful degradation:** any failure in the spice pass (model error, Redis publish failure) is logged and swallowed; it never fails an already-finalized scene, and the soft text remains canon.
+
+This keeps the gated narrative clean and reproducible while making the amplified variant a side artifact, fully isolated behind opt-in config.
 
 ### Artifact Persistence
 
@@ -616,7 +636,7 @@ MANOE uses Langfuse Prompt Management for versioned prompts with production labe
 The model used for generation is determined by the following precedence:
 1. **Request `llmConfig.model`** - User's selection from frontend settings (highest priority)
 2. **Environment variable** - Server-side default (e.g., `OPENAI_API_KEY` enables OpenAI)
-3. **`DEFAULT_MODELS`** - Code defaults in `LLMModels.ts` (gpt-5.2 for OpenAI)
+3. **`DEFAULT_MODELS`** - Code defaults in `LLMModels.ts` (e.g. gpt-5.4 for OpenAI, claude-opus-4-8 for Anthropic, gemini-3.1-pro-preview for Gemini)
 
 The `config.model` field in Langfuse prompts is metadata/documentation only - it does not override the user's model selection. Langfuse tracing shows the actual model used in each generation, not the prompt's config.model.
 
@@ -641,7 +661,7 @@ MANOE includes automatic quality evaluation using LLM-as-a-Judge methodology. Th
 - **Relevance**: Measures how well Profiler character output matches the user's seed idea (score 0-1)
 
 **Features:**
-- Uses cost-effective models (default: gpt-4o-mini) for evaluations
+- Uses cost-effective models (default: gpt-5.4-mini) for evaluations
 - Records scores in both Langfuse (for tracing) and Prometheus (for dashboards)
 - Configurable via environment variables: `EVALUATION_LLM_PROVIDER`, `EVALUATION_LLM_MODEL`, `EVALUATION_LLM_API_KEY`
 
@@ -704,7 +724,7 @@ MANOE supports multiple LLM providers with BYOK (Bring Your Own Key). Configure 
 ### Testing & Code Quality
 
 **Automated Testing Suite:**
-- 270 test cases across 10 test suites (entrypoints in `tests/`, implementations in `api-gateway/src/__tests__/`):
+- Test suites co-located in `api-gateway/src/__tests__/` (run with `npm test` from `api-gateway/`):
   - CORS configuration
   - Agent implementations (Critic, Writer)
   - Services (Evaluation, WorldBible Embedding, Data Consistency)
@@ -765,12 +785,14 @@ OPENAI_API_KEY=your-openai-key
 
 MANOE supports multiple LLM providers with BYOK (Bring Your Own Key):
 
-| Provider | Models | Best For |
+| Provider | Default Model | Best For |
 |----------|--------|----------|
-| **OpenAI** | GPT-4o, GPT-4o-mini, o1, o3 | Reasoning, general purpose |
-| **Google Gemini** | Gemini 2.0 Flash, Gemini 1.5 Pro | Long context, complex logic |
-| **Anthropic Claude** | Claude 3.5 Sonnet, Claude 3 Haiku | Creative writing, prose quality |
-| **OpenRouter** | Access to multiple providers via single API | Cost optimization, model variety |
+| **OpenAI** | gpt-5.4 | Reasoning, general purpose |
+| **Google Gemini** | gemini-3.1-pro-preview | Long context, complex logic |
+| **Anthropic Claude** | claude-opus-4-8 | Creative writing, prose quality |
+| **OpenRouter** | google/gemini-3.1-pro-preview | Cost optimization, model variety, uncensored models |
+
+Defaults are defined in `api-gateway/src/models/LLMModels.ts` (`DEFAULT_MODELS`); any model the provider supports can be selected per-request via `llmConfig.model`. DeepSeek and Venice AI are also supported.
 
 ### Moral Compass Framework
 
@@ -881,7 +903,7 @@ The following tables are used for persistence:
   "target_audience": "Adult thriller readers",
   "themes": "justice,memory,truth",
   "provider": "openai",
-  "model": "gpt-4o",
+  "model": "gpt-5.4",
   "api_key": "your-api-key",
   "supabase_project_id": "uuid-of-project",
   "start_from_phase": "characters",
@@ -889,9 +911,16 @@ The following tables are used for persistence:
   "scenes_to_regenerate": [2, 5],
   "constraints": {
     "edit_comment": "Make the protagonist more conflicted about their abilities"
+  },
+  "spiceConfig": {
+    "provider": "openrouter",
+    "model": "uncensored-model-name",
+    "apiKey": "your-openrouter-key"
   }
 }
 ```
+
+`spiceConfig` is optional and **off by default**; omit it for unchanged behavior. See [Dialogue Depth & Spice Rewrite](#dialogue-depth--spice-rewrite) below.
 
 ## Environment Variables
 
@@ -950,11 +979,11 @@ The VPS configuration includes nginx-proxy integration for automatic SSL certifi
 
 ## Current State
 
-The **frontend** is fully implemented and containerized. The **api-gateway** is fully implemented with a complete multi-agent system (~23,000 lines of TypeScript). The **database layer** is production-ready with 9 Supabase migrations. **CI/CD** is configured with GitHub Actions including comprehensive test suite (270 test cases with Jest), TypeScript linting, and automated Docker builds. Documentation is comprehensive.
+The **frontend** is fully implemented and containerized. The **api-gateway** is fully implemented with a complete multi-agent system (~23,000 lines of TypeScript). The **database layer** is production-ready with 9 Supabase migrations. **CI/CD** is configured with GitHub Actions including comprehensive test suite (577 test cases across 51 suites with Jest), TypeScript linting, and automated Docker builds. Documentation is comprehensive.
 
 **Status: PRODUCTION READY**
 
-What's already working: Complete TypeScript API Gateway (~23,000 lines) with 9 AI Agents fully implemented, real-time SSE streaming via Redis, CI/CD pipeline with automated builds, comprehensive test suite (270 test cases), TypeScript linting, Docker containerization, Supabase database with 9 migrations, Qdrant vector memory integration, Redis caching layer with TTL-based caching, rate limiting middleware with fail-secure behavior, Prometheus metrics, Grafana dashboards, and multi-provider LLM support (OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek, Venice AI).
+What's already working: Complete TypeScript API Gateway (~23,000 lines) with 9 AI Agents fully implemented, real-time SSE streaming via Redis, CI/CD pipeline with automated builds, comprehensive test suite (577 test cases), TypeScript linting, Docker containerization, Supabase database with 9 migrations, Qdrant vector memory integration, Redis caching layer with TTL-based caching, rate limiting middleware with fail-secure behavior, Prometheus metrics, Grafana dashboards, and multi-provider LLM support (OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek, Venice AI).
 
 ## Success Metrics
 
