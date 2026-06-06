@@ -26,7 +26,11 @@ import {
  * Updated pricing as of 2024
  */
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  // OpenAI models
+  // OpenAI models (current generation)
+  "gpt-5.5": { input: 0.005, output: 0.03 },
+  "gpt-5.4": { input: 0.0025, output: 0.015 },
+  "gpt-5.4-mini": { input: 0.00075, output: 0.0045 },
+  // OpenAI models (legacy, retained for cost attribution of past runs)
   "gpt-4": { input: 0.03, output: 0.06 },
   "gpt-4-turbo": { input: 0.01, output: 0.03 },
   "gpt-4o": { input: 0.005, output: 0.015 },
@@ -55,6 +59,9 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "gemini-1.5-pro": { input: 0.00125, output: 0.005 },
   "gemini-1.5-flash": { input: 0.000075, output: 0.0003 },
   "gemini-2": { input: 0.00125, output: 0.005 },
+  "gemini-3.1-pro-preview": { input: 0.00125, output: 0.005 },
+  "gemini-3.5-flash": { input: 0.000075, output: 0.0003 },
+  "gemini-3.1-flash-lite": { input: 0.00004, output: 0.00015 },
   "gemini-3-pro": { input: 0.00125, output: 0.005 },
   "gemini-3-flash": { input: 0.000075, output: 0.0003 },
   // DeepSeek models

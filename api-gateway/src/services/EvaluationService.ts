@@ -76,7 +76,7 @@ export class EvaluationService {
    */
   private initializeConfig(): void {
     const provider = (process.env.EVALUATION_LLM_PROVIDER || "openai") as LLMProvider;
-    const model = process.env.EVALUATION_LLM_MODEL || "gpt-4o-mini";
+    const model = process.env.EVALUATION_LLM_MODEL || "gpt-5.4-mini";
     const apiKey = process.env.EVALUATION_LLM_API_KEY || process.env.OPENAI_API_KEY;
 
     if (!apiKey) {

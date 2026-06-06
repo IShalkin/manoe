@@ -42,9 +42,9 @@ MANOE uses a multi-agent architecture where specialized AI agents collaborate to
 - Considers target audience sensibilities
 
 **Recommended Models:**
-- OpenAI: gpt-4o, o1-preview
-- Claude: claude-3-5-sonnet, claude-3-opus
-- Gemini: gemini-1.5-pro
+- OpenAI: gpt-5.5
+- Claude: claude-opus-4-8, claude-sonnet-4-7
+- Gemini: gemini-3.1-pro-preview
 
 ### 2. Profiler Agent (Character Design Phase)
 
@@ -72,9 +72,9 @@ MANOE uses a multi-agent architecture where specialized AI agents collaborate to
 - Stores character vectors in Qdrant for consistency
 
 **Recommended Models:**
-- OpenAI: gpt-4o
-- Claude: claude-3-5-sonnet
-- Gemini: gemini-1.5-pro
+- OpenAI: gpt-5.5
+- Claude: claude-opus-4-8
+- Gemini: gemini-3.1-pro-preview
 
 ### 3. Strategist Agent (Outlining Phase)
 
@@ -107,9 +107,9 @@ MANOE uses a multi-agent architecture where specialized AI agents collaborate to
 - Balances pacing across the story
 
 **Recommended Models:**
-- OpenAI: gpt-4o, o1-preview
-- Claude: claude-3-5-sonnet
-- Gemini: gemini-1.5-pro
+- OpenAI: gpt-5.5
+- Claude: claude-opus-4-8
+- Gemini: gemini-3.1-pro-preview
 
 ### 4. Writer Agent (Drafting Phase)
 
@@ -139,9 +139,9 @@ MANOE uses a multi-agent architecture where specialized AI agents collaborate to
 - Retrieves character/world details from Qdrant
 
 **Recommended Models:**
-- OpenAI: gpt-4o-mini (cost-effective for volume)
-- Claude: claude-3-5-haiku
-- Gemini: gemini-1.5-flash
+- OpenAI: gpt-5.4-mini (cost-effective for volume)
+- Claude: claude-haiku-4-5
+- Gemini: gemini-3.1-flash-lite
 
 ### 5. Critic Agent (Feedback Phase)
 
@@ -184,9 +184,9 @@ MANOE uses a multi-agent architecture where specialized AI agents collaborate to
 - Triggers revision loop if score below threshold
 
 **Recommended Models:**
-- OpenAI: gpt-4o
-- Claude: claude-3-5-sonnet, claude-3-opus
-- Gemini: gemini-1.5-pro
+- OpenAI: gpt-5.5
+- Claude: claude-opus-4-8, claude-sonnet-4-7
+- Gemini: gemini-3.1-pro-preview
 
 ## Agent Communication
 
@@ -237,23 +237,23 @@ Each agent can use a different LLM provider and model:
 ```env
 # Architect Agent
 ARCHITECT_PROVIDER=openai
-ARCHITECT_MODEL=gpt-4o
+ARCHITECT_MODEL=gpt-5.5
 
 # Profiler Agent
 PROFILER_PROVIDER=claude
-PROFILER_MODEL=claude-3-5-sonnet-20241022
+PROFILER_MODEL=claude-opus-4-8
 
 # Strategist Agent
 STRATEGIST_PROVIDER=openai
-STRATEGIST_MODEL=o1-preview
+STRATEGIST_MODEL=gpt-5.5
 
 # Writer Agent (cost-effective for volume)
 WRITER_PROVIDER=openai
-WRITER_MODEL=gpt-4o-mini
+WRITER_MODEL=gpt-5.4-mini
 
 # Critic Agent
 CRITIC_PROVIDER=claude
-CRITIC_MODEL=claude-3-5-sonnet-20241022
+CRITIC_MODEL=claude-opus-4-8
 ```
 
 ### Temperature Settings

@@ -290,11 +290,11 @@ Get all available LLM models grouped by provider.
 ```json
 {
   "openai": {
-    "gpt-4o": {
-      "name": "GPT-4o",
-      "description": "Most capable GPT-4 model, multimodal",
-      "contextWindow": 128000,
-      "maxOutput": 16384,
+    "gpt-5.5": {
+      "name": "GPT-5.5",
+      "description": "Flagship OpenAI model for coding and professional work",
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
       "recommendedFor": ["architect", "profiler", "strategist", "critic"]
     },
     ...
@@ -315,7 +315,7 @@ Get list of supported LLM providers.
     {
       "id": "openai",
       "name": "OpenAI",
-      "description": "OpenAI GPT models including GPT-4o and O1",
+      "description": "OpenAI GPT models including GPT-5.5 and GPT-5.4 mini/nano variants",
       "baseUrl": "https://api.openai.com/v1"
     },
     ...
@@ -334,9 +334,9 @@ Get recommended models for a specific agent.
 {
   "agent": "architect",
   "recommendations": {
-    "openai": ["gpt-4o", "gpt-4-turbo", "o1-preview"],
-    "claude": ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229"],
-    "gemini": ["gemini-1.5-pro"]
+    "openai": ["gpt-5.5"],
+    "claude": ["claude-opus-4-8", "claude-sonnet-4-7"],
+    "gemini": ["gemini-3.1-pro-preview"]
   }
 }
 ```
@@ -353,7 +353,7 @@ Get all agent roles and their purposes.
       "phase": "Genesis",
       "description": "Transforms seed ideas into structured narrative possibilities",
       "defaultProvider": "openai",
-      "defaultModel": "gpt-4o"
+      "defaultModel": "gpt-5.5"
     },
     ...
   ]

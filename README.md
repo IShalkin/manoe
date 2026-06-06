@@ -636,7 +636,7 @@ MANOE uses Langfuse Prompt Management for versioned prompts with production labe
 The model used for generation is determined by the following precedence:
 1. **Request `llmConfig.model`** - User's selection from frontend settings (highest priority)
 2. **Environment variable** - Server-side default (e.g., `OPENAI_API_KEY` enables OpenAI)
-3. **`DEFAULT_MODELS`** - Code defaults in `LLMModels.ts` (e.g. gpt-5.4 for OpenAI, claude-opus-4-8 for Anthropic, gemini-3.1-pro-preview for Gemini)
+3. **`DEFAULT_MODELS`** - Code defaults in `LLMModels.ts` (e.g. gpt-5.5 for OpenAI, claude-opus-4-8 for Anthropic, gemini-3.1-pro-preview for Gemini)
 
 The `config.model` field in Langfuse prompts is metadata/documentation only - it does not override the user's model selection. Langfuse tracing shows the actual model used in each generation, not the prompt's config.model.
 
@@ -787,7 +787,7 @@ MANOE supports multiple LLM providers with BYOK (Bring Your Own Key):
 
 | Provider | Default Model | Best For |
 |----------|--------|----------|
-| **OpenAI** | gpt-5.4 | Reasoning, general purpose |
+| **OpenAI** | gpt-5.5 | Reasoning, general purpose |
 | **Google Gemini** | gemini-3.1-pro-preview | Long context, complex logic |
 | **Anthropic Claude** | claude-opus-4-8 | Creative writing, prose quality |
 | **OpenRouter** | google/gemini-3.1-pro-preview | Cost optimization, model variety, uncensored models |
@@ -903,7 +903,7 @@ The following tables are used for persistence:
   "target_audience": "Adult thriller readers",
   "themes": "justice,memory,truth",
   "provider": "openai",
-  "model": "gpt-5.4",
+  "model": "gpt-5.5",
   "api_key": "your-api-key",
   "supabase_project_id": "uuid-of-project",
   "start_from_phase": "characters",
