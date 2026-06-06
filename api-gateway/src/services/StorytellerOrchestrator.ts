@@ -14,7 +14,7 @@
 
 import { Service, Inject } from "@tsed/di";
 import { $log } from "@tsed/common";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import {
   GenerationPhase,
   LLMProvider,
@@ -207,7 +207,7 @@ export class StorytellerOrchestrator {
    * @returns Run ID
    */
   async startGeneration(options: GenerationOptions): Promise<string> {
-    const runId = uuidv4();
+    const runId = randomUUID();
     process.stdout.write(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}\n`);
     $log.info(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}`);
 

@@ -28,7 +28,7 @@ import {
 } from "@tsed/schema";
 import { Inject } from "@tsed/di";
 import { Request, Response } from "express";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { StorytellerOrchestrator, GenerationOptions, RunStatus } from "../services/StorytellerOrchestrator";
 import { RedisStreamsService } from "../services/RedisStreamsService";
 import { LLMProvider, GenerationPhase } from "../models/LLMModels";
@@ -315,7 +315,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
   ): Promise<GenerateResponseDTO> {
     // Support both new TypeScript format and legacy Python format
     // Generate a proper UUID if no projectId is provided (Supabase expects UUID format)
-    const projectId = request.projectId || request.supabase_project_id || uuidv4();
+    const projectId = request.projectId || request.supabase_project_id || randomUUID();
     const seedIdea = request.seedIdea || request.seed_idea || "";
     const provider = request.llmConfig?.provider || request.provider as LLMProvider;
     const model = request.llmConfig?.model || request.model || "";

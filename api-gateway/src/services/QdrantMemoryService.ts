@@ -13,7 +13,7 @@ import { Service, Inject } from "@tsed/di";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { stringifyForPrompt } from "../utils/schemaNormalizers";
 import { MetricsService } from "./MetricsService";
 
@@ -354,7 +354,7 @@ export class QdrantMemoryService {
     const characterText = this.characterToText(character);
     const embedding = await this.generateEmbedding(characterText);
 
-    const pointId = uuidv4();
+    const pointId = randomUUID();
     const payload: CharacterPayload = {
       projectId,
       character,
@@ -572,7 +572,7 @@ export class QdrantMemoryService {
     const elementText = this.worldbuildingToText(elementType, element);
     const embedding = await this.generateEmbedding(elementText);
 
-    const pointId = uuidv4();
+    const pointId = randomUUID();
     const payload: WorldbuildingPayload = {
       projectId,
       elementType,
@@ -672,7 +672,7 @@ export class QdrantMemoryService {
     const sceneText = this.sceneToText(scene);
     const embedding = await this.generateEmbedding(sceneText);
 
-    const pointId = uuidv4();
+    const pointId = randomUUID();
     const payload: ScenePayload = {
       projectId,
       sceneNumber,
