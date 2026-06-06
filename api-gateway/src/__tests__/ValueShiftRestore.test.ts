@@ -101,4 +101,28 @@ describe("valueShifts survives snapshot → restore", () => {
     // The write that used to crash must now work.
     expect(() => sr.set(3, [{ text: "more", style: "y" }])).not.toThrow();
   });
+
+  it("defaults rollingSynopsis to [] when restoring a pre-field snapshot", async () => {
+    const { orch, o, saved } = makeOrch();
+    const runId = "run-1";
+    o.activeRuns = new Map([[runId, makeState(runId)]]);
+
+    await (o.gracefulShutdown as (timeoutMs: number) => Promise<number>)(0);
+    const content = saved[0].content as AnyObj;
+    const persisted = JSON.parse(JSON.stringify(content)) as AnyObj;
+    // Simulate an OLD snapshot saved before rollingSynopsis existed: the key is absent.
+    delete persisted.rollingSynopsis;
+
+    o.supabase = { getRunArtifact: jest.fn(async () => ({ content: persisted })) };
+    o.activeRuns = new Map();
+    const restored = await (o.restoreFromShutdown as (r: string) => Promise<number>)(runId);
+    expect(restored).toBe(1);
+
+    const state = (o.activeRuns as Map<string, AnyObj>).get(runId)!;
+    expect(Array.isArray(state.rollingSynopsis)).toBe(true);
+    // The .push() that used to crash (undefined) must now work.
+    expect(() =>
+      (state.rollingSynopsis as { sceneNumber: number; summary: string }[]).push({ sceneNumber: 2, summary: "x" })
+    ).not.toThrow();
+  });
 });

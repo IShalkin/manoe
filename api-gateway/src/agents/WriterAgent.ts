@@ -265,6 +265,21 @@ ${autonomousInstruction}${spiceInstruction}`;
 WORLD STATE (authoritative continuity — do NOT contradict):
 ${worldStateBlock}
 
+NARRATOR VOICE (write in this voice consistently):
+${narratorVoiceBlock}
+
+CHARACTER VOICES (keep them distinct):
+${voiceExemplarsBlock}
+
+STORY SO FAR (prior scenes — for continuity, do not re-narrate):
+${synopsisBlock}
+
+SCENE CONTRACT (deliver exactly this):
+${sceneContractBlock}
+
+STORY CRAFT PLAN (weave these in):
+${advancedPlanBlock}
+
 CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
 
 The scene so far ends with:
@@ -302,6 +317,21 @@ ${autonomousInstruction}`;
 
 WORLD STATE (authoritative continuity — do NOT contradict):
 ${worldStateBlock}
+
+NARRATOR VOICE (write in this voice consistently):
+${narratorVoiceBlock}
+
+CHARACTER VOICES (keep them distinct):
+${voiceExemplarsBlock}
+
+STORY SO FAR (prior scenes — for continuity, do not re-narrate):
+${synopsisBlock}
+
+SCENE CONTRACT (deliver exactly this):
+${sceneContractBlock}
+
+STORY CRAFT PLAN (weave these in):
+${advancedPlanBlock}
 
 CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
 

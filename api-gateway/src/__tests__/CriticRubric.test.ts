@@ -19,4 +19,15 @@ describe("CritiqueSchema rubric fields", () => {
     expect(parsed.score).toBe(9);
     expect(parsed.rubric).toBeUndefined();
   });
+
+  it("rejects valueShiftDelivered outside the -10..+10 scale", () => {
+    expect(CritiqueSchema.safeParse({ valueShiftDelivered: 11 }).success).toBe(false);
+    expect(CritiqueSchema.safeParse({ valueShiftDelivered: -11 }).success).toBe(false);
+  });
+
+  it("accepts valueShiftDelivered at the boundaries and zero", () => {
+    expect(CritiqueSchema.safeParse({ valueShiftDelivered: 10 }).success).toBe(true);
+    expect(CritiqueSchema.safeParse({ valueShiftDelivered: -10 }).success).toBe(true);
+    expect(CritiqueSchema.safeParse({ valueShiftDelivered: 0 }).success).toBe(true);
+  });
 });

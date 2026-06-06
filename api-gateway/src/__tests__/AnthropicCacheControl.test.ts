@@ -42,5 +42,36 @@ describe("anthropicCompletion prompt caching", () => {
     expect(sys.map((b) => b.text).join("")).toContain("Stable prefix");
     expect((res.usage as AnyObj).cacheCreationTokens).toBe(100);
     expect((res.usage as AnyObj).cacheReadTokens).toBe(0);
+    // totalTokens must include cache tokens (billed input not in input_tokens),
+    // else it undercounts when prompt caching is active: 10 + 5 + 100 + 0 = 115.
+    expect((res.usage as AnyObj).totalTokens).toBe(115);
+  });
+
+  it("includes cache_read_input_tokens in totalTokens", async () => {
+    const svc = new LLMProviderService();
+    const o = svc as unknown as AnyObj;
+
+    const fakeCreate = jest.fn(async () => ({
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 8, output_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 200 },
+      stop_reason: "end_turn",
+    }));
+    o.makeAnthropicClient = jest.fn(() => ({ messages: { create: fakeCreate } }));
+
+    const res = await (o.anthropicCompletion as (opt: AnyObj) => Promise<AnyObj>)({
+      provider: LLMProvider.ANTHROPIC,
+      model: "claude-opus-4.5",
+      apiKey: "sk-ant-test-0123456789",
+      temperature: 0.7,
+      maxTokens: 1000,
+      messages: [
+        { role: MessageRole.SYSTEM, content: "Stable prefix." },
+        { role: MessageRole.USER, content: "Write scene 2." },
+      ],
+    });
+
+    // 8 + 4 + 0 + 200 = 212
+    expect((res.usage as AnyObj).totalTokens).toBe(212);
+    expect((res.usage as AnyObj).cacheReadTokens).toBe(200);
   });
 });

@@ -711,16 +711,23 @@ export class LLMProviderService {
       ? response.content[0].text 
       : "";
 
+    const inputTokens = response.usage?.input_tokens ?? 0;
+    const outputTokens = response.usage?.output_tokens ?? 0;
+    const cacheCreation = (response.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ?? 0;
+    const cacheRead = (response.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ?? 0;
+
     return {
       content,
       model: options.model,
       provider: LLMProvider.ANTHROPIC,
       usage: {
-        promptTokens: response.usage?.input_tokens ?? 0,
-        completionTokens: response.usage?.output_tokens ?? 0,
-        totalTokens: (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0),
-        cacheCreationTokens: (response.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ?? 0,
-        cacheReadTokens: (response.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ?? 0,
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        // Cache tokens (creation + read) are billed input tokens NOT included in input_tokens,
+        // so they must be added to avoid undercounting when prompt caching is active.
+        totalTokens: inputTokens + outputTokens + cacheCreation + cacheRead,
+        cacheCreationTokens: cacheCreation,
+        cacheReadTokens: cacheRead,
       },
       finishReason: response.stop_reason ?? "stop",
     };

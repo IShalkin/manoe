@@ -30,6 +30,7 @@ import {
   RawFact,
   NarratorVoice,
   SpiceRegion,
+  SynopsisEntry,
 } from "../models/AgentModels";
 import { LLMProviderService } from "./LLMProviderService";
 import { RedisStreamsService } from "./RedisStreamsService";
@@ -1022,6 +1023,10 @@ export class StorytellerOrchestrator {
       // This saves time and money, and prevents Polish from degrading good content
       // Note: this is a separate, HIGHER bar than the approval threshold (7) —
       // a scene can be approved (score >= 7) and still get a polish pass if score < 8.
+      // For sub-threshold scenes, the final score-only re-critique below measures the
+      // ACTUAL finalized text. Capture its valueShiftDelivered so we can thread the
+      // correct entry charge into scene N+1 instead of the stale pre-revision critique.
+      let finalValueShift: number | undefined;
       const shouldSkipPolish = typeof approvedCritiqueScore === "number" && approvedCritiqueScore >= 8;
       if (sceneApproved && !shouldSkipPolish) {
         await this.polishScene(runId, options, sceneNum + 1);
@@ -1040,6 +1045,9 @@ export class StorytellerOrchestrator {
           const finalCritique = await this.critiqueScene(runId, options, sceneNum + 1);
           const s = finalCritique.score;
           if (typeof s === "number" && !isNaN(s)) finalScore = s;
+          if (typeof finalCritique.valueShiftDelivered === "number") {
+            finalValueShift = finalCritique.valueShiftDelivered as number;
+          }
         }
         console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions (final score ${finalScore ?? "n/a"})`);
         await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "flagged_subthreshold", finalScore);
@@ -1054,11 +1062,15 @@ export class StorytellerOrchestrator {
 
       // Slice 2: thread the achieved value-shift (scene N exit → N+1 entry) and
       // append a rolling-synopsis entry for the finalized scene.
-      // valueShiftDelivered comes from the last in-loop critique (the final
-      // score-only re-critique for sub-threshold scenes is intentionally not used here).
-      const achievedShift = lastCritique && typeof lastCritique.valueShiftDelivered === "number"
-        ? (lastCritique.valueShiftDelivered as number)
-        : 0;
+      // For sub-threshold scenes, prefer valueShiftDelivered from the final score-only
+      // re-critique (which measured the actual finalized text). For approved scenes,
+      // fall back to the last in-loop critique (which IS the approving critique of the
+      // final text). Default to 0 when neither is available.
+      const achievedShift = typeof finalValueShift === "number"
+        ? finalValueShift
+        : (lastCritique && typeof lastCritique.valueShiftDelivered === "number"
+          ? (lastCritique.valueShiftDelivered as number)
+          : 0);
       state.valueShifts.set(sceneNum + 1, achievedShift);
 
       try {
@@ -2953,6 +2965,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           spiceRegions: new Map(
             Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
           ),
+          // Default to [] for snapshots saved before rollingSynopsis existed,
+          // so the .push() in runDraftingLoop does not throw on restore.
+          rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
           isPaused: true, // Keep paused until explicitly resumed
         };
 
@@ -3036,6 +3051,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
             spiceRegions: new Map(
               Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
             ),
+            // Default to [] for snapshots saved before rollingSynopsis existed,
+            // so the .push() in runDraftingLoop does not throw on restore.
+            rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
             isPaused: true, // Keep paused until explicitly resumed
           };
 

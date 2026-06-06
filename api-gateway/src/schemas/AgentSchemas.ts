@@ -180,7 +180,7 @@ export const CritiqueSchema = z.object({
     motifPayoff: z.number().min(1).max(10).optional(),
     valueShift: z.number().min(1).max(10).optional(),
   }).optional(),
-  valueShiftDelivered: z.number().optional(),
+  valueShiftDelivered: z.number().min(-10).max(10).optional(),
   strengths: z.array(z.string()).optional(),
   issues: z.array(z.string()).optional(),
   revisionRequests: z.array(z.string()).optional(),

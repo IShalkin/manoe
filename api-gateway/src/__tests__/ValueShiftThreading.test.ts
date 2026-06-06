@@ -56,4 +56,44 @@ describe("runDraftingLoop synopsis + value-shift threading", () => {
     expect(vs.get(1)).toBe(-2);
     expect(vs.get(2)).toBe(4);
   });
+
+  it("threads the FINAL critique's value-shift for sub-threshold scenes (not the stale pre-revision one)", async () => {
+    const orch = new StorytellerOrchestrator();
+    const o = orch as unknown as AnyObj;
+    const runId = "run-2";
+    const state = makeState(runId, 1);
+    o.activeRuns = new Map([[runId, state]]);
+
+    o.draftScene = jest.fn(async (_r: string, _o: AnyObj, n: number) => {
+      (state.drafts as Map<number, AnyObj>).set(n, { wordCount: 500, content: `scene ${n} text` });
+    });
+    o.draftSceneWithBeats = jest.fn(async () => {});
+    o.expandScene = jest.fn(async () => {});
+
+    // Scene 1 is never approved (score 5 < threshold 7). The in-loop critiques carry a
+    // STALE valueShiftDelivered of -9 (measured pre-revision). The final score-only
+    // re-critique (the call after maxRevisions) measures the actual finalized text and
+    // reports +3 — that is the value that must be threaded.
+    let critiqueCalls = 0;
+    o.critiqueScene = jest.fn(async () => {
+      critiqueCalls++;
+      // First `maxRevisions` (2) calls are in-loop (sub-threshold); the 3rd is finalCritique.
+      return critiqueCalls <= 2
+        ? { approved: false, revision_needed: true, score: 5, valueShiftDelivered: -9 }
+        : { approved: false, score: 5, valueShiftDelivered: 3 };
+    });
+    o.reviseScene = jest.fn(async () => {});
+    o.polishScene = jest.fn(async () => {});
+    o.runArchivistCheck = jest.fn(async () => {});
+    o.publishEvent = jest.fn(async () => {});
+    o.emitSceneFinal = jest.fn(async () => {});
+    o.applySpicePass = jest.fn(async () => {});
+    o.agentFactory = { getAgent: () => ({ summarizeScene: async (_r: string, _o: AnyObj, n: number) => `summary of scene ${n}` }) };
+
+    await (o.runDraftingLoop as (r: string, opts: AnyObj) => Promise<void>)(runId, { projectId: "proj-1" });
+
+    const vs = state.valueShifts as Map<number, number>;
+    // Must be +3 (final critique of finalized text), NOT -9 (stale pre-revision critique).
+    expect(vs.get(1)).toBe(3);
+  });
 });
