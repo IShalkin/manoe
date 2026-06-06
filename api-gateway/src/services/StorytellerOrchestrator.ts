@@ -45,6 +45,7 @@ import { EvaluationService } from "./EvaluationService";
 import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
 import { assembleSceneContract } from "./StoryStateAssembler";
 import { applySpiceExtraction } from "./spiceParser";
+import { buildAmplifyMessages, spliceAmplified, contextAround } from "./SpiceRewriter";
 
 /**
  * Simple rate limiter for concurrent async operations
@@ -1044,6 +1045,13 @@ export class StorytellerOrchestrator {
         await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "flagged_subthreshold", finalScore);
       }
 
+      // Slice 2: terminal spice pass — runs after the scene is finalized in SOFT
+      // form (all gates passed on clean text). Inert unless spiceConfig is set and
+      // the scene produced spice regions. Never fails the scene.
+      if (!this.shouldStop(runId)) {
+        await this.applySpicePass(runId, options, sceneNum + 1);
+      }
+
       // Slice 2: thread the achieved value-shift (scene N exit → N+1 entry) and
       // append a rolling-synopsis entry for the finalized scene.
       // valueShiftDelivered comes from the last in-loop critique (the final
@@ -1921,6 +1929,89 @@ export class StorytellerOrchestrator {
       score,
       finalContent,
       wordCount: finalWordCount,
+    });
+  }
+
+  /**
+   * Slice 2 terminal spice pass. Runs AFTER the scene is finalized in SOFT form
+   * (already stored to Qdrant/Archivist). Only fires when spiceConfig is set and
+   * the scene has extracted regions. Amplifies each region via the uncensored
+   * provider, re-locates it in the final SOFT text by exact match, splices the
+   * amplified text in, stores spicedContent, and emits a replacement event.
+   * Any failure keeps the soft text (graceful degradation — never fails a scene).
+   */
+  private async applySpicePass(
+    runId: string,
+    options: GenerationOptions,
+    sceneNum: number
+  ): Promise<void> {
+    const spice = options.spiceConfig;
+    if (!spice) return;
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+    const regions = state.spiceRegions.get(sceneNum);
+    if (!regions || regions.length === 0) return;
+
+    const draft = state.drafts.get(sceneNum) as Record<string, unknown> | undefined;
+    const softText = typeof draft?.content === "string" ? draft.content : "";
+    if (!softText.trim()) return;
+
+    await this.publishEvent(runId, "scene_spice_start", { sceneNum, regions: regions.length });
+
+    let spiced = softText;
+    let amplifiedCount = 0;
+    for (const region of regions) {
+      try {
+        const { before, after } = contextAround(spiced, region.text, 400);
+        const messages = buildAmplifyMessages({
+          fragment: region.text,
+          style: region.style,
+          ceiling: spice.ceiling,
+          before,
+          after,
+        });
+        const result = await this.llmProvider.createCompletionWithRetry({
+          messages,
+          model: spice.model,
+          provider: spice.provider as LLMProvider,
+          apiKey: spice.apiKey,
+          temperature: 0.9,
+          maxTokens: 4096,
+          runId,
+          agentName: "spice",
+        });
+        const amplified = (result.content ?? "").trim();
+        if (amplified.length > 0) {
+          const next = spliceAmplified(spiced, region.text, amplified);
+          if (next !== spiced) {
+            spiced = next;
+            amplifiedCount++;
+          }
+        }
+      } catch (spiceError) {
+        $log.warn(`[StorytellerOrchestrator] applySpicePass: region amplify failed for scene ${sceneNum}, keeping soft text, runId: ${runId}`, spiceError);
+      }
+    }
+
+    if (amplifiedCount === 0) {
+      await this.publishEvent(runId, "scene_spice_complete", { sceneNum, amplified: 0 });
+      return;
+    }
+
+    (draft as Record<string, unknown>).spicedContent = spiced;
+    state.drafts.set(sceneNum, draft as Record<string, unknown>);
+    state.updatedAt = new Date().toISOString();
+
+    await this.saveArtifact(runId, options.projectId, `spiced_scene_${sceneNum}`, {
+      sceneNum,
+      content: spiced,
+      wordCount: spiced.split(/\s+/).length,
+    });
+    await this.publishEvent(runId, "scene_spiced", {
+      sceneNum,
+      amplified: amplifiedCount,
+      finalContent: spiced,
+      wordCount: spiced.split(/\s+/).length,
     });
   }
 
