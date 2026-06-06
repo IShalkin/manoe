@@ -63,23 +63,20 @@ export class ProfilerAgent extends BaseAgent {
       const parsed = this.parseJSONArray(response);
       console.log(`[profiler] Parsed ${Array.isArray(parsed) ? parsed.length : 0} characters, runId: ${runId}`);
       
-      try {
-        const validated = this.validateOutput(parsed, CharactersArraySchema, runId);
-        console.log(`[profiler] Validation passed, emitting message, runId: ${runId}`);
-        // Emit the actual generated content for the frontend to display
-        await this.emitMessage(runId, { characters: validated }, phase);
-        console.log(`[profiler] Message emitted, emitting thought, runId: ${runId}`);
-        await this.emitThought(runId, "Character profiles complete. Ready for worldbuilding.", "neutral", AgentType.WORLDBUILDER);
-        console.log(`[profiler] Thought emitted, returning content, runId: ${runId}`);
-        return { content: validated as Record<string, unknown>[] };
-      } catch (validationError) {
-        console.error(`[profiler] Validation failed:`, validationError);
-        // Skip validation and emit raw content for debugging
-        console.log(`[profiler] Emitting raw content without validation, runId: ${runId}`);
-        await this.emitMessage(runId, { characters: parsed }, phase);
-        await this.emitThought(runId, "Character profiles complete (validation skipped). Ready for worldbuilding.", "neutral", AgentType.WORLDBUILDER);
-        return { content: parsed as Record<string, unknown>[] };
-      }
+      // Validate BEFORE emitting. On failure validateOutput throws a
+      // ValidationError, which propagates to the orchestrator's error handling
+      // (matching ArchitectAgent/WorldbuilderAgent/StrategistAgent, which all
+      // call validateOutput without a swallowing catch). We must NOT emit or
+      // return the raw `parsed` value on failure — doing so leaked unvalidated
+      // character profiles to the frontend and downstream agents.
+      const validated = this.validateOutput(parsed, CharactersArraySchema, runId);
+      console.log(`[profiler] Validation passed, emitting message, runId: ${runId}`);
+      // Emit the actual generated content for the frontend to display
+      await this.emitMessage(runId, { characters: validated }, phase);
+      console.log(`[profiler] Message emitted, emitting thought, runId: ${runId}`);
+      await this.emitThought(runId, "Character profiles complete. Ready for worldbuilding.", "neutral", AgentType.WORLDBUILDER);
+      console.log(`[profiler] Thought emitted, returning content, runId: ${runId}`);
+      return { content: validated as Record<string, unknown>[] };
     }
 
     // For NARRATOR_DESIGN, return as-is (simple object)
@@ -208,6 +205,7 @@ For each character include:
 7. Visual signature and mannerisms
 8. Voice and speech patterns
 9. Relationships to other characters
+10. voiceExemplars: an array of 3-5 SHORT characteristic lines this character would actually say (their rhythm, idiolect, what they deflect or leave unsaid). Distinct enough that a reader could tell two characters apart by line alone. NOT description of their voice - actual quoted lines.
 
 IMPORTANT: Characters MUST match the genre, tone, and setting described above.
 Create at least 3-5 main characters.

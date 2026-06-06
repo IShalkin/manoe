@@ -63,7 +63,7 @@ services:
       - SUPABASE_KEY=${SUPABASE_KEY:-}
       # Required: JWT secret for user authentication
       # SECURITY: Generate with: openssl rand -base64 32
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required - generate via openssl rand -base64 32}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
       # Optional: Logging level
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -165,33 +165,33 @@ services:
       - "3000"
     environment:
       # Database
-      - DATABASE_URL=postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-postgres:5432/langfuse
-      # Security (CHANGEME in .env)
-      - SALT=${LANGFUSE_SALT:-mysalt}
-      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      - DATABASE_URL=postgresql://langfuse:${LANGFUSE_DB_PASSWORD:?LANGFUSE_DB_PASSWORD is required - generate via openssl rand -base64 24}@langfuse-postgres:5432/langfuse
+      # Security (required - no insecure defaults)
+      - SALT=${LANGFUSE_SALT:?LANGFUSE_SALT is required - generate via openssl rand -hex 32}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:?LANGFUSE_ENCRYPTION_KEY is required - must be 64 hex chars, generate via openssl rand -hex 32}
       - NEXTAUTH_URL=https://langfuse.iliashalkin.com
-      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-mysecret}
+      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET is required - generate via openssl rand -base64 32}
       # ClickHouse
       - CLICKHOUSE_MIGRATION_URL=clickhouse://langfuse-clickhouse:9000
       - CLICKHOUSE_URL=http://langfuse-clickhouse:8123
       - CLICKHOUSE_USER=clickhouse
-      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD is required - generate via openssl rand -base64 24}
       - CLICKHOUSE_CLUSTER_ENABLED=false
       # Redis
       - REDIS_HOST=langfuse-redis
       - REDIS_PORT=6379
-      - REDIS_AUTH=${LANGFUSE_REDIS_PASSWORD:-langfuseredis}
+      - REDIS_AUTH=${LANGFUSE_REDIS_PASSWORD:?LANGFUSE_REDIS_PASSWORD is required - generate via openssl rand -base64 24}
       # MinIO (S3-compatible storage)
       - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
       - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
       - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minio
-      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:?LANGFUSE_MINIO_PASSWORD is required - generate via openssl rand -base64 24}
       - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://langfuse-minio:9000
       - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
       - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=langfuse
       - LANGFUSE_S3_MEDIA_UPLOAD_REGION=auto
       - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=minio
-      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:?LANGFUSE_MINIO_PASSWORD is required - generate via openssl rand -base64 24}
       - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://langfuse-minio:9000
       - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
       # Telemetry
@@ -226,31 +226,31 @@ services:
         condition: service_healthy
     environment:
       # Database
-      - DATABASE_URL=postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-postgres:5432/langfuse
-      # Security
-      - SALT=${LANGFUSE_SALT:-mysalt}
-      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      - DATABASE_URL=postgresql://langfuse:${LANGFUSE_DB_PASSWORD:?LANGFUSE_DB_PASSWORD is required - generate via openssl rand -base64 24}@langfuse-postgres:5432/langfuse
+      # Security (required - no insecure defaults)
+      - SALT=${LANGFUSE_SALT:?LANGFUSE_SALT is required - generate via openssl rand -hex 32}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:?LANGFUSE_ENCRYPTION_KEY is required - must be 64 hex chars, generate via openssl rand -hex 32}
       # ClickHouse
       - CLICKHOUSE_MIGRATION_URL=clickhouse://langfuse-clickhouse:9000
       - CLICKHOUSE_URL=http://langfuse-clickhouse:8123
       - CLICKHOUSE_USER=clickhouse
-      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD is required - generate via openssl rand -base64 24}
       - CLICKHOUSE_CLUSTER_ENABLED=false
       # Redis
       - REDIS_HOST=langfuse-redis
       - REDIS_PORT=6379
-      - REDIS_AUTH=${LANGFUSE_REDIS_PASSWORD:-langfuseredis}
+      - REDIS_AUTH=${LANGFUSE_REDIS_PASSWORD:?LANGFUSE_REDIS_PASSWORD is required - generate via openssl rand -base64 24}
       # MinIO
       - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
       - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
       - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minio
-      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:?LANGFUSE_MINIO_PASSWORD is required - generate via openssl rand -base64 24}
       - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://langfuse-minio:9000
       - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
       - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=langfuse
       - LANGFUSE_S3_MEDIA_UPLOAD_REGION=auto
       - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=minio
-      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_MINIO_PASSWORD:?LANGFUSE_MINIO_PASSWORD is required - generate via openssl rand -base64 24}
       - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://langfuse-minio:9000
       - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
       # Telemetry
@@ -265,7 +265,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=langfuse
-      - POSTGRES_PASSWORD=${LANGFUSE_DB_PASSWORD:-langfuse}
+      - POSTGRES_PASSWORD=${LANGFUSE_DB_PASSWORD:?LANGFUSE_DB_PASSWORD is required - generate via openssl rand -base64 24}
       - POSTGRES_DB=langfuse
     volumes:
       - langfuse-postgres-data:/var/lib/postgresql/data
@@ -286,7 +286,7 @@ services:
     environment:
       - CLICKHOUSE_DB=default
       - CLICKHOUSE_USER=clickhouse
-      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD is required - generate via openssl rand -base64 24}
     volumes:
       - langfuse-clickhouse-data:/var/lib/clickhouse
       - langfuse-clickhouse-logs:/var/log/clickhouse-server
@@ -304,13 +304,13 @@ services:
     image: redis:7-alpine
     container_name: langfuse-redis
     restart: unless-stopped
-    command: redis-server --requirepass ${LANGFUSE_REDIS_PASSWORD:-langfuseredis}
+    command: redis-server --requirepass ${LANGFUSE_REDIS_PASSWORD:?LANGFUSE_REDIS_PASSWORD is required - generate via openssl rand -base64 24}
     volumes:
       - langfuse-redis-data:/data
     networks:
       - complete-deploy_proxy
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_PASSWORD:-langfuseredis}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_PASSWORD:?LANGFUSE_REDIS_PASSWORD is required - generate via openssl rand -base64 24}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -324,7 +324,7 @@ services:
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
     environment:
       - MINIO_ROOT_USER=minio
-      - MINIO_ROOT_PASSWORD=${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      - MINIO_ROOT_PASSWORD=${LANGFUSE_MINIO_PASSWORD:?LANGFUSE_MINIO_PASSWORD is required - generate via openssl rand -base64 24}
     volumes:
       - langfuse-minio-data:/data
     networks:

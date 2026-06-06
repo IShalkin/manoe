@@ -13,7 +13,7 @@ import { Service, Inject } from "@tsed/di";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { stringifyForPrompt } from "../utils/schemaNormalizers";
 import { MetricsService } from "./MetricsService";
 
@@ -228,16 +228,84 @@ export class QdrantMemoryService {
     }
   }
 
+  // One-time warning flag so LOCAL-mode degradation is loud but not spammy
+  private static localWarningEmitted = false;
+  private static localSearchWarningEmitted = false;
+
+  /**
+   * Deterministic pseudo-embedding derived from text.
+   *
+   * NOT semantic — this only guarantees that identical text maps to an
+   * identical vector, so cosine ranking in LOCAL mode is stable and
+   * repeatable instead of random garbage. Real semantic search requires an
+   * OpenAI or Gemini key (or a real local embedding model).
+   *
+   * Uses an FNV-1a hash of the text to seed a per-dimension xorshift PRNG,
+   * yielding finite values in roughly [-0.5, 0.5] (same range as the old
+   * Math.random implementation).
+   */
+  static localEmbedding(text: string, dim: number): number[] {
+    // FNV-1a 32-bit hash of the input text.
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    // Seed must be non-zero for xorshift; mix in the dimension index per element.
+    let state = (hash >>> 0) || 0x1;
+
+    const vector = new Array<number>(dim);
+    for (let i = 0; i < dim; i++) {
+      // xorshift32 step, perturbed by the index so successive dims differ.
+      state ^= (i + 1);
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      state >>>= 0;
+      // Map to [-0.5, 0.5).
+      vector[i] = state / 0xffffffff - 0.5;
+    }
+    return vector;
+  }
+
+  /**
+   * Extract the embedding vector from an OpenAI embeddings response, guarding
+   * against empty/missing `data` (empty input or content-filtered response
+   * yields `data: []`, so `data[0]` would be undefined and crash the caller).
+   *
+   * Throws a clear, catchable error rather than dereferencing undefined.
+   */
+  static extractEmbedding(
+    response: { data?: Array<{ embedding?: number[] }> },
+    dim: number
+  ): number[] {
+    const embedding = response?.data?.[0]?.embedding;
+    if (!embedding || embedding.length === 0) {
+      throw new Error(
+        `OpenAI embeddings returned empty data (expected ${dim}-dim vector); ` +
+          `likely empty input or a content-filtered response`
+      );
+    }
+    return embedding;
+  }
+
   /**
    * Generate embedding for text
    */
   private async generateEmbedding(text: string): Promise<number[]> {
+    // Guard empty input: never call the embedding API with "" (yields data: [])
+    // and never store a meaningless vector. Fall back to a deterministic local
+    // vector so the store/search path stays alive without a crash.
+    if (!text || text.trim().length === 0) {
+      return QdrantMemoryService.localEmbedding(text ?? "", this.embeddingDimension);
+    }
+
     if (this.embeddingProvider === EmbeddingProvider.OPENAI && this.openaiClient) {
       const response = await this.openaiClient.embeddings.create({
         model: this.embeddingModel,
         input: text,
       });
-      return response.data[0].embedding;
+      return QdrantMemoryService.extractEmbedding(response, this.embeddingDimension);
     } else if (this.embeddingProvider === EmbeddingProvider.GEMINI && this.geminiClient) {
       try {
         // Use full model path format "models/gemini-embedding-001" for Gemini API
@@ -256,9 +324,19 @@ export class QdrantMemoryService {
         throw error;
       }
     } else {
-      // Local embeddings - return random vector for now
-      // In production, use a local embedding model like fastembed
-      return Array.from({ length: this.embeddingDimension }, () => Math.random() - 0.5);
+      // Local embeddings: deterministic pseudo-vector derived from the text.
+      // This is NOT semantic search — identical text gets identical vectors so
+      // ranking is stable/repeatable, but relevance is meaningless. Warn loudly
+      // once so this degraded mode is never silent.
+      if (!QdrantMemoryService.localWarningEmitted) {
+        QdrantMemoryService.localWarningEmitted = true;
+        console.warn(
+          "Qdrant Memory: LOCAL embedding mode is active — semantic search is " +
+            "DEGRADED (deterministic pseudo-vectors, not real embeddings). " +
+            "Set an OpenAI or Gemini API key for meaningful retrieval."
+        );
+      }
+      return QdrantMemoryService.localEmbedding(text, this.embeddingDimension);
     }
   }
 
@@ -276,7 +354,7 @@ export class QdrantMemoryService {
     const characterText = this.characterToText(character);
     const embedding = await this.generateEmbedding(characterText);
 
-    const pointId = uuidv4();
+    const pointId = randomUUID();
     const payload: CharacterPayload = {
       projectId,
       character,
@@ -316,6 +394,25 @@ export class QdrantMemoryService {
   }
 
   /**
+   * Slice 0: vector search is meaningless in LOCAL mode (deterministic noise
+   * vectors). Fail closed — callers get [] and fall back to structured state.
+   * Warns once so the degraded mode is visible rather than silent.
+   */
+  private retrievalDisabled(): boolean {
+    if (this.embeddingProvider === EmbeddingProvider.LOCAL) {
+      if (!QdrantMemoryService.localSearchWarningEmitted) {
+        QdrantMemoryService.localSearchWarningEmitted = true;
+        console.warn(
+          "[QdrantMemory] Embedding provider is LOCAL (noise vectors); vector retrieval is DISABLED. " +
+          "Continuity is served from structured state only. Set OPENAI_API_KEY or GEMINI_API_KEY to enable retrieval."
+        );
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Search for characters by semantic similarity
    */
   async searchCharacters(
@@ -323,6 +420,7 @@ export class QdrantMemoryService {
     query: string,
     limit: number = 3
   ): Promise<SearchResult<CharacterPayload>[]> {
+    if (this.retrievalDisabled()) return [];
     if (!this.client) return [];
 
     const startTime = Date.now();
@@ -474,7 +572,7 @@ export class QdrantMemoryService {
     const elementText = this.worldbuildingToText(elementType, element);
     const embedding = await this.generateEmbedding(elementText);
 
-    const pointId = uuidv4();
+    const pointId = randomUUID();
     const payload: WorldbuildingPayload = {
       projectId,
       elementType,
@@ -521,6 +619,7 @@ export class QdrantMemoryService {
     query: string,
     limit: number = 5
   ): Promise<SearchResult<WorldbuildingPayload>[]> {
+    if (this.retrievalDisabled()) return [];
     if (!this.client) return [];
 
     const startTime = Date.now();
@@ -573,7 +672,7 @@ export class QdrantMemoryService {
     const sceneText = this.sceneToText(scene);
     const embedding = await this.generateEmbedding(sceneText);
 
-    const pointId = uuidv4();
+    const pointId = randomUUID();
     const payload: ScenePayload = {
       projectId,
       sceneNumber,
@@ -620,6 +719,7 @@ export class QdrantMemoryService {
     query: string,
     limit: number = 2
   ): Promise<SearchResult<ScenePayload>[]> {
+    if (this.retrievalDisabled()) return [];
     if (!this.client) return [];
 
     const startTime = Date.now();

@@ -298,5 +298,32 @@ Output JSON with:
 
     return newState;
   }
+
+  /**
+   * Slice 2: produce a compact rolling-synopsis entry (~50-80 words) for a
+   * finalized scene. Cheap, single-shot, summarization-only — kept separate
+   * from the every-3-scenes constraint pass so continuity has a per-scene recap.
+   */
+  public async summarizeScene(
+    runId: string,
+    options: GenerationOptions,
+    sceneNum: number,
+    sceneText: string
+  ): Promise<string> {
+    if (!sceneText || sceneText.trim().length === 0) return "";
+    const systemPrompt =
+      "You are the Archivist. Summarize a story scene in 50-80 words, plain prose, " +
+      "third person, present tense. Capture only what changed: who did what, where, " +
+      "and the new situation. No preamble, no quotes, no markdown — output the summary only.";
+    const userPrompt = `Summarize Scene ${sceneNum} in 50-80 words:\n\n${sceneText}`;
+    const response = await this.callLLM(
+      runId,
+      systemPrompt,
+      userPrompt,
+      options.llmConfig,
+      GenerationPhase.DRAFTING
+    );
+    return response.trim();
+  }
 }
 

@@ -82,6 +82,10 @@ export const CharacterSchema = z.object({
   backstory: z.string().optional(),
   visual: z.string().optional(),
   voice: z.string().optional(),
+  // 3-5 characteristic spoken lines per character (rhythm, idiolect, what they
+  // leave unsaid). Seeded by the Profiler, editable by the author, injected per
+  // scene by the Writer for present characters only.
+  voiceExemplars: z.array(z.string()).optional(),
   // Accept string, array, or object for relationships (LLM returns various formats)
   relationships: z.union([
     z.string(),
@@ -141,13 +145,18 @@ export const OutlineSchema = z.object({
 }).passthrough();
 
 /**
- * Advanced Plan schema (from StrategistAgent - Advanced Planning phase)
+ * Advanced plan (Strategist, ADVANCED_PLANNING phase). motifs/subtext/etc are
+ * global records; emotionalBeats and sensory are keyed by scene number (string),
+ * which BaseAgent.buildAdvancedPlanBlock's pick() reads per scene.
  */
 export const AdvancedPlanSchema = z.object({
   motifs: z.record(z.unknown()).optional(),
   subtext: z.record(z.unknown()).optional(),
   emotionalBeats: z.record(z.unknown()).optional(),
   sensory: z.record(z.unknown()).optional(),
+  // Per-scene status (power) trajectory, keyed by scene number (string). Johnstone
+  // status play — distinct from emotional value-shift. Read per scene by the assembler.
+  statusShifts: z.record(z.unknown()).optional(),
   contradictions: z.record(z.unknown()).optional(),
   deepening: z.record(z.unknown()).optional(),
   complexity: z.record(z.unknown()).optional(),
@@ -160,6 +169,18 @@ export const CritiqueSchema = z.object({
   approved: z.boolean().optional(),
   score: z.number().min(1).max(10).optional(),
   revision_needed: z.boolean().optional(),
+  wordCountCompliance: z.boolean().optional(),
+  scopeAdherence: z.boolean().optional(),
+  rubric: z.object({
+    beatDelivery: z.number().min(1).max(10).optional(),
+    continuity: z.number().min(1).max(10).optional(),
+    characterVoice: z.number().min(1).max(10).optional(),
+    proseCraft: z.number().min(1).max(10).optional(),
+    pacing: z.number().min(1).max(10).optional(),
+    motifPayoff: z.number().min(1).max(10).optional(),
+    valueShift: z.number().min(1).max(10).optional(),
+  }).optional(),
+  valueShiftDelivered: z.number().min(-10).max(10).optional(),
   strengths: z.array(z.string()).optional(),
   issues: z.array(z.string()).optional(),
   revisionRequests: z.array(z.string()).optional(),

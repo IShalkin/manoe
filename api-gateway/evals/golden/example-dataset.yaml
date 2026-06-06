@@ -1,0 +1,53 @@
+# =============================================================================
+# MANOE eval golden-set STUB -- ONE illustrative example only.
+# =============================================================================
+# This shows the *intended input shape* for a real golden set:
+#   seed idea  -> the user's premise that kicks off a MANOE run
+#   outline    -> the per-scene outline the Writer is handed (beat/conflict/hook)
+#   constraints-> the world/character invariants that must never be violated
+#   expected_qualities -> the dimensions a good rendering should satisfy, in
+#                         plain language. These map 1:1 to the llm-rubric
+#                         assertions in ../promptfooconfig.yaml.
+#
+# IMPORTANT: this is NOT a real golden set. A real one must be curated by hand:
+#   - 20-50+ scene cases spanning genres, tones, and known failure modes
+#     (anachronisms, name drift, over-running the hook, telling-not-showing).
+#   - Each case reviewed by a human so the rubric grades are trustworthy.
+#   - Include deliberate "should FAIL" cases to confirm the judge has teeth.
+#   - Ideally exported from real Langfuse traces of past runs (good and bad),
+#     so the eval reflects production distribution, not synthetic prose.
+# =============================================================================
+
+- id: lighthouse-001
+  seed_idea: >
+    A lighthouse keeper on the Cornish coast in 1971 spends her final night
+    on duty before an automation crew arrives to decommission both the light
+    and her job. A quiet story about obsolescence and dignity.
+
+  scene_outline:
+    title: "The Lighthouse Keeper's Last Night"
+    beat: "Mara realizes the automation crew arrives at dawn to decommission her."
+    conflict: "duty vs. obsolescence"
+    hook: "She lights the lamp one final time as headlights crest the hill."
+    characters: ["Mara"]
+    setting: "a storm-battered lighthouse on the Cornish coast, 1971"
+    wordCount: 600
+
+  constraints:
+    - "Mara is the only human character in this scene."
+    - "1971 setting: NO mobile phones, NO internet, NO modern tech."
+    - "The lighthouse is on the Cornish coast."
+
+  expected_qualities:
+    structure: >
+      Dramatizes the realization beat and ends on the hook (lighting the lamp
+      as headlights crest the hill); does not advance past this scene.
+    consistency: >
+      No new named characters; no anachronistic technology; setting stays
+      the Cornish-coast lighthouse.
+    show_dont_tell: >
+      Conveys Mara's resignation and pride through sensory detail and action,
+      not by stating "she felt obsolete."
+    # Further MANOE dimensions to add when the rubric set grows:
+    originality: "Avoids cliché lighthouse/storm imagery; fresh phrasing."
+    impact: "The final image lands with emotional weight."

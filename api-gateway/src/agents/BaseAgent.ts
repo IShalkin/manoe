@@ -5,7 +5,7 @@
  * Provides common functionality for LLM calls, JSON parsing, and Langfuse tracing.
  */
 
-import { AgentType, GenerationState, MessageType, KeyConstraint } from "../models/AgentModels";
+import { AgentType, GenerationState, MessageType, KeyConstraint, WorldState, NarratorVoice, SynopsisEntry, SceneContract } from "../models/AgentModels";
 import { GenerationPhase, ChatMessage, MessageRole, getMaxTokensForPhase, LLMProvider } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService } from "../services/LangfuseService";
@@ -82,21 +82,81 @@ export abstract class BaseAgent {
   }
 
   /**
+   * Extract the JSON payload from an LLM response.
+   *
+   * Pure, dependency-free helper so the parse logic is unit-testable in
+   * isolation. Returns the raw JSON *string* to parse, or null if nothing
+   * parseable was found.
+   *
+   * Fence selection: LLMs sometimes emit an explanatory ```json example```
+   * BEFORE the real answer in a second fence. The previous non-greedy regex
+   * matched the FIRST fence and parsed the example. We instead collect ALL
+   * fenced blocks and return the LAST one that JSON.parses successfully
+   * (the answer almost always comes after any example). If no fenced block
+   * parses, we fall back to the whole response string (also validated by a
+   * trial JSON.parse). If nothing parses, return null.
+   *
+   * Heuristic limitation: LAST-block selection has a known inverse failure —
+   * if the model emits its real ANSWER first and an illustrative EXAMPLE fence
+   * afterward, we return the example. This trade-off favors the far more common
+   * example-first/answer-last ordering. (Pinned by a test in
+   * BaseAgentParseJSON.test.ts so future changes are intentional.)
+   */
+  protected static extractJSON(response: string): string | null {
+    const fenceRegex = /```(?:json)?\s*([\s\S]*?)```/g;
+    const candidates: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = fenceRegex.exec(response)) !== null) {
+      candidates.push(match[1].trim());
+    }
+
+    // Prefer the LAST fenced block that parses to valid JSON.
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      try {
+        JSON.parse(candidates[i]);
+        return candidates[i];
+      } catch {
+        // try the next candidate
+      }
+    }
+
+    // No (parseable) fence — fall back to the whole string if it is JSON.
+    const trimmed = response.trim();
+    try {
+      JSON.parse(trimmed);
+      return trimmed;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Parse JSON from LLM response
-   * Handles markdown code blocks and various JSON formats
+   * Handles markdown code blocks and various JSON formats.
+   *
+   * Total by contract (never throws) — callers pass the result straight to
+   * Zod validation. On parse failure we return a sentinel that is BOTH
+   * - detectable downstream (`__parseError: true`), so a parse failure is no
+   *   longer mistaken for "required field missing" by Zod, AND
+   * - backward compatible (`raw: response` is preserved) so any caller that
+   *   inspected `.raw` still works.
    */
   protected parseJSON(response: string): Record<string, unknown> {
-    try {
-      // Try to extract JSON from markdown code blocks
-      const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[1].trim());
+    const json = BaseAgent.extractJSON(response);
+    if (json !== null) {
+      try {
+        return JSON.parse(json);
+      } catch (error) {
+        // extractJSON already validated parseability; reaching here means the
+        // payload changed shape unexpectedly. Fall through to the sentinel.
+        console.warn(`[${this.agentType}] Failed to parse extracted JSON:`, error);
       }
-      return JSON.parse(response);
-    } catch (error) {
-      console.warn(`[${this.agentType}] Failed to parse JSON response:`, error);
-      return { raw: response };
+    } else {
+      console.warn(
+        `[${this.agentType}] Failed to parse JSON response (no parseable JSON found)`
+      );
     }
+    return { __parseError: true, raw: response };
   }
 
   /**
@@ -105,6 +165,16 @@ export abstract class BaseAgent {
    */
   protected parseJSONArray(response: string): Record<string, unknown>[] {
     const parsed = this.parseJSON(response);
+    // Propagate parseJSON's failure contract: on a parse failure `parsed` is the
+    // sentinel `{ __parseError: true, raw }`. Wrapping it as `[parsed]` would
+    // leak a fake "character" object downstream (ProfilerAgent's catch path
+    // emits it to the frontend). Return [] instead — the sole caller validates
+    // against CharactersArraySchema (.min(1)), so an empty array still fails
+    // validation cleanly (no silent "0 characters = success"), while nothing
+    // malformed escapes.
+    if (parsed.__parseError === true) {
+      return [];
+    }
     if (Array.isArray(parsed)) {
       return parsed;
     }
@@ -125,6 +195,116 @@ export abstract class BaseAgent {
     return constraints
       .map((c) => `- ${c.key}: ${c.value} (Scene ${c.sceneNumber})`)
       .join("\n");
+  }
+
+  /**
+   * Render the evolving world state into a compact, always-on continuity block.
+   * Slice 1a: this is the highest-priority dynamic context — who is alive/dead,
+   * where they are, and the hard facts established so far.
+   */
+  protected buildWorldStateBlock(worldState?: WorldState): string {
+    if (!worldState) return "No world state tracked yet.";
+    const lines: string[] = [];
+    const chars = worldState.characters ?? [];
+    if (chars.length > 0) {
+      lines.push("Characters (current status):");
+      for (const c of chars) {
+        const loc = c.currentLocation ? `, at ${c.currentLocation}` : "";
+        lines.push(`- ${c.name} [${c.status}${loc}] (last seen scene ${c.lastSeenScene})`);
+      }
+    }
+    const facts = worldState.keyFacts ?? [];
+    if (facts.length > 0) {
+      lines.push("Established facts:");
+      for (const f of facts) lines.push(`- ${f}`);
+    }
+    return lines.length > 0 ? lines.join("\n") : "No world state tracked yet.";
+  }
+
+  /**
+   * Render the advanced-plan slice (motifs, subtext, emotional beat for this
+   * scene) into a craft-guidance block. The plan's internal shape is a loose
+   * record, so extraction is defensive: per-scene keys are used when present,
+   * else the whole sub-object is summarized.
+   */
+  protected buildAdvancedPlanBlock(plan: Record<string, unknown> | undefined, sceneNum: number): string {
+    if (!plan || Object.keys(plan).length === 0) return "No advanced plan available.";
+    const pick = (obj: unknown): unknown => {
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        const rec = obj as Record<string, unknown>;
+        return rec[String(sceneNum)] ?? rec[`scene${sceneNum}`] ?? rec;
+      }
+      return obj;
+    };
+    const parts: string[] = [];
+    if (plan.motifs) parts.push(`Motifs: ${JSON.stringify(plan.motifs)}`);
+    if (plan.subtext) parts.push(`Subtext: ${JSON.stringify(plan.subtext)}`);
+    if (plan.emotionalBeats) parts.push(`Emotional beat (this scene): ${JSON.stringify(pick(plan.emotionalBeats))}`);
+    if (plan.sensory) parts.push(`Sensory blueprint: ${JSON.stringify(pick(plan.sensory))}`);
+    return parts.length > 0 ? parts.join("\n") : "No advanced plan available.";
+  }
+
+  /** Render narrator voice/POV design into a compact, always-on style block. */
+  protected buildNarratorVoiceBlock(voice?: NarratorVoice): string {
+    if (!voice || Object.keys(voice).length === 0) return "No narrator voice specified — use a consistent, natural narrative voice.";
+    const parts: string[] = [];
+    if (voice.perspective) parts.push(`POV: ${voice.perspective}`);
+    if (voice.voice) parts.push(`Voice: ${voice.voice}`);
+    if (voice.tone) parts.push(`Tone: ${voice.tone}`);
+    if (voice.style) parts.push(`Style: ${voice.style}`);
+    return parts.length > 0 ? parts.join("\n") : "No narrator voice specified — use a consistent, natural narrative voice.";
+  }
+
+  /** Render the rolling synopsis of scenes strictly BEFORE sceneNum (never the future). */
+  protected buildSynopsisBlock(entries: SynopsisEntry[] | undefined, sceneNum: number): string {
+    const prior = (entries ?? []).filter((e) => e.sceneNumber < sceneNum).sort((a, b) => a.sceneNumber - b.sceneNumber);
+    if (prior.length === 0) return "No prior scenes (this is the opening).";
+    return prior.map((e) => `Scene ${e.sceneNumber}: ${e.summary}`).join("\n");
+  }
+
+  /** Render the per-scene contract (goal/conflict/hook/value-shift/motifs). */
+  protected buildSceneContractBlock(contract?: SceneContract): string {
+    if (!contract) return "No scene contract available — follow the scene outline.";
+    const lines = [
+      `Goal: ${contract.goal || "(unspecified)"}`,
+      `Conflict: ${contract.conflict || "(unspecified)"}`,
+      `Required end hook: ${contract.hook || "(unspecified)"}`,
+      `Characters present: ${(contract.charactersPresent ?? []).join(", ") || "(unspecified)"}`,
+      `Active motifs to touch: ${(contract.activeMotifs ?? []).join(", ") || "(none)"}`,
+      `Emotional charge: enter at ${contract.valueShiftEntering}, end near ${contract.valueShiftExitingTarget} (the scene must shift the charge, not hold it flat).`,
+    ];
+    if (contract.statusShift && contract.statusShift.trim()) {
+      lines.push(`Status (power) shift: ${contract.statusShift} (who holds power should move across the scene).`);
+    }
+    return lines.join("\n");
+  }
+
+  /**
+   * Render per-character voice exemplars for the characters present in this
+   * scene only (token budget + contrast: voices distinguish in opposition).
+   * Returns a safe placeholder when no present character has exemplars.
+   */
+  protected buildVoiceExemplarsBlock(characters: unknown, present: string[]): string {
+    if (!Array.isArray(characters) || characters.length === 0) {
+      return "No voice exemplars available — give each character a distinct rhythm and idiolect.";
+    }
+    const presentSet = new Set(present.map((n) => n.trim().toLowerCase()));
+    const blocks: string[] = [];
+    for (const char of characters) {
+      if (typeof char !== "object" || char === null) continue;
+      const rec = char as Record<string, unknown>;
+      const name = typeof rec.name === "string" ? rec.name.trim() : "";
+      if (!name || (presentSet.size > 0 && !presentSet.has(name.toLowerCase()))) continue;
+      const exemplars = Array.isArray(rec.voiceExemplars)
+        ? rec.voiceExemplars.filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+        : [];
+      if (exemplars.length === 0) continue;
+      blocks.push(`${name}:\n${exemplars.map((e) => `  "${e}"`).join("\n")}`);
+    }
+    if (blocks.length === 0) {
+      return "No voice exemplars available — give each character a distinct rhythm and idiolect.";
+    }
+    return `These are the characters' baseline voices (drift is allowed as the arc demands). Make them sound DIFFERENT from each other:\n${blocks.join("\n")}`;
   }
 
   /**

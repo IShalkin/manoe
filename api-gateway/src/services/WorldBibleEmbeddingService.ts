@@ -24,7 +24,6 @@ import { Service, Inject } from "@tsed/di";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import { MetricsService } from "./MetricsService";
 import { stringifyForPrompt } from "../utils/schemaNormalizers";

@@ -14,7 +14,7 @@
 
 import { Service, Inject } from "@tsed/di";
 import { $log } from "@tsed/common";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import {
   GenerationPhase,
   LLMProvider,
@@ -28,6 +28,9 @@ import {
   GenerationState,
   KeyConstraint,
   RawFact,
+  NarratorVoice,
+  SpiceRegion,
+  SynopsisEntry,
 } from "../models/AgentModels";
 import { LLMProviderService } from "./LLMProviderService";
 import { RedisStreamsService } from "./RedisStreamsService";
@@ -36,11 +39,14 @@ import { LangfuseService, AGENT_PROMPTS } from "./LangfuseService";
 import { SupabaseService, Character, Draft } from "./SupabaseService";
 import { MetricsService } from "./MetricsService";
 import { AgentFactory } from "../agents/AgentFactory";
-import { AgentContext } from "../agents/types";
+import { AgentContext, SpiceConfig } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
 import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
+import { assembleSceneContract } from "./StoryStateAssembler";
+import { applySpiceExtraction } from "./spiceParser";
+import { buildAmplifyMessages, spliceAmplified, contextAround } from "./SpiceRewriter";
 
 /**
  * Simple rate limiter for concurrent async operations
@@ -101,6 +107,8 @@ export interface GenerationOptions {
   settings?: Record<string, unknown>;
   /** Embedding API key for WorldBibleEmbeddingService (Gemini API key) */
   embeddingApiKey?: string;
+  /** Opt-in spice rewrite config (Slice 2). Absent = feature off. */
+  spiceConfig?: SpiceConfig;
 }
 
 /**
@@ -148,12 +156,16 @@ interface SceneDraft {
   semanticCheckError?: string;
   /** Similarity score (0-1) - higher means more similar to World Bible entries */
   contradictionScore?: number;
+  /** Terminal spice-amplified version of `content` (Slice 2). Output to reader; never canon. */
+  spicedContent?: string;
   /** Index signature for compatibility with state.drafts Map and Qdrant storage */
   [key: string]: string | number | boolean | undefined;
 }
 
 @Service()
 export class StorytellerOrchestrator {
+  private static readonly APPROVAL_THRESHOLD = 7;
+
   private activeRuns: Map<string, GenerationState> = new Map();
   private pauseCallbacks: Map<string, () => boolean> = new Map();
   private isShuttingDown: boolean = false;
@@ -196,7 +208,7 @@ export class StorytellerOrchestrator {
    * @returns Run ID
    */
   async startGeneration(options: GenerationOptions): Promise<string> {
-    const runId = uuidv4();
+    const runId = randomUUID();
     process.stdout.write(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}\n`);
     $log.info(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}`);
 
@@ -215,6 +227,9 @@ export class StorytellerOrchestrator {
       maxRevisions: 2,
       keyConstraints: [],
       rawFactsLog: [],
+      rollingSynopsis: [],
+      valueShifts: new Map(),
+      spiceRegions: new Map(),
       lastArchivistScene: 0,
       isPaused: false,
       isCompleted: false,
@@ -302,10 +317,16 @@ export class StorytellerOrchestrator {
     }
 
     try {
+      // Mark in-flight while running phase work; we clear it at each safe
+      // boundary below so gracefulShutdown() can tell when this run is at a
+      // checkpoint rather than mid agent/LLM call.
+      state.inFlight = true;
+
       // Phase 1: Genesis
       $log.info(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
       await this.runGenesisPhase(runId, options);
       $log.info(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
+      state.inFlight = false; // safe checkpoint
       const shouldStopAfterGenesis = this.shouldStop(runId);
       $log.info(`[StorytellerOrchestrator] runGeneration: shouldStop after Genesis = ${shouldStopAfterGenesis}, runId: ${runId}`);
       if (shouldStopAfterGenesis) {
@@ -315,23 +336,38 @@ export class StorytellerOrchestrator {
 
       // Phase 2: Characters
       $log.info(`[StorytellerOrchestrator] runGeneration: about to call runCharactersPhase, runId: ${runId}`);
+      state.inFlight = true;
       await this.runCharactersPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
       $log.info(`[StorytellerOrchestrator] runGeneration: runCharactersPhase completed, runId: ${runId}`);
       if (this.shouldStop(runId)) return;
 
+      // Phase 2.5: Narrator design (voice/POV) — depends on characters + narrative.
+      state.inFlight = true;
+      await this.runNarratorDesignPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
+      if (this.shouldStop(runId)) return;
+
       // Phase 3: Worldbuilding
+      state.inFlight = true;
       await this.runWorldbuildingPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
       if (this.shouldStop(runId)) return;
 
       // Phase 4: Outlining
+      state.inFlight = true;
       await this.runOutliningPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
       if (this.shouldStop(runId)) return;
 
       // Phase 5: Advanced Planning (optional)
+      state.inFlight = true;
       await this.runAdvancedPlanningPhase(runId, options);
+      state.inFlight = false; // safe checkpoint
       if (this.shouldStop(runId)) return;
 
-      // Phase 6-9: Drafting → Critique → Revision → Polish (per scene)
+      // Phase 6-9: Drafting → Critique → Revision → Polish (per scene).
+      // runDraftingLoop manages its own per-scene inFlight checkpoints.
       await this.runDraftingLoop(runId, options);
       if (this.shouldStop(runId)) return;
 
@@ -351,6 +387,19 @@ export class StorytellerOrchestrator {
       });
     } catch (error) {
       await this.handleError(runId, error);
+    } finally {
+      const finalState = this.activeRuns.get(runId);
+      if (finalState) {
+        // The loop has unwound — this run is no longer mid agent/LLM call.
+        finalState.inFlight = false;
+      }
+      // Deferred cleanup for cooperatively-cancelled runs. cancelRun() leaves
+      // the cancelled state in activeRuns so in-flight code reads a coherent
+      // (cancelled) state and getRunStatus() stays meaningful; once the loop has
+      // unwound here we drop it to avoid leaking the state.
+      if (finalState?.isCancelled) {
+        this.activeRuns.delete(runId);
+      }
     }
   }
 
@@ -674,6 +723,32 @@ export class StorytellerOrchestrator {
   }
 
   /**
+   * Narrator Design Phase (Slice 2) — derive narrator voice / POV / tone / style
+   * via the Profiler's NARRATOR_DESIGN prompt and persist it so every Writer and
+   * Critic call carries a consistent voice spec.
+   */
+  private async runNarratorDesignPhase(
+    runId: string,
+    options: GenerationOptions
+  ): Promise<void> {
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+
+    state.phase = GenerationPhase.NARRATOR_DESIGN;
+    await this.publishPhaseStart(runId, GenerationPhase.NARRATOR_DESIGN);
+
+    const agent = this.agentFactory.getAgent(AgentType.PROFILER);
+    const context: AgentContext = { runId, state, projectId: options.projectId };
+
+    const output = await agent.execute(context, options);
+    state.narratorVoice = output.content as Record<string, unknown> as unknown as NarratorVoice;
+    state.updatedAt = new Date().toISOString();
+
+    await this.saveArtifact(runId, options.projectId, "narrator_voice", state.narratorVoice);
+    await this.publishPhaseComplete(runId, GenerationPhase.NARRATOR_DESIGN, state.narratorVoice);
+  }
+
+  /**
    * Worldbuilding Phase - Setting and world details
    */
   private async runWorldbuildingPhase(
@@ -837,6 +912,7 @@ export class StorytellerOrchestrator {
 
     const output = await agent.execute(context, options);
     const advancedPlan = output.content as Record<string, unknown>;
+    state.advancedPlan = advancedPlan;
     state.updatedAt = new Date().toISOString();
 
     await this.saveArtifact(runId, options.projectId, "advanced_plan", advancedPlan);
@@ -865,7 +941,13 @@ export class StorytellerOrchestrator {
     for (let sceneNum = 0; sceneNum < scenes.length; sceneNum++) {
       if (this.shouldStop(runId)) return;
 
+      // Mark in-flight for the duration of this scene's agent/LLM work; cleared
+      // at the end of the scene (a safe boundary) so gracefulShutdown can wait.
+      state.inFlight = true;
       state.currentScene = sceneNum + 1;
+      // Slice 2: assemble the per-scene contract from blackboard regions and
+      // stash it on state so Writer/Critic can read it without re-assembling.
+      state.currentSceneContract = assembleSceneContract(state, sceneNum + 1);
       const scene = scenes[sceneNum] as Record<string, unknown>;
       
       // Use safeParseWordCount to handle string values like "1,900" and prevent NaN
@@ -904,11 +986,13 @@ export class StorytellerOrchestrator {
       let revisionCount = 0;
       let sceneApproved = false;
       let approvedCritiqueScore: number | undefined;
+      let lastCritique: Record<string, unknown> | undefined;
       while (revisionCount < state.maxRevisions) {
         if (this.shouldStop(runId)) return;
 
         // Critique
         const critique = await this.critiqueScene(runId, options, sceneNum + 1);
+        lastCritique = critique;
         if (this.shouldStop(runId)) return;
 
         // Check if revision needed
@@ -937,7 +1021,12 @@ export class StorytellerOrchestrator {
       // Polish the scene ONLY if it was approved AND score < 8
       // Skip Polish if Critic gave score >= 8 (scene is already high quality)
       // This saves time and money, and prevents Polish from degrading good content
-      // Note: >= 8 aligns with isApproved() threshold for consistency
+      // Note: this is a separate, HIGHER bar than the approval threshold (7) —
+      // a scene can be approved (score >= 7) and still get a polish pass if score < 8.
+      // For sub-threshold scenes, the final score-only re-critique below measures the
+      // ACTUAL finalized text. Capture its valueShiftDelivered so we can thread the
+      // correct entry charge into scene N+1 instead of the stale pre-revision critique.
+      let finalValueShift: number | undefined;
       const shouldSkipPolish = typeof approvedCritiqueScore === "number" && approvedCritiqueScore >= 8;
       if (sceneApproved && !shouldSkipPolish) {
         await this.polishScene(runId, options, sceneNum + 1);
@@ -946,16 +1035,70 @@ export class StorytellerOrchestrator {
         // This ensures frontend always has a canonical source of truth for each scene
         // Without this, frontend falls back to collecting all Writer messages which causes duplication
         console.log(`[Orchestrator] Scene ${sceneNum + 1} has high score (${approvedCritiqueScore}), skipping polish`);
-        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "skipped_high_score");
+        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "skipped_high_score", approvedCritiqueScore);
       } else {
-        // Scene not approved after max revisions - still emit final event for frontend
-        console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions, skipping polish`);
-        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "not_approved");
+        // Not approved after max revisions: run ONE final score-only critique so
+        // the accepted text carries a recorded score and an explicit flag, instead
+        // of being silently accepted. This does not consume a revision slot.
+        let finalScore: number | undefined;
+        if (!this.shouldStop(runId)) {
+          const finalCritique = await this.critiqueScene(runId, options, sceneNum + 1);
+          const s = finalCritique.score;
+          if (typeof s === "number" && !isNaN(s)) finalScore = s;
+          if (typeof finalCritique.valueShiftDelivered === "number") {
+            finalValueShift = finalCritique.valueShiftDelivered as number;
+          }
+        }
+        console.log(`[Orchestrator] Scene ${sceneNum + 1} not approved after ${revisionCount} revisions (final score ${finalScore ?? "n/a"})`);
+        await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "flagged_subthreshold", finalScore);
+      }
+
+      // Slice 2: terminal spice pass — runs after the scene is finalized in SOFT
+      // form (all gates passed on clean text). Inert unless spiceConfig is set and
+      // the scene produced spice regions. Never fails the scene.
+      if (!this.shouldStop(runId)) {
+        await this.applySpicePass(runId, options, sceneNum + 1);
+      }
+
+      // Slice 2: thread the achieved value-shift (scene N exit → N+1 entry) and
+      // append a rolling-synopsis entry for the finalized scene.
+      // For sub-threshold scenes, prefer valueShiftDelivered from the final score-only
+      // re-critique (which measured the actual finalized text). For approved scenes,
+      // fall back to the last in-loop critique (which IS the approving critique of the
+      // final text). Default to 0 when neither is available.
+      const achievedShift = typeof finalValueShift === "number"
+        ? finalValueShift
+        : (lastCritique && typeof lastCritique.valueShiftDelivered === "number"
+          ? (lastCritique.valueShiftDelivered as number)
+          : 0);
+      state.valueShifts.set(sceneNum + 1, achievedShift);
+
+      try {
+        const finalDraft = state.drafts.get(sceneNum + 1) as Record<string, unknown> | undefined;
+        const finalText = String(finalDraft?.content ?? "");
+        if (finalText.trim().length > 0) {
+          const archivist = this.agentFactory.getAgent(AgentType.ARCHIVIST) as ArchivistAgent;
+          const summary = await archivist.summarizeScene(runId, options, sceneNum + 1, finalText);
+          if (summary) state.rollingSynopsis.push({ sceneNumber: sceneNum + 1, summary });
+        }
+      } catch (synopsisError) {
+        $log.warn(`[StorytellerOrchestrator] runDraftingLoop: synopsis generation failed for scene ${sceneNum + 1}, continuing anyway, runId: ${runId}`, synopsisError);
       }
 
       // CRITICAL: Clear currentSceneOutline at the end of each scene to prevent state contamination
       // Without this, Scene 2 would use Scene 1's outline data due to stale state
       state.currentSceneOutline = undefined;
+
+      // Safe checkpoint between scenes: gracefulShutdown may snapshot here.
+      state.inFlight = false;
+    }
+
+    // Final Archivist flush: the per-scene trigger only fires on multiples of 3,
+    // so when the scene count isn't divisible by 3 the trailing scenes' raw facts
+    // were never consolidated. Run a final pass over any unprocessed scenes.
+    if (!this.shouldStop(runId) && scenes.length > state.lastArchivistScene) {
+      await this.runArchivistCheck(runId, options, scenes.length);
+      state.lastArchivistScene = scenes.length;
     }
   }
 
@@ -1007,7 +1150,10 @@ export class StorytellerOrchestrator {
 
     const output = await agent.execute(context, options);
     // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
-    const response = this.stripFakeWordCount(output.content as string);
+    const rawResponse = this.stripFakeWordCount(output.content as string);
+    // Slice 2: extract spice fragments and DETAG before any gate sees the text.
+    // With spice off this only scrubs stray markup. SOFT text is the canon.
+    const response = applySpiceExtraction(state, sceneNum, rawResponse);
 
     const draft: SceneDraft = {
       sceneNum,
@@ -1252,6 +1398,11 @@ export class StorytellerOrchestrator {
         totalWordCount: combinedContent.split(/\s+/).length
       });
     }
+
+    // Slice 2: run spice extraction once over the FULL assembled scene so a region
+    // straddling a part boundary is reconciled. Detag before the draft is built so
+    // the SOFT text is what gets persisted and seen by every downstream gate.
+    combinedContent = applySpiceExtraction(state, sceneNum, combinedContent);
 
     // Create the final draft from combined content
     const draft: SceneDraft = {
@@ -1757,7 +1908,8 @@ export class StorytellerOrchestrator {
     runId: string,
     projectId: string,
     sceneNum: number,
-    polishStatus: string
+    polishStatus: string,
+    score?: number
   ): Promise<void> {
     const state = this.activeRuns.get(runId);
     if (!state) return;
@@ -1786,9 +1938,99 @@ export class StorytellerOrchestrator {
     await this.publishEvent(runId, "scene_polish_complete", {
       sceneNum,
       polishStatus,
+      score,
       finalContent,
       wordCount: finalWordCount,
     });
+  }
+
+  /**
+   * Slice 2 terminal spice pass. Runs AFTER the scene is finalized in SOFT form
+   * (already stored to Qdrant/Archivist). Only fires when spiceConfig is set and
+   * the scene has extracted regions. Amplifies each region via the uncensored
+   * provider, re-locates it in the final SOFT text by exact match, splices the
+   * amplified text in, stores spicedContent, and emits a replacement event.
+   * Any failure keeps the soft text (graceful degradation — never fails a scene).
+   */
+  private async applySpicePass(
+    runId: string,
+    options: GenerationOptions,
+    sceneNum: number
+  ): Promise<void> {
+    const spice = options.spiceConfig;
+    if (!spice) return;
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+    const regions = state.spiceRegions.get(sceneNum);
+    if (!regions || regions.length === 0) return;
+
+    const draft = state.drafts.get(sceneNum) as Record<string, unknown> | undefined;
+    const softText = typeof draft?.content === "string" ? draft.content : "";
+    if (!softText.trim()) return;
+
+    try {
+      await this.publishEvent(runId, "scene_spice_start", { sceneNum, regions: regions.length });
+
+      let spiced = softText;
+      let amplifiedCount = 0;
+      for (const region of regions) {
+        try {
+          const { before, after } = contextAround(spiced, region.text, 400);
+          const messages = buildAmplifyMessages({
+            fragment: region.text,
+            style: region.style,
+            ceiling: spice.ceiling,
+            before,
+            after,
+          });
+          const result = await this.llmProvider.createCompletionWithRetry({
+            messages,
+            model: spice.model,
+            provider: spice.provider as LLMProvider,
+            apiKey: spice.apiKey,
+            temperature: 0.9,
+            maxTokens: 4096,
+            runId,
+            agentName: "spice",
+          });
+          const amplified = (result.content ?? "").trim();
+          if (amplified.length > 0) {
+            const next = spliceAmplified(spiced, region.text, amplified);
+            if (next !== spiced) {
+              spiced = next;
+              amplifiedCount++;
+            }
+          }
+        } catch (spiceError) {
+          $log.warn(`[StorytellerOrchestrator] applySpicePass: region amplify failed for scene ${sceneNum}, keeping soft text, runId: ${runId}`, spiceError);
+        }
+      }
+
+      if (amplifiedCount === 0) {
+        await this.publishEvent(runId, "scene_spice_complete", { sceneNum, amplified: 0 });
+        return;
+      }
+
+      (draft as Record<string, unknown>).spicedContent = spiced;
+      state.drafts.set(sceneNum, draft as Record<string, unknown>);
+      state.updatedAt = new Date().toISOString();
+
+      await this.saveArtifact(runId, options.projectId, `spiced_scene_${sceneNum}`, {
+        sceneNum,
+        content: spiced,
+        wordCount: spiced.split(/\s+/).length,
+      });
+      await this.publishEvent(runId, "scene_spiced", {
+        sceneNum,
+        amplified: amplifiedCount,
+        finalContent: spiced,
+        wordCount: spiced.split(/\s+/).length,
+      });
+    } catch (spicePassError) {
+      // Optional enhancement: a failure here (e.g. Redis publish) must NEVER fail
+      // an already-finalized scene. Soft text remains the canon; just log and move on.
+      $log.warn(`[StorytellerOrchestrator] applySpicePass: spice pass failed for scene ${sceneNum}, keeping soft text, runId: ${runId}`, spicePassError);
+    }
   }
 
   /**
@@ -2284,11 +2526,15 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
    * Uses revision_needed flag from CriticAgent output
    */
   private isApproved(critique: Record<string, unknown>): boolean {
-    // Check revision_needed flag (inverted - if revision_needed is false, it's approved)
-    if (critique.revision_needed === false) return true;
-    // Fallback to old format
-    if (critique.approved === true) return true;
-    if (typeof critique.score === "number" && critique.score >= 8) return true;
+    const score = typeof critique.score === "number" && !isNaN(critique.score)
+      ? critique.score
+      : null;
+    // An explicit revision request always blocks approval.
+    if (critique.revision_needed === true) return false;
+    // Require a qualifying score (the unified bar) ...
+    if (score !== null && score >= StorytellerOrchestrator.APPROVAL_THRESHOLD) return true;
+    // ... or an explicit approval flag that isn't contradicted by a low score.
+    if (critique.approved === true && (score === null || score >= StorytellerOrchestrator.APPROVAL_THRESHOLD)) return true;
     return false;
   }
 
@@ -2408,6 +2654,10 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
       $log.info(`[StorytellerOrchestrator] shouldStop: state not found, returning true, runId: ${runId}`);
       return true;
     }
+    if (state.isCancelled) {
+      $log.info(`[StorytellerOrchestrator] shouldStop: isCancelled=true, returning true, runId: ${runId}`);
+      return true;
+    }
     if (state.isPaused) {
       $log.info(`[StorytellerOrchestrator] shouldStop: isPaused=true, returning true, runId: ${runId}`);
       return true;
@@ -2513,15 +2763,33 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
   }
 
   /**
-   * Cancel a run
+   * Cancel a run (cooperative).
+   *
+   * Previously this set state.error then IMMEDIATELY deleted the run from
+   * activeRuns. Any in-flight awaited work (draftScene/critiqueScene/…) that
+   * re-read activeRuns.get(runId) then saw `undefined` and silently returned,
+   * while getRunStatus(runId) returned null — so cancellation neither stopped
+   * the work cleanly nor surfaced a meaningful status, and leaked the state.
+   *
+   * Now we mark the run cancelled cooperatively and KEEP it in activeRuns:
+   *  - state.isCancelled (and state.error) make shouldStop() return true at the
+   *    next phase/scene boundary, so the loop unwinds itself.
+   *  - In-flight code that re-reads activeRuns still sees a COHERENT cancelled
+   *    state instead of undefined, and getRunStatus() returns a non-null status
+   *    reflecting the cancellation.
+   * Actual removal from activeRuns happens in runGeneration()'s finally, after
+   * the loop has observed the cancellation and unwound.
+   *
+   * LIMITATION: this is cooperative only. A single LLM call already in flight
+   * cannot be aborted mid-call — see the AbortSignal follow-up FLAG.
    */
   cancelRun(runId: string): boolean {
     const state = this.activeRuns.get(runId);
     if (!state) return false;
 
+    state.isCancelled = true;
     state.error = "Cancelled by user";
     state.updatedAt = new Date().toISOString();
-    this.activeRuns.delete(runId);
     return true;
   }
 
@@ -2587,14 +2855,21 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
       });
     }
 
-    // Wait for any in-flight LLM calls to complete (with timeout)
+    // Wait for any in-flight LLM calls to complete (with timeout).
+    //
+    // Previously this checked ONLY state.isPaused — which we set ourselves two
+    // lines above — so allSafe was true on the very first iteration and we never
+    // actually waited, risking a torn/half-written snapshot. We now wait on the
+    // per-run `inFlight` flag, which the run loop clears at each safe boundary
+    // (phase/scene). The timeout remains a backstop.
+    //
+    // LIMITATION: cooperative only. A single LLM call already in flight is not
+    // interrupted — we wait up to timeoutMs for it to finish, then snapshot
+    // regardless. True mid-call abort needs AbortSignal threading (see FLAG).
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
-      // Check if all runs have reached a safe checkpoint
-      const allSafe = activeRuns.every((state) => {
-        // A run is "safe" if it's paused and not in the middle of an LLM call
-        return state.isPaused;
-      });
+      // A run is "safe" if it has reached a boundary (not mid agent/LLM call).
+      const allSafe = activeRuns.every((state) => !state.inFlight);
 
       if (allSafe) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -2610,6 +2885,8 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           drafts: Object.fromEntries(state.drafts),
           critiques: Object.fromEntries(state.critiques),
           revisionCount: Object.fromEntries(state.revisionCount),
+          valueShifts: Object.fromEntries(state.valueShifts),
+          spiceRegions: Object.fromEntries(state.spiceRegions),
         };
 
         await this.supabase.saveRunArtifact({
@@ -2668,6 +2945,8 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
         const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
         const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
+        const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
+        const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
 
         const state: GenerationState = {
           ...(savedState as unknown as GenerationState),
@@ -2680,6 +2959,15 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           revisionCount: new Map(
             Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
           ),
+          valueShifts: new Map(
+            Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
+          ),
+          spiceRegions: new Map(
+            Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
+          ),
+          // Default to [] for snapshots saved before rollingSynopsis existed,
+          // so the .push() in runDraftingLoop does not throw on restore.
+          rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
           isPaused: true, // Keep paused until explicitly resumed
         };
 
@@ -2741,6 +3029,8 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
           const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
           const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
+          const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
+          const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
 
           const state: GenerationState = {
             ...(savedState as unknown as GenerationState),
@@ -2755,6 +3045,15 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
             revisionCount: new Map(
               Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
             ),
+            valueShifts: new Map(
+              Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
+            ),
+            spiceRegions: new Map(
+              Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
+            ),
+            // Default to [] for snapshots saved before rollingSynopsis existed,
+            // so the .push() in runDraftingLoop does not throw on restore.
+            rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
             isPaused: true, // Keep paused until explicitly resumed
           };
 

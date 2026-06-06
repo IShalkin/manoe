@@ -17,6 +17,18 @@ export interface LLMConfiguration {
 }
 
 /**
+ * Opt-in spice configuration (Slice 2). When absent, the spice feature is inert:
+ * the Writer is not told to tag, and any stray {{SPICE}} markup is stripped.
+ * Routes the terminal amplify pass to an uncensored OpenRouter model.
+ */
+export interface SpiceConfig {
+  provider: string;   // typically "openrouter"
+  model: string;
+  apiKey: string;
+  ceiling?: string;   // base intensity ceiling (e.g. "explicit, consensual")
+}
+
+/**
  * Context passed to agent execute method
  */
 export interface AgentContext {
@@ -49,5 +61,6 @@ export interface GenerationOptions {
   llmConfig: LLMConfiguration;
   mode: "full" | "branching";
   settings?: Record<string, unknown>;
+  spiceConfig?: SpiceConfig;
 }
 

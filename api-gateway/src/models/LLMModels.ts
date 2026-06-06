@@ -51,6 +51,14 @@ export class TokenUsage {
 
   @Property()
   totalTokens: number = 0;
+
+  @Optional()
+  @Property()
+  cacheCreationTokens?: number;
+
+  @Optional()
+  @Property()
+  cacheReadTokens?: number;
 }
 
 /**

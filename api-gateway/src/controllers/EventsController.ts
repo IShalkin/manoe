@@ -110,11 +110,7 @@ export class EventsController {
               this.sendEvent(res, event);
 
               // Check for completion events
-              if (
-                event.type === "generation_complete" ||
-                event.type === "generation_error" ||
-                event.type === "phase_complete" && event.data.phase === "drafting"
-              ) {
+              if (EventsController.isTerminalEvent(event)) {
                 // Send final event and close
                 this.sendEvent(res, {
                   id: "stream_end",
@@ -208,6 +204,17 @@ export class EventsController {
     } catch (error) {
       return { status: "unhealthy", redis: "disconnected" };
     }
+  }
+
+  /**
+   * Only genuine end-of-run events should close the SSE stream. A phase
+   * completing (including "drafting") is NOT terminal — polish, originality,
+   * impact and the final generation_complete still follow.
+   */
+  static isTerminalEvent(event: { type: string }): boolean {
+    return (
+      event.type === "generation_complete" || event.type === "generation_error"
+    );
   }
 
   private sendEvent(res: Response, event: StreamEvent): void {

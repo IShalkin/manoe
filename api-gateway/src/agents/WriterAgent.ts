@@ -125,6 +125,13 @@ export class WriterAgent extends BaseAgent {
 Your role is to transform outlines into vivid, engaging prose that brings the story to life.
 Maintain consistency with established facts.
 
+DIALOGUE CRAFT (apply to every line of dialogue):
+- Subtext over statement: characters pursue hidden goals obliquely. They talk between the lines. What matters most is usually what they refuse to say.
+- Banned: on-the-nose dialogue. Do NOT have characters name their own emotions ("I'm so angry", "I feel betrayed") or explain their motivations aloud. Show the feeling through action, evasion, what they change the subject to, and silence.
+- Banned: the "chatbot having feelings" voice — over-explained, over-polite, conflict-free exchanges where everyone understands everyone.
+- Carry subtext through action and physical business (objects, gestures, pauses), not only through clever lines.
+- Status moves: in a charged scene, power between characters should shift across the exchange — who controls it at the start should not trivially control it at the end.
+
 CRITICAL INSTRUCTION: You are an autonomous agent in a simulation. DO NOT ask the user for feedback. DO NOT offer options (A/B/C). Always execute the best option immediately. Never output meta-commentary like "Here is the revised scene" or "Which approach would you prefer". Just output the story content directly.
 
 Key Constraints: ${variables.keyConstraints || "No constraints established yet."}`;
@@ -158,12 +165,34 @@ Key Constraints: ${variables.keyConstraints || "No constraints established yet."
     const autonomousInstruction = `
 CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer options (A/B/C). DO NOT include meta-commentary like "Here is the scene" or "Which approach would you prefer". Just write the story content directly.`;
 
+    // Slice 2: only ask the model to tag intimate fragments when spice is enabled.
+    // With spice off this is "" and no {{SPICE}} markup is ever produced.
+    const spiceInstruction = options.spiceConfig
+      ? `
+SPICE TAGGING: If this scene contains an intimate/sexual passage, wrap ONLY that passage in spice tags so it can later be intensified:
+{{SPICE style="<short label of where the intimacy goes, e.g. 'tender to intense' or 'dom/sub escalation'>"}}
+...write the FULL passage at your normal strength here, including the dialogue, psychology, and build-up...
+{{/SPICE}}
+Write the passage completely and well — do NOT soften or skip it. Tag only the intimate fragment, not the whole scene. If the scene has no intimacy, do not emit any tags.`
+      : "";
+
     if (phase === GenerationPhase.DRAFTING) {
       const sceneNum = state.currentScene;
       const outline = state.outline as Record<string, unknown>;
       const scenes = (outline?.scenes as unknown[]) || [];
       const sceneOutline = state.currentSceneOutline ?? (scenes[sceneNum - 1] as Record<string, unknown>) ?? {};
       const sceneTitle = String(sceneOutline.title ?? `Scene ${sceneNum}`);
+
+      // Slice 2: always-on continuity + craft guidance for ALL drafting paths
+      // (standard, beats first-part, beats continuation, expansion).
+      const worldStateBlock = this.buildWorldStateBlock(state.worldState);
+      const advancedPlanBlock = this.buildAdvancedPlanBlock(state.advancedPlan, sceneNum);
+      const narratorVoiceBlock = this.buildNarratorVoiceBlock(state.narratorVoice);
+      const synopsisBlock = this.buildSynopsisBlock(state.rollingSynopsis, sceneNum);
+      const sceneContractBlock = this.buildSceneContractBlock(state.currentSceneContract);
+
+      const presentCharacters = state.currentSceneContract?.charactersPresent ?? [];
+      const voiceExemplarsBlock = this.buildVoiceExemplarsBlock(state.characters, presentCharacters);
 
       // Check if this is a Proactive Beats Method request (generating scene in parts)
       if (sceneOutline.beatsMode === true) {
@@ -185,6 +214,24 @@ CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer option
           // First part: Start the scene fresh
           return `Write Part 1 of ${partsTotal} for Scene ${sceneNum}: "${sceneTitle}"
 
+WORLD STATE (authoritative continuity — do NOT contradict):
+${worldStateBlock}
+
+NARRATOR VOICE (write in this voice consistently):
+${narratorVoiceBlock}
+
+CHARACTER VOICES (keep them distinct):
+${voiceExemplarsBlock}
+
+STORY SO FAR (prior scenes — for continuity, do not re-narrate):
+${synopsisBlock}
+
+SCENE CONTRACT (deliver exactly this):
+${sceneContractBlock}
+
+STORY CRAFT PLAN (weave these in):
+${advancedPlanBlock}
+
 Scene outline:
 ${JSON.stringify(sceneOutline, null, 2)}
 
@@ -202,7 +249,7 @@ Requirements:
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
 ${retrievedContext}
-${autonomousInstruction}`;
+${autonomousInstruction}${spiceInstruction}`;
         } else {
           // Continuation parts (2, 3, 4...)
           // Use 50 words of context (not 20) to maintain narrative voice and tone consistency
@@ -214,6 +261,24 @@ ${autonomousInstruction}`;
             : `This is Part ${partIndex} of ${partsTotal}. End at a natural transition point for the next part.`;
 
           return `Continue Scene ${sceneNum}: "${sceneTitle}" - Part ${partIndex} of ${partsTotal}
+
+WORLD STATE (authoritative continuity — do NOT contradict):
+${worldStateBlock}
+
+NARRATOR VOICE (write in this voice consistently):
+${narratorVoiceBlock}
+
+CHARACTER VOICES (keep them distinct):
+${voiceExemplarsBlock}
+
+STORY SO FAR (prior scenes — for continuity, do not re-narrate):
+${synopsisBlock}
+
+SCENE CONTRACT (deliver exactly this):
+${sceneContractBlock}
+
+STORY CRAFT PLAN (weave these in):
+${advancedPlanBlock}
 
 CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
 
@@ -250,6 +315,24 @@ ${autonomousInstruction}`;
         
         return `Continue Scene ${sceneNum}: "${sceneTitle}"
 
+WORLD STATE (authoritative continuity — do NOT contradict):
+${worldStateBlock}
+
+NARRATOR VOICE (write in this voice consistently):
+${narratorVoiceBlock}
+
+CHARACTER VOICES (keep them distinct):
+${voiceExemplarsBlock}
+
+STORY SO FAR (prior scenes — for continuity, do not re-narrate):
+${synopsisBlock}
+
+SCENE CONTRACT (deliver exactly this):
+${sceneContractBlock}
+
+STORY CRAFT PLAN (weave these in):
+${advancedPlanBlock}
+
 CRITICAL INSTRUCTION: Return ONLY the continuation text. Do NOT repeat any previous text.
 
 The scene ends with:
@@ -275,6 +358,24 @@ ${autonomousInstruction}`;
 
       return `Write Scene ${sceneNum}: "${sceneTitle}"
 
+WORLD STATE (authoritative continuity — do NOT contradict):
+${worldStateBlock}
+
+NARRATOR VOICE (write in this voice consistently):
+${narratorVoiceBlock}
+
+CHARACTER VOICES (keep them distinct):
+${voiceExemplarsBlock}
+
+STORY SO FAR (prior scenes — for continuity, do not re-narrate):
+${synopsisBlock}
+
+SCENE CONTRACT (deliver exactly this):
+${sceneContractBlock}
+
+STORY CRAFT PLAN (weave these in):
+${advancedPlanBlock}
+
 Scene outline:
 ${JSON.stringify(sceneOutline, null, 2)}
 
@@ -294,7 +395,7 @@ Requirements:
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
 ${retrievedContext}
-${autonomousInstruction}`;
+${autonomousInstruction}${spiceInstruction}`;
     }
 
     if (phase === GenerationPhase.REVISION) {

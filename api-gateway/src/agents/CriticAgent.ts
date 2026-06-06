@@ -208,12 +208,36 @@ Key Constraints: ${variables.keyConstraints || "No constraints established yet."
       // Get scene outline for scope checking
       const sceneHook = sceneOutline.hook ?? sceneOutline.endHook ?? "";
 
+      // Slice 1a: give the Critic the context it needs to judge consistency.
+      const rosterBlock = (state.characters ?? [])
+        .map((c) => `- ${String(c.name ?? "?")}${c.role ? ` (${String(c.role)})` : ""}`)
+        .join("\n") || "No characters defined.";
+      const worldStateBlock = this.buildWorldStateBlock(state.worldState);
+      const narratorVoiceBlock = this.buildNarratorVoiceBlock(state.narratorVoice);
+      const synopsisBlock = this.buildSynopsisBlock(state.rollingSynopsis, sceneNum);
+      const sceneContractBlock = this.buildSceneContractBlock(state.currentSceneContract);
+
       return `Critique Scene ${sceneNum}:
 
 ${(draft as Record<string, unknown>).content}
 
 SCENE OUTLINE (for scope checking):
 ${JSON.stringify(sceneOutline, null, 2)}
+
+CHARACTER ROSTER (for consistency checking):
+${rosterBlock}
+
+WORLD STATE (authoritative — flag any contradiction, e.g. a character marked dead who acts):
+${worldStateBlock}
+
+NARRATOR VOICE (the scene must honor this voice/POV):
+${narratorVoiceBlock}
+
+STORY SO FAR (prior scenes — flag any contradiction with these):
+${synopsisBlock}
+
+SCENE CONTRACT (the scene must deliver this goal/conflict/hook and shift the emotional charge):
+${sceneContractBlock}
 
 WORD COUNT CHECK (CRITICAL):
 - Target word count: ${targetWordCount} words
@@ -223,7 +247,7 @@ ${wordCountRatio < 0.7 ? "⚠️ SCENE IS TOO SHORT - MUST REQUEST EXPANSION" : 
 
 Evaluate:
 1. Prose quality (clarity, flow, voice)
-2. Character consistency
+2. Character consistency (against the ROSTER and WORLD STATE above — a dead/absent character must not act)
 3. Emotional impact
 4. Pacing
 5. Dialogue authenticity
@@ -235,6 +259,15 @@ Evaluate:
    - Does it avoid depicting events from later scenes?
    - Does it end on the specified hook: "${sceneHook}"?
    - No premature escalation or resolution of future conflicts?
+10. DECOMPOSED CRAFT RUBRIC — score each 1-10 (anchors: 1-3 fails the axis, 4-6 weak, 7-8 solid, 9-10 excellent):
+    - beatDelivery: does the scene deliver the SCENE CONTRACT goal/conflict and land the required hook?
+    - continuity: consistent with WORLD STATE and STORY SO FAR (no contradiction, no re-narration)?
+    - characterVoice: do characters stay in voice; is the NARRATOR VOICE honored?
+    - proseCraft: show-don't-tell, concrete sensory detail, sentence variety?
+    - pacing: scene moves with purpose; no sag, no rush?
+    - motifPayoff: are the contract's active motifs touched meaningfully (not shoehorned)?
+    - valueShift: does the emotional charge move from the entering value toward the target (not flat)?
+11. VALUE-SHIFT DELIVERED — estimate the scene's achieved exit charge on a -10..+10 scale (negative = darker/worse for the POV character, positive = better), as a single number.
 
 KEY CONSTRAINTS TO CHECK:
 ${constraintsBlock}
@@ -246,7 +279,9 @@ Output JSON with:
 - scopeAdherence: boolean (true if scene stays within outline bounds and ends on hook)
 - strengths: string[]
 - issues: string[] (MUST include "Scene too short" if word count < 70%, "Scope violation" if scene goes beyond outline)
-- revisionRequests: string[] (MUST include "Expand scene to at least ${Math.round(Number(targetWordCount) * 0.7)} words" if too short, specific scope fixes if needed)`;
+- revisionRequests: string[] (MUST include "Expand scene to at least ${Math.round(Number(targetWordCount) * 0.7)} words" if too short, specific scope fixes if needed)
+- rubric: { beatDelivery, continuity, characterVoice, proseCraft, pacing, motifPayoff, valueShift } (each a number 1-10)
+- valueShiftDelivered: number (-10..+10, the scene's achieved exit emotional charge)`;
     }
 
     if (phase === GenerationPhase.REVISION) {

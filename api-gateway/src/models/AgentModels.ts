@@ -272,6 +272,65 @@ export interface WorldState {
   keyFacts: string[];
 }
 
+/** A single rolling-synopsis entry — one compact recap per finalized scene. */
+export interface SynopsisEntry {
+  sceneNumber: number;
+  summary: string; // ~50-80 words
+}
+
+/** Narrator voice / POV design produced by the Profiler's NARRATOR_DESIGN phase. */
+export interface NarratorVoice {
+  voice?: string;
+  perspective?: string; // e.g. "1st", "3rd-limited", "3rd-omni"
+  tone?: string;
+  style?: string;
+}
+
+/**
+ * STORY-level blackboard view (semantic memory). Assembled from existing state
+ * regions by StoryStateAssembler — NOT a new agent output. Stable per run.
+ */
+export interface StoryBible {
+  premise: string;
+  themes: string[];
+  genreConventions: string[];
+  narratorVoice?: NarratorVoice;
+  worldRules: string[];
+  roster: { name: string; role: string }[];
+}
+
+/**
+ * SCENE-level blackboard view (working set). Assembled per scene from the scene
+ * outline + advancedPlan slice + threaded value-shift.
+ */
+export interface SceneContract {
+  sceneNumber: number;
+  goal: string;
+  conflict: string;
+  hook: string;
+  charactersPresent: string[];
+  targetWords: number;
+  activeMotifs: string[];
+  valueShiftEntering: number;       // == previous scene's achieved exit (0 for scene 1)
+  valueShiftExitingTarget: number;  // intended charge at scene end
+  /**
+   * Per-scene status (power) trajectory — Johnstone's status play, distinct from
+   * the McKee value-shift above. How power between present characters moves
+   * across the scene. Filled by the Strategist's advanced plan; optional.
+   */
+  statusShift?: string;
+}
+
+/**
+ * A spice fragment extracted from a draft (Slice 2). `text` is the soft fragment
+ * the smart model wrapped; the terminal pass re-locates it in the final scene by
+ * exact match and amplifies it. `style` is the per-fragment intensity label.
+ */
+export interface SpiceRegion {
+  text: string;
+  style: string;
+}
+
 /**
  * Generation state tracking
  */
@@ -342,6 +401,47 @@ export class GenerationState {
   worldState?: WorldState;
 
   /**
+   * Advanced planning output (motifs, subtext, emotional beats, sensory blueprints).
+   * Produced by the Strategist in the ADVANCED_PLANNING phase and injected into
+   * the Writer/Critic prompts. Persisted here so it survives past its phase.
+   */
+  @Optional()
+  @Property()
+  advancedPlan?: Record<string, unknown>;
+
+  /**
+   * Per-scene rolling synopsis (~50-80 words each), appended after each scene
+   * finalizes. Injected (entries < current scene) into Writer/Critic prompts.
+   */
+  @Optional()
+  @Property()
+  rollingSynopsis: SynopsisEntry[] = [];
+
+  /**
+   * Narrator voice / POV design from the NARRATOR_DESIGN phase. Rides every
+   * Writer/Critic prompt so voice is consistent and checkable.
+   */
+  @Optional()
+  @Property()
+  narratorVoice?: NarratorVoice;
+
+  /**
+   * Achieved value-shift (emotional charge) at the END of each scene, recorded
+   * by the Critic. Scene N's exit becomes scene N+1's entering charge — the one
+   * threaded number of the story model.
+   */
+  @Property()
+  valueShifts: Map<number, number> = new Map();
+
+  /**
+   * Per-scene spice fragments (Slice 2), extracted immediately after drafting and
+   * detagged from the prose before any gate runs. Empty unless spiceConfig is set
+   * and the Writer emitted {{SPICE}} tags. Keyed by scene number.
+   */
+  @Property()
+  spiceRegions: Map<number, SpiceRegion[]> = new Map();
+
+  /**
    * Current scene outline being processed
    * Used to pass expansion mode context to WriterAgent
    */
@@ -349,11 +449,35 @@ export class GenerationState {
   @Property()
   currentSceneOutline?: Record<string, unknown>;
 
+  /** Assembled per-scene contract (Slice 2). Set by runDraftingLoop per scene. */
+  @Optional()
+  @Property()
+  currentSceneContract?: SceneContract;
+
   @Property()
   isPaused: boolean = false;
 
   @Property()
   isCompleted: boolean = false;
+
+  /**
+   * Cooperative cancellation flag. Set by cancelRun(); observed by shouldStop()
+   * at phase/scene boundaries so the run loop unwinds cleanly instead of being
+   * abruptly deleted from activeRuns mid-flight.
+   */
+  @Optional()
+  @Property()
+  isCancelled?: boolean;
+
+  /**
+   * True while the run loop is awaiting an agent / LLM call, false between
+   * safe boundaries (phase/scene). gracefulShutdown() waits on this so it does
+   * not snapshot a torn, half-written state. NOTE: this is cooperative only —
+   * a single in-flight LLM call still cannot be interrupted mid-call.
+   */
+  @Optional()
+  @Property()
+  inFlight?: boolean;
 
   @Property()
   error?: string;

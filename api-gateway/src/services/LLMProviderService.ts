@@ -537,9 +537,9 @@ export class LLMProviderService {
     if (trimmedKey && trimmedKey.length > 10) {
       // Reject common placeholder keys (case-insensitive)
       const lowerKey = trimmedKey.toLowerCase();
-      const isPlaceholder = LLMProviderService.PLACEHOLDER_KEYS.some(
-        (placeholder) => lowerKey === placeholder || lowerKey.includes(placeholder)
-      );
+      // Exact match only: a real key can legitimately contain substrings like
+      // "xxx" or "placeholder", so substring matching would reject valid keys.
+      const isPlaceholder = LLMProviderService.PLACEHOLDER_KEYS.includes(lowerKey);
       if (!isPlaceholder) {
         return trimmedKey;
       }
@@ -643,15 +643,17 @@ export class LLMProviderService {
     };
   }
 
+  /** Seam for tests: build the Anthropic client. */
+  private makeAnthropicClient(apiKey: string): Anthropic {
+    return new Anthropic({ apiKey, timeout: 120000 });
+  }
+
   /**
    * Anthropic Claude completion
    */
   private async anthropicCompletion(options: CompletionOptions): Promise<LLMResponse> {
     const apiKey = this.getApiKey(LLMProvider.ANTHROPIC, options.apiKey);
-    const client = new Anthropic({
-      apiKey,
-      timeout: 120000, // 2 minute timeout
-    });
+    const client = this.makeAnthropicClient(apiKey);
 
     // Extract system message
     let systemMessage = "";
@@ -677,11 +679,23 @@ export class LLMProviderService {
     const requestedMaxTokens = options.maxTokens ?? 4096;
     const cappedMaxTokens = capMaxTokensToModelLimit(options.model, requestedMaxTokens);
 
+    // Slice 1b: send the (stable) system prompt as a cache_control ephemeral
+    // block so repeated Writer/Critic prefixes are billed as cache reads.
+    // The stable messages endpoint accepts cache_control at runtime, but the
+    // @anthropic-ai/sdk@0.32 stable TextBlockParam type omits it (it lives on
+    // the beta types), so we describe the block locally and cast at assignment.
+    type CachedTextBlock = Anthropic.TextBlockParam & {
+      cache_control: { type: "ephemeral" };
+    };
+    const systemBlocks: CachedTextBlock[] | undefined = systemMessage
+      ? [{ type: "text" as const, text: systemMessage, cache_control: { type: "ephemeral" as const } }]
+      : undefined;
+
     // Build request options - only include temperature for models that support it
     const requestOptions: Anthropic.MessageCreateParams = {
       model: options.model,
       max_tokens: cappedMaxTokens,
-      system: systemMessage,
+      system: systemBlocks as Anthropic.MessageCreateParams["system"],
       messages: chatMessages,
     };
 
@@ -697,14 +711,23 @@ export class LLMProviderService {
       ? response.content[0].text 
       : "";
 
+    const inputTokens = response.usage?.input_tokens ?? 0;
+    const outputTokens = response.usage?.output_tokens ?? 0;
+    const cacheCreation = (response.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ?? 0;
+    const cacheRead = (response.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ?? 0;
+
     return {
       content,
       model: options.model,
       provider: LLMProvider.ANTHROPIC,
       usage: {
-        promptTokens: response.usage?.input_tokens ?? 0,
-        completionTokens: response.usage?.output_tokens ?? 0,
-        totalTokens: (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0),
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        // Cache tokens (creation + read) are billed input tokens NOT included in input_tokens,
+        // so they must be added to avoid undercounting when prompt caching is active.
+        totalTokens: inputTokens + outputTokens + cacheCreation + cacheRead,
+        cacheCreationTokens: cacheCreation,
+        cacheReadTokens: cacheRead,
       },
       finishReason: response.stop_reason ?? "stop",
     };
@@ -760,20 +783,60 @@ export class LLMProviderService {
       generationConfig,
     });
 
-    const response = result.response;
-    const content = response.text() ?? "";
+    const parsed = LLMProviderService.parseGeminiResponse(result.response);
 
     return {
-      content,
+      content: parsed.content,
       model: options.model,
       provider: LLMProvider.GEMINI,
-      usage: {
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-      },
-      finishReason: "stop",
+      usage: parsed.usage,
+      finishReason: parsed.finishReason,
     };
+  }
+
+  /**
+   * Parse a Gemini SDK response into content, token usage and finish reason.
+   *
+   * - Reads real token counts from usageMetadata (previously hardcoded to 0,
+   *   which zeroed all Gemini cost/token metrics).
+   * - Guards response.text(), which THROWS when the response was blocked for
+   *   safety (empty candidates). In that case we return empty content and the
+   *   block/finish reason instead of crashing the calling agent.
+   */
+  static parseGeminiResponse(response: unknown): {
+    content: string;
+    usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+    finishReason: string;
+  } {
+    const r = (response ?? {}) as {
+      text?: () => string;
+      candidates?: Array<{ finishReason?: string }>;
+      promptFeedback?: { blockReason?: string };
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        totalTokenCount?: number;
+      };
+    };
+
+    let content = "";
+    try {
+      content = r.text?.() ?? "";
+    } catch {
+      // Safety-blocked or otherwise empty — text() throws. Treat as no content.
+      content = "";
+    }
+
+    const usage = {
+      promptTokens: r.usageMetadata?.promptTokenCount ?? 0,
+      completionTokens: r.usageMetadata?.candidatesTokenCount ?? 0,
+      totalTokens: r.usageMetadata?.totalTokenCount ?? 0,
+    };
+
+    const finishReason =
+      r.candidates?.[0]?.finishReason ?? r.promptFeedback?.blockReason ?? "stop";
+
+    return { content, usage, finishReason };
   }
 
   /**
@@ -937,27 +1000,48 @@ export class LLMProviderService {
    * Check if an error is retryable (rate limit, server error, timeout)
    */
   isRetryableError(error: unknown): boolean {
+    // Prefer the numeric HTTP status when the SDK exposes one. Provider SDKs
+    // (OpenAI/Anthropic) surface rate limits and server errors via `status`
+    // even when the message text has no digits or keywords.
+    const status = this.getErrorStatus(error);
+    if (typeof status === "number") {
+      return status === 429 || (status >= 500 && status <= 599);
+    }
+
     if (error instanceof Error) {
       const message = error.message.toLowerCase();
-      
+
       // Rate limit errors
-      if (message.includes("rate limit") || message.includes("429")) {
+      if (message.includes("rate limit") || /\b429\b/.test(message)) {
         return true;
       }
-      
-      // Server errors
-      if (message.includes("500") || message.includes("502") || 
-          message.includes("503") || message.includes("504")) {
+
+      // Server errors — match HTTP codes as whole tokens so that incidental
+      // numbers (e.g. "at most 500 characters") don't trigger a retry.
+      if (/\b(500|502|503|504)\b/.test(message)) {
         return true;
       }
-      
+
       // Timeout errors
       if (message.includes("timeout") || message.includes("timed out")) {
         return true;
       }
     }
-    
+
     return false;
+  }
+
+  /**
+   * Extract a numeric HTTP status from a provider error, if present.
+   * Different SDKs use `status` or `statusCode`.
+   */
+  private getErrorStatus(error: unknown): number | undefined {
+    if (error && typeof error === "object") {
+      const e = error as { status?: unknown; statusCode?: unknown };
+      if (typeof e.status === "number") return e.status;
+      if (typeof e.statusCode === "number") return e.statusCode;
+    }
+    return undefined;
   }
 
   /**
@@ -974,6 +1058,26 @@ export class LLMProviderService {
       );
     }
     return false;
+  }
+
+  /**
+   * Compute the backoff delay for a transient-retry attempt using exponential
+   * backoff with full jitter. The exponential ceiling is
+   * `baseDelayMs * 2^attempt`; the returned value is uniformly sampled within
+   * `[0, ceiling]` so that many callers hitting a 429 simultaneously do not
+   * retry in lockstep (thundering herd). Math.random is acceptable here — this
+   * is production runtime code, not a workflow script.
+   */
+  static computeBackoffDelay(attempt: number, baseDelayMs: number): number {
+    const ceiling = baseDelayMs * Math.pow(2, attempt);
+    return Math.random() * ceiling;
+  }
+
+  /**
+   * Sleep helper — extracted so tests can stub the wait without real timers.
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -1003,7 +1107,10 @@ export class LLMProviderService {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
-        // Handle temperature unsupported errors - learn and retry without temperature
+        // Handle temperature unsupported errors - learn and retry without temperature.
+        // This is a NON-transient corrective retry (happens at most once, guarded
+        // by temperatureRetried), so it must NOT consume a transient-retry slot —
+        // decrement attempt so the loop counter is unchanged by this corrective pass.
         if (isTemperatureUnsupportedError(error) && !temperatureRetried) {
           temperatureCache.markAsNoTemperatureSupport(options.model);
           console.log(`[LLMProviderService] Model ${options.model} doesn't support temperature, retrying without it`);
@@ -1011,9 +1118,12 @@ export class LLMProviderService {
           // which now consults the cache, so the retry will work without temperature
           options = { ...options, temperature: undefined };
           temperatureRetried = true;
+          attempt--;
           continue;
         }
 
+        // Token-limit corrective retry — likewise non-transient and single-shot,
+        // so it must not consume a transient-retry slot.
         if (this.isTokenLimitError(error) && !tokenLimitRetried) {
           const limitError = extractMaxOutputTokensFromError(options.provider, lastError);
           if (limitError) {
@@ -1021,16 +1131,17 @@ export class LLMProviderService {
             console.log(`[LLMProviderService] Retrying with discovered limit: ${limitError.allowed}`);
             options = { ...options, maxTokens: limitError.allowed };
             tokenLimitRetried = true;
+            attempt--;
             continue;
           }
         }
-        
+
         if (!this.isRetryableError(error) || attempt === maxRetries - 1) {
           throw lastError;
         }
 
-        const delay = baseDelayMs * Math.pow(2, attempt);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        const delay = LLMProviderService.computeBackoffDelay(attempt, baseDelayMs);
+        await this.sleep(delay);
       }
     }
 
