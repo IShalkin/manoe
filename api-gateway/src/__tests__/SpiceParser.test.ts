@@ -66,3 +66,29 @@ describe("extractSpiceRegions", () => {
     expect(regions.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("extractSpiceRegions — markup must never leak (adversarial)", () => {
+  it("handles a single } inside the style attribute without leaking the open tag", () => {
+    const { soft, regions } = extractSpiceRegions(`{{SPICE style="a}b"}}x{{/SPICE}}`);
+    expect(soft).toBe("x");
+    expect(soft).not.toContain("{{");
+    expect(soft).not.toContain("SPICE");
+    expect(regions).toHaveLength(1);
+    expect(regions[0].text).toBe("x");
+  });
+
+  it("never leaves any {{SPICE or {{/SPICE token in soft across nasty inputs", () => {
+    const nasty = [
+      `{{SPICE style="a}b"}}x{{/SPICE}}`,
+      `{{/SPICE}} {{SPICE}}y{{/SPICE}}`,
+      `{{ spice STYLE="z" }}body{{/ spice }}`,
+      `{{SPICE}}`,
+      `plain prose no tags`,
+      `{{SPICE style="x"}}unclosed tail with {{SPICE}} junk`,
+    ];
+    for (const input of nasty) {
+      const { soft } = extractSpiceRegions(input);
+      expect(soft).not.toMatch(/\{\{\s*\/?\s*SPICE/i);
+    }
+  });
+});

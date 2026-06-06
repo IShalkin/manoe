@@ -17,9 +17,9 @@ export interface SpiceRegion {
   style: string;
 }
 
-const OPEN_RE = /\{\{\s*SPICE\b([^}]*)\}\}/i;
+const OPEN_RE = /\{\{\s*SPICE\b([\s\S]*?)\}\}/i;
 const CLOSE_RE = /\{\{\s*\/\s*SPICE\s*\}\}/i;
-const ANY_MARKUP_RE = /\{\{\s*\/?\s*SPICE\b[^}]*\}\}/gi;
+const ANY_MARKUP_RE = /\{\{\s*\/?\s*SPICE\b[\s\S]*?\}\}/gi;
 
 function parseStyle(attrs: string): string {
   const m = attrs.match(/style\s*=\s*"([^"]*)"/i);
