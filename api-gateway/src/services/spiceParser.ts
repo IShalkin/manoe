@@ -10,14 +10,9 @@
  * or {{/SPICE}} markup survive into the returned text.
  */
 
-import type { GenerationState } from "../models/AgentModels";
+import type { GenerationState, SpiceRegion } from "../models/AgentModels";
 
-export interface SpiceRegion {
-  /** The soft fragment text the model wrapped (used to re-locate at spice time). */
-  text: string;
-  /** Per-fragment style label from the tag (may be empty). */
-  style: string;
-}
+export type { SpiceRegion } from "../models/AgentModels";
 
 const OPEN_RE = /\{\{\s*SPICE\b([\s\S]*?)\}\}/i;
 const CLOSE_RE = /\{\{\s*\/\s*SPICE\s*\}\}/i;
