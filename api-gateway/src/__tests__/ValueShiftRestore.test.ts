@@ -42,6 +42,7 @@ function makeState(runId: string): AnyObj {
     rawFactsLog: [], lastArchivistScene: 0, isPaused: false, isCompleted: false,
     inFlight: false, rollingSynopsis: [{ sceneNumber: 1, summary: "Scene 1 recap." }],
     valueShifts: new Map<number, number>([[1, -2], [2, 4]]),
+    spiceRegions: new Map<number, { text: string; style: string }[]>([[2, [{ text: "frag", style: "x" }]]]),
     startedAt: "", updatedAt: "",
   };
 }
@@ -75,5 +76,29 @@ describe("valueShifts survives snapshot → restore", () => {
     expect(vs.get(2)).toBe(4);
     // The write that used to crash must now work.
     expect(() => vs.set(3, 1)).not.toThrow();
+  });
+
+  it("serializes spiceRegions on shutdown and rehydrates it as a Map on restore", async () => {
+    const { orch, o, saved } = makeOrch();
+    const runId = "run-1";
+    o.activeRuns = new Map([[runId, makeState(runId)]]);
+
+    await (o.gracefulShutdown as (timeoutMs: number) => Promise<number>)(0);
+    expect(saved).toHaveLength(1);
+    const content = saved[0].content as AnyObj;
+    const persisted = JSON.parse(JSON.stringify(content)) as AnyObj;
+    expect(persisted.spiceRegions).toEqual({ "2": [{ text: "frag", style: "x" }] });
+
+    o.supabase = { getRunArtifact: jest.fn(async () => ({ content: persisted })) };
+    o.activeRuns = new Map();
+    const restored = await (o.restoreFromShutdown as (r: string) => Promise<number>)(runId);
+    expect(restored).toBe(1);
+
+    const state = (o.activeRuns as Map<string, AnyObj>).get(runId)!;
+    expect(state.spiceRegions instanceof Map).toBe(true);
+    const sr = state.spiceRegions as Map<number, { text: string; style: string }[]>;
+    expect(sr.get(2)).toEqual([{ text: "frag", style: "x" }]);
+    // The write that used to crash must now work.
+    expect(() => sr.set(3, [{ text: "more", style: "y" }])).not.toThrow();
   });
 });

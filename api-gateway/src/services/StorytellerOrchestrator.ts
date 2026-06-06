@@ -29,6 +29,7 @@ import {
   KeyConstraint,
   RawFact,
   NarratorVoice,
+  SpiceRegion,
 } from "../models/AgentModels";
 import { LLMProviderService } from "./LLMProviderService";
 import { RedisStreamsService } from "./RedisStreamsService";
@@ -2767,6 +2768,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           critiques: Object.fromEntries(state.critiques),
           revisionCount: Object.fromEntries(state.revisionCount),
           valueShifts: Object.fromEntries(state.valueShifts),
+          spiceRegions: Object.fromEntries(state.spiceRegions),
         };
 
         await this.supabase.saveRunArtifact({
@@ -2826,6 +2828,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
         const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
         const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
+        const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
 
         const state: GenerationState = {
           ...(savedState as unknown as GenerationState),
@@ -2840,6 +2843,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           ),
           valueShifts: new Map(
             Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
+          ),
+          spiceRegions: new Map(
+            Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
           ),
           isPaused: true, // Keep paused until explicitly resumed
         };
@@ -2903,6 +2909,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
           const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
           const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
+          const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
 
           const state: GenerationState = {
             ...(savedState as unknown as GenerationState),
@@ -2919,6 +2926,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
             ),
             valueShifts: new Map(
               Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
+            ),
+            spiceRegions: new Map(
+              Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
             ),
             isPaused: true, // Keep paused until explicitly resumed
           };
