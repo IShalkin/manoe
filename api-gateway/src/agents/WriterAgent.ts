@@ -165,6 +165,17 @@ Key Constraints: ${variables.keyConstraints || "No constraints established yet."
     const autonomousInstruction = `
 CRITICAL: Output ONLY the story prose. DO NOT ask questions. DO NOT offer options (A/B/C). DO NOT include meta-commentary like "Here is the scene" or "Which approach would you prefer". Just write the story content directly.`;
 
+    // Slice 2: only ask the model to tag intimate fragments when spice is enabled.
+    // With spice off this is "" and no {{SPICE}} markup is ever produced.
+    const spiceInstruction = options.spiceConfig
+      ? `
+SPICE TAGGING: If this scene contains an intimate/sexual passage, wrap ONLY that passage in spice tags so it can later be intensified:
+{{SPICE style="<short label of where the intimacy goes, e.g. 'tender to intense' or 'dom/sub escalation'>"}}
+...write the FULL passage at your normal strength here, including the dialogue, psychology, and build-up...
+{{/SPICE}}
+Write the passage completely and well — do NOT soften or skip it. Tag only the intimate fragment, not the whole scene. If the scene has no intimacy, do not emit any tags.`
+      : "";
+
     if (phase === GenerationPhase.DRAFTING) {
       const sceneNum = state.currentScene;
       const outline = state.outline as Record<string, unknown>;
@@ -238,7 +249,7 @@ Requirements:
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
 ${retrievedContext}
-${autonomousInstruction}`;
+${autonomousInstruction}${spiceInstruction}`;
         } else {
           // Continuation parts (2, 3, 4...)
           // Use 50 words of context (not 20) to maintain narrative voice and tone consistency
@@ -354,7 +365,7 @@ Requirements:
 KEY CONSTRAINTS (MUST NOT VIOLATE):
 ${constraintsBlock}
 ${retrievedContext}
-${autonomousInstruction}`;
+${autonomousInstruction}${spiceInstruction}`;
     }
 
     if (phase === GenerationPhase.REVISION) {
@@ -487,4 +498,3 @@ ${autonomousInstruction}`;
     return names.map(name => `- ${name}`).join("\n");
   }
 }
-
