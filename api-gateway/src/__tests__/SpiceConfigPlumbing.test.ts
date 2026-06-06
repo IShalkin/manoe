@@ -3,6 +3,7 @@
  * shape and that GenerationOptions accepts it as optional.
  */
 import type { GenerationOptions, SpiceConfig } from "../agents/types";
+import { GenerationState } from "../models/AgentModels";
 
 describe("SpiceConfig type", () => {
   it("accepts a fully-specified spice config on GenerationOptions", () => {
@@ -28,5 +29,13 @@ describe("SpiceConfig type", () => {
       mode: "full",
     };
     expect(opts.spiceConfig).toBeUndefined();
+  });
+});
+
+describe("GenerationState.spiceRegions", () => {
+  it("initializes to an empty Map", () => {
+    const state = new GenerationState();
+    expect(state.spiceRegions instanceof Map).toBe(true);
+    expect(state.spiceRegions.size).toBe(0);
   });
 });

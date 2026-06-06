@@ -152,6 +152,8 @@ interface SceneDraft {
   semanticCheckError?: string;
   /** Similarity score (0-1) - higher means more similar to World Bible entries */
   contradictionScore?: number;
+  /** Terminal spice-amplified version of `content` (Slice 2). Output to reader; never canon. */
+  spicedContent?: string;
   /** Index signature for compatibility with state.drafts Map and Qdrant storage */
   [key: string]: string | number | boolean | undefined;
 }
@@ -223,6 +225,7 @@ export class StorytellerOrchestrator {
       rawFactsLog: [],
       rollingSynopsis: [],
       valueShifts: new Map(),
+      spiceRegions: new Map(),
       lastArchivistScene: 0,
       isPaused: false,
       isCompleted: false,
