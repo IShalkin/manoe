@@ -791,8 +791,10 @@ MANOE supports multiple LLM providers with BYOK (Bring Your Own Key):
 | **Google Gemini** | gemini-3.1-pro-preview | Long context, complex logic |
 | **Anthropic Claude** | claude-opus-4-8 | Creative writing, prose quality |
 | **OpenRouter** | google/gemini-3.1-pro-preview | Cost optimization, model variety, uncensored models |
+| **DeepSeek** | deepseek-v3.2 | Low-cost reasoning and drafting |
+| **Venice AI** | venice-uncensored | Uncensored, privacy-focused generation |
 
-Defaults are defined in `api-gateway/src/models/LLMModels.ts` (`DEFAULT_MODELS`); any model the provider supports can be selected per-request via `llmConfig.model`. DeepSeek and Venice AI are also supported.
+Defaults are defined in `api-gateway/src/models/LLMModels.ts` (`DEFAULT_MODELS`); any model the provider supports can be selected per-request via `llmConfig.model`.
 
 ### Moral Compass Framework
 

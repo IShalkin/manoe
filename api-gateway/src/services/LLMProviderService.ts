@@ -70,6 +70,8 @@ const MODEL_CONTEXT_LENGTHS: Record<string, number> = {
   "gemini-3.1-pro-preview": 1000000,
   "gemini-3.5-flash": 1000000,
   "gemini-3.1-flash-lite": 1000000,
+  // DeepSeek (current generation)
+  "deepseek-v3.2": 128000,
   // Default for unknown models (assume large context)
   "default": 128000,
 };
@@ -193,6 +195,11 @@ const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
   "claude-3-opus": 4096,
   "claude-opus-4": 16384,
   "claude-sonnet-4": 16384,
+  // Claude current generation (aligned with ModelsController catalog maxOutput)
+  "claude-opus-4-8": 128000,
+  "claude-sonnet-4-7": 64000,
+  "claude-sonnet-4-6": 64000,
+  "claude-haiku-4-5": 64000,
   // GPT-4 variants (OpenAI)
   "gpt-4": 8192,
   "gpt-4-0314": 8192,
@@ -222,6 +229,7 @@ const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
   "gemini-1.5-flash": 8192,
   // DeepSeek models
   "deepseek-v3": 8192,
+  "deepseek-v3.2": 8192,
   "deepseek-r1": 8192,
   // Default (conservative)
   "default": 4096,

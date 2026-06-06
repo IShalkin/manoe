@@ -23,7 +23,11 @@ import {
 
 /**
  * Model pricing in USD per 1K tokens
- * Updated pricing as of 2024
+ * Current-generation rates verified against official provider pricing (June 2026:
+ * ai.google.dev/gemini-api/docs/pricing). Gemini 3.x Pro uses the standard
+ * (<=200K-token) tier; long-context (>200K) requests are billed higher upstream
+ * but are approximated here at the standard rate. Legacy rows retained for
+ * cost attribution of historical runs.
  */
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   // OpenAI models (current generation)
@@ -59,13 +63,14 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "gemini-1.5-pro": { input: 0.00125, output: 0.005 },
   "gemini-1.5-flash": { input: 0.000075, output: 0.0003 },
   "gemini-2": { input: 0.00125, output: 0.005 },
-  "gemini-3.1-pro-preview": { input: 0.00125, output: 0.005 },
-  "gemini-3.5-flash": { input: 0.000075, output: 0.0003 },
-  "gemini-3.1-flash-lite": { input: 0.00004, output: 0.00015 },
+  "gemini-3.1-pro-preview": { input: 0.002, output: 0.012 },
+  "gemini-3.5-flash": { input: 0.0015, output: 0.009 },
+  "gemini-3.1-flash-lite": { input: 0.00025, output: 0.0015 },
   "gemini-3-pro": { input: 0.00125, output: 0.005 },
   "gemini-3-flash": { input: 0.000075, output: 0.0003 },
   // DeepSeek models
   "deepseek-v3": { input: 0.00014, output: 0.00028 },
+  "deepseek-v3.2": { input: 0.00014, output: 0.00028 },
   "deepseek-r1": { input: 0.00055, output: 0.00219 },
   // Moonshot/Kimi models (OpenRouter)
   "kimi-k2": { input: 0.0006, output: 0.0024 },

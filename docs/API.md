@@ -334,9 +334,10 @@ Get recommended models for a specific agent.
 {
   "agent": "architect",
   "recommendations": {
-    "openai": ["gpt-5.5"],
-    "claude": ["claude-opus-4-8", "claude-sonnet-4-7"],
-    "gemini": ["gemini-3.1-pro-preview"]
+    "openai": ["gpt-5.5", "gpt-5.4"],
+    "openrouter": ["openai/gpt-5.5", "anthropic/claude-opus-4.8", "google/gemini-3.1-pro-preview"],
+    "gemini": ["gemini-3.1-pro-preview", "gemini-3.5-flash"],
+    "claude": ["claude-opus-4-8"]
   }
 }
 ```
