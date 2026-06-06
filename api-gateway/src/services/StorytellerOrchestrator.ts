@@ -1956,63 +1956,69 @@ export class StorytellerOrchestrator {
     const softText = typeof draft?.content === "string" ? draft.content : "";
     if (!softText.trim()) return;
 
-    await this.publishEvent(runId, "scene_spice_start", { sceneNum, regions: regions.length });
+    try {
+      await this.publishEvent(runId, "scene_spice_start", { sceneNum, regions: regions.length });
 
-    let spiced = softText;
-    let amplifiedCount = 0;
-    for (const region of regions) {
-      try {
-        const { before, after } = contextAround(spiced, region.text, 400);
-        const messages = buildAmplifyMessages({
-          fragment: region.text,
-          style: region.style,
-          ceiling: spice.ceiling,
-          before,
-          after,
-        });
-        const result = await this.llmProvider.createCompletionWithRetry({
-          messages,
-          model: spice.model,
-          provider: spice.provider as LLMProvider,
-          apiKey: spice.apiKey,
-          temperature: 0.9,
-          maxTokens: 4096,
-          runId,
-          agentName: "spice",
-        });
-        const amplified = (result.content ?? "").trim();
-        if (amplified.length > 0) {
-          const next = spliceAmplified(spiced, region.text, amplified);
-          if (next !== spiced) {
-            spiced = next;
-            amplifiedCount++;
+      let spiced = softText;
+      let amplifiedCount = 0;
+      for (const region of regions) {
+        try {
+          const { before, after } = contextAround(spiced, region.text, 400);
+          const messages = buildAmplifyMessages({
+            fragment: region.text,
+            style: region.style,
+            ceiling: spice.ceiling,
+            before,
+            after,
+          });
+          const result = await this.llmProvider.createCompletionWithRetry({
+            messages,
+            model: spice.model,
+            provider: spice.provider as LLMProvider,
+            apiKey: spice.apiKey,
+            temperature: 0.9,
+            maxTokens: 4096,
+            runId,
+            agentName: "spice",
+          });
+          const amplified = (result.content ?? "").trim();
+          if (amplified.length > 0) {
+            const next = spliceAmplified(spiced, region.text, amplified);
+            if (next !== spiced) {
+              spiced = next;
+              amplifiedCount++;
+            }
           }
+        } catch (spiceError) {
+          $log.warn(`[StorytellerOrchestrator] applySpicePass: region amplify failed for scene ${sceneNum}, keeping soft text, runId: ${runId}`, spiceError);
         }
-      } catch (spiceError) {
-        $log.warn(`[StorytellerOrchestrator] applySpicePass: region amplify failed for scene ${sceneNum}, keeping soft text, runId: ${runId}`, spiceError);
       }
+
+      if (amplifiedCount === 0) {
+        await this.publishEvent(runId, "scene_spice_complete", { sceneNum, amplified: 0 });
+        return;
+      }
+
+      (draft as Record<string, unknown>).spicedContent = spiced;
+      state.drafts.set(sceneNum, draft as Record<string, unknown>);
+      state.updatedAt = new Date().toISOString();
+
+      await this.saveArtifact(runId, options.projectId, `spiced_scene_${sceneNum}`, {
+        sceneNum,
+        content: spiced,
+        wordCount: spiced.split(/\s+/).length,
+      });
+      await this.publishEvent(runId, "scene_spiced", {
+        sceneNum,
+        amplified: amplifiedCount,
+        finalContent: spiced,
+        wordCount: spiced.split(/\s+/).length,
+      });
+    } catch (spicePassError) {
+      // Optional enhancement: a failure here (e.g. Redis publish) must NEVER fail
+      // an already-finalized scene. Soft text remains the canon; just log and move on.
+      $log.warn(`[StorytellerOrchestrator] applySpicePass: spice pass failed for scene ${sceneNum}, keeping soft text, runId: ${runId}`, spicePassError);
     }
-
-    if (amplifiedCount === 0) {
-      await this.publishEvent(runId, "scene_spice_complete", { sceneNum, amplified: 0 });
-      return;
-    }
-
-    (draft as Record<string, unknown>).spicedContent = spiced;
-    state.drafts.set(sceneNum, draft as Record<string, unknown>);
-    state.updatedAt = new Date().toISOString();
-
-    await this.saveArtifact(runId, options.projectId, `spiced_scene_${sceneNum}`, {
-      sceneNum,
-      content: spiced,
-      wordCount: spiced.split(/\s+/).length,
-    });
-    await this.publishEvent(runId, "scene_spiced", {
-      sceneNum,
-      amplified: amplifiedCount,
-      finalContent: spiced,
-      wordCount: spiced.split(/\s+/).length,
-    });
   }
 
   /**
