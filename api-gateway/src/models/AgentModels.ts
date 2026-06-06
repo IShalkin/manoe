@@ -151,7 +151,7 @@ export class KeyConstraint {
   value: string;
 
   @Optional()
-  @Property()
+  @Enum(AgentType)
   source?: AgentType;
 
   @Required()
@@ -184,7 +184,7 @@ export class RawFact {
   fact: string;
 
   @Required()
-  @Property()
+  @Enum(AgentType)
   source: AgentType;
 
   @Required()
@@ -322,6 +322,16 @@ export interface SceneContract {
 }
 
 /**
+ * A spice fragment extracted from a draft (Slice 2). `text` is the soft fragment
+ * the smart model wrapped; the terminal pass re-locates it in the final scene by
+ * exact match and amplifies it. `style` is the per-fragment intensity label.
+ */
+export interface SpiceRegion {
+  text: string;
+  style: string;
+}
+
+/**
  * Generation state tracking
  */
 export class GenerationState {
@@ -422,6 +432,14 @@ export class GenerationState {
    */
   @Property()
   valueShifts: Map<number, number> = new Map();
+
+  /**
+   * Per-scene spice fragments (Slice 2), extracted immediately after drafting and
+   * detagged from the prose before any gate runs. Empty unless spiceConfig is set
+   * and the Writer emitted {{SPICE}} tags. Keyed by scene number.
+   */
+  @Property()
+  spiceRegions: Map<number, SpiceRegion[]> = new Map();
 
   /**
    * Current scene outline being processed
