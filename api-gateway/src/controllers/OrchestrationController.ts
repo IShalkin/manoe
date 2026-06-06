@@ -116,7 +116,6 @@ class GenerateRequestDTO {
   settings?: Record<string, unknown>;
 
   @Property()
-  @Groups("internal")
   @Description("Opt-in spice rewrite config (default off)")
   spiceConfig?: SpiceConfigDTO;
 
