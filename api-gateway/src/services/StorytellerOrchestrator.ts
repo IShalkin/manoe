@@ -14,7 +14,7 @@
 
 import { Service, Inject } from "@tsed/di";
 import { $log } from "@tsed/common";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import {
   GenerationPhase,
   LLMProvider,
@@ -29,6 +29,7 @@ import {
   KeyConstraint,
   RawFact,
   NarratorVoice,
+  SpiceRegion,
 } from "../models/AgentModels";
 import { LLMProviderService } from "./LLMProviderService";
 import { RedisStreamsService } from "./RedisStreamsService";
@@ -37,12 +38,14 @@ import { LangfuseService, AGENT_PROMPTS } from "./LangfuseService";
 import { SupabaseService, Character, Draft } from "./SupabaseService";
 import { MetricsService } from "./MetricsService";
 import { AgentFactory } from "../agents/AgentFactory";
-import { AgentContext } from "../agents/types";
+import { AgentContext, SpiceConfig } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
 import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
 import { assembleSceneContract } from "./StoryStateAssembler";
+import { applySpiceExtraction } from "./spiceParser";
+import { buildAmplifyMessages, spliceAmplified, contextAround } from "./SpiceRewriter";
 
 /**
  * Simple rate limiter for concurrent async operations
@@ -103,6 +106,8 @@ export interface GenerationOptions {
   settings?: Record<string, unknown>;
   /** Embedding API key for WorldBibleEmbeddingService (Gemini API key) */
   embeddingApiKey?: string;
+  /** Opt-in spice rewrite config (Slice 2). Absent = feature off. */
+  spiceConfig?: SpiceConfig;
 }
 
 /**
@@ -150,6 +155,8 @@ interface SceneDraft {
   semanticCheckError?: string;
   /** Similarity score (0-1) - higher means more similar to World Bible entries */
   contradictionScore?: number;
+  /** Terminal spice-amplified version of `content` (Slice 2). Output to reader; never canon. */
+  spicedContent?: string;
   /** Index signature for compatibility with state.drafts Map and Qdrant storage */
   [key: string]: string | number | boolean | undefined;
 }
@@ -200,7 +207,7 @@ export class StorytellerOrchestrator {
    * @returns Run ID
    */
   async startGeneration(options: GenerationOptions): Promise<string> {
-    const runId = uuidv4();
+    const runId = randomUUID();
     process.stdout.write(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}\n`);
     $log.info(`[StorytellerOrchestrator] startGeneration called, runId: ${runId}, projectId: ${options.projectId}`);
 
@@ -221,6 +228,7 @@ export class StorytellerOrchestrator {
       rawFactsLog: [],
       rollingSynopsis: [],
       valueShifts: new Map(),
+      spiceRegions: new Map(),
       lastArchivistScene: 0,
       isPaused: false,
       isCompleted: false,
@@ -1037,6 +1045,13 @@ export class StorytellerOrchestrator {
         await this.emitSceneFinal(runId, options.projectId, sceneNum + 1, "flagged_subthreshold", finalScore);
       }
 
+      // Slice 2: terminal spice pass — runs after the scene is finalized in SOFT
+      // form (all gates passed on clean text). Inert unless spiceConfig is set and
+      // the scene produced spice regions. Never fails the scene.
+      if (!this.shouldStop(runId)) {
+        await this.applySpicePass(runId, options, sceneNum + 1);
+      }
+
       // Slice 2: thread the achieved value-shift (scene N exit → N+1 entry) and
       // append a rolling-synopsis entry for the finalized scene.
       // valueShiftDelivered comes from the last in-loop critique (the final
@@ -1123,7 +1138,10 @@ export class StorytellerOrchestrator {
 
     const output = await agent.execute(context, options);
     // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
-    const response = this.stripFakeWordCount(output.content as string);
+    const rawResponse = this.stripFakeWordCount(output.content as string);
+    // Slice 2: extract spice fragments and DETAG before any gate sees the text.
+    // With spice off this only scrubs stray markup. SOFT text is the canon.
+    const response = applySpiceExtraction(state, sceneNum, rawResponse);
 
     const draft: SceneDraft = {
       sceneNum,
@@ -1368,6 +1386,11 @@ export class StorytellerOrchestrator {
         totalWordCount: combinedContent.split(/\s+/).length
       });
     }
+
+    // Slice 2: run spice extraction once over the FULL assembled scene so a region
+    // straddling a part boundary is reconciled. Detag before the draft is built so
+    // the SOFT text is what gets persisted and seen by every downstream gate.
+    combinedContent = applySpiceExtraction(state, sceneNum, combinedContent);
 
     // Create the final draft from combined content
     const draft: SceneDraft = {
@@ -1910,6 +1933,95 @@ export class StorytellerOrchestrator {
   }
 
   /**
+   * Slice 2 terminal spice pass. Runs AFTER the scene is finalized in SOFT form
+   * (already stored to Qdrant/Archivist). Only fires when spiceConfig is set and
+   * the scene has extracted regions. Amplifies each region via the uncensored
+   * provider, re-locates it in the final SOFT text by exact match, splices the
+   * amplified text in, stores spicedContent, and emits a replacement event.
+   * Any failure keeps the soft text (graceful degradation — never fails a scene).
+   */
+  private async applySpicePass(
+    runId: string,
+    options: GenerationOptions,
+    sceneNum: number
+  ): Promise<void> {
+    const spice = options.spiceConfig;
+    if (!spice) return;
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+    const regions = state.spiceRegions.get(sceneNum);
+    if (!regions || regions.length === 0) return;
+
+    const draft = state.drafts.get(sceneNum) as Record<string, unknown> | undefined;
+    const softText = typeof draft?.content === "string" ? draft.content : "";
+    if (!softText.trim()) return;
+
+    try {
+      await this.publishEvent(runId, "scene_spice_start", { sceneNum, regions: regions.length });
+
+      let spiced = softText;
+      let amplifiedCount = 0;
+      for (const region of regions) {
+        try {
+          const { before, after } = contextAround(spiced, region.text, 400);
+          const messages = buildAmplifyMessages({
+            fragment: region.text,
+            style: region.style,
+            ceiling: spice.ceiling,
+            before,
+            after,
+          });
+          const result = await this.llmProvider.createCompletionWithRetry({
+            messages,
+            model: spice.model,
+            provider: spice.provider as LLMProvider,
+            apiKey: spice.apiKey,
+            temperature: 0.9,
+            maxTokens: 4096,
+            runId,
+            agentName: "spice",
+          });
+          const amplified = (result.content ?? "").trim();
+          if (amplified.length > 0) {
+            const next = spliceAmplified(spiced, region.text, amplified);
+            if (next !== spiced) {
+              spiced = next;
+              amplifiedCount++;
+            }
+          }
+        } catch (spiceError) {
+          $log.warn(`[StorytellerOrchestrator] applySpicePass: region amplify failed for scene ${sceneNum}, keeping soft text, runId: ${runId}`, spiceError);
+        }
+      }
+
+      if (amplifiedCount === 0) {
+        await this.publishEvent(runId, "scene_spice_complete", { sceneNum, amplified: 0 });
+        return;
+      }
+
+      (draft as Record<string, unknown>).spicedContent = spiced;
+      state.drafts.set(sceneNum, draft as Record<string, unknown>);
+      state.updatedAt = new Date().toISOString();
+
+      await this.saveArtifact(runId, options.projectId, `spiced_scene_${sceneNum}`, {
+        sceneNum,
+        content: spiced,
+        wordCount: spiced.split(/\s+/).length,
+      });
+      await this.publishEvent(runId, "scene_spiced", {
+        sceneNum,
+        amplified: amplifiedCount,
+        finalContent: spiced,
+        wordCount: spiced.split(/\s+/).length,
+      });
+    } catch (spicePassError) {
+      // Optional enhancement: a failure here (e.g. Redis publish) must NEVER fail
+      // an already-finalized scene. Soft text remains the canon; just log and move on.
+      $log.warn(`[StorytellerOrchestrator] applySpicePass: spice pass failed for scene ${sceneNum}, keeping soft text, runId: ${runId}`, spicePassError);
+    }
+  }
+
+  /**
    * Validate polish output to prevent chunk loss and lazy polish notes
    * Returns true if polish is acceptable, false if we should fall back to pre-polish draft
    */
@@ -2082,6 +2194,7 @@ export class StorytellerOrchestrator {
         }
       }
     }
+
     console.log(`[extractRawFacts] Canonical names: ${Array.from(canonicalNames).join(', ')}`);
 
     // Patterns that capture meaningful character actions
@@ -2762,6 +2875,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           critiques: Object.fromEntries(state.critiques),
           revisionCount: Object.fromEntries(state.revisionCount),
           valueShifts: Object.fromEntries(state.valueShifts),
+          spiceRegions: Object.fromEntries(state.spiceRegions),
         };
 
         await this.supabase.saveRunArtifact({
@@ -2821,6 +2935,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
         const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
         const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
+        const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
 
         const state: GenerationState = {
           ...(savedState as unknown as GenerationState),
@@ -2835,6 +2950,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           ),
           valueShifts: new Map(
             Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
+          ),
+          spiceRegions: new Map(
+            Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
           ),
           isPaused: true, // Keep paused until explicitly resumed
         };
@@ -2898,6 +3016,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
           const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
           const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
           const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
+          const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
 
           const state: GenerationState = {
             ...(savedState as unknown as GenerationState),
@@ -2914,6 +3033,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
             ),
             valueShifts: new Map(
               Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
+            ),
+            spiceRegions: new Map(
+              Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
             ),
             isPaused: true, // Keep paused until explicitly resumed
           };
