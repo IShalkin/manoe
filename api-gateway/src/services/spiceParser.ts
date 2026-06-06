@@ -10,6 +10,8 @@
  * or {{/SPICE}} markup survive into the returned text.
  */
 
+import type { GenerationState } from "../models/AgentModels";
+
 export interface SpiceRegion {
   /** The soft fragment text the model wrapped (used to re-locate at spice time). */
   text: string;
@@ -73,4 +75,21 @@ export function extractSpiceRegions(raw: string): { soft: string; regions: Spice
   // Final safety net: scrub any markup that survived (orphan closes, garbage).
   soft = soft.replace(ANY_MARKUP_RE, "");
   return { soft, regions };
+}
+
+/**
+ * Orchestrator seam: extract regions from a freshly drafted scene, store any
+ * found regions on state (keyed by scene), and return the SOFT (detagged) text.
+ * Pure aside from the single state.spiceRegions write. Never throws.
+ */
+export function applySpiceExtraction(
+  state: GenerationState,
+  sceneNum: number,
+  raw: string
+): string {
+  const { soft, regions } = extractSpiceRegions(raw);
+  if (regions.length > 0) {
+    state.spiceRegions.set(sceneNum, regions);
+  }
+  return soft;
 }

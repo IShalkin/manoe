@@ -44,6 +44,7 @@ import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
 import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
 import { assembleSceneContract } from "./StoryStateAssembler";
+import { applySpiceExtraction } from "./spiceParser";
 
 /**
  * Simple rate limiter for concurrent async operations
@@ -1129,7 +1130,10 @@ export class StorytellerOrchestrator {
 
     const output = await agent.execute(context, options);
     // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
-    const response = this.stripFakeWordCount(output.content as string);
+    const rawResponse = this.stripFakeWordCount(output.content as string);
+    // Slice 2: extract spice fragments and DETAG before any gate sees the text.
+    // With spice off this only scrubs stray markup. SOFT text is the canon.
+    const response = applySpiceExtraction(state, sceneNum, rawResponse);
 
     const draft: SceneDraft = {
       sceneNum,
@@ -1374,6 +1378,11 @@ export class StorytellerOrchestrator {
         totalWordCount: combinedContent.split(/\s+/).length
       });
     }
+
+    // Slice 2: run spice extraction once over the FULL assembled scene so a region
+    // straddling a part boundary is reconciled. Detag before the draft is built so
+    // the SOFT text is what gets persisted and seen by every downstream gate.
+    combinedContent = applySpiceExtraction(state, sceneNum, combinedContent);
 
     // Create the final draft from combined content
     const draft: SceneDraft = {
