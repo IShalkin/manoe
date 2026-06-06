@@ -63,6 +63,29 @@ class LLMConfigDTO {
 }
 
 /**
+ * Spice Configuration DTO (Slice 2) - opt-in side config, default off
+ */
+class SpiceConfigDTO {
+  @Required()
+  @Enum(LLMProvider)
+  @Description("Provider for the spice rewrite (typically openrouter)")
+  provider: LLMProvider;
+
+  @Required()
+  @Description("Uncensored model name on the provider")
+  model: string;
+
+  @Required()
+  @Groups("internal")
+  @Description("API key for the spice provider (BYOK)")
+  apiKey: string;
+
+  @Property()
+  @Description("Base intensity ceiling for amplification")
+  ceiling?: string;
+}
+
+/**
  * Generation Request DTO - supports both new TypeScript format and legacy Python format
  */
 class GenerateRequestDTO {
@@ -91,6 +114,11 @@ class GenerateRequestDTO {
   @Groups("internal")
   @Description("Additional settings")
   settings?: Record<string, unknown>;
+
+  @Property()
+  @Groups("internal")
+  @Description("Opt-in spice rewrite config (default off)")
+  spiceConfig?: SpiceConfigDTO;
 
   // Legacy Python format (snake_case)
   @Property()
@@ -309,6 +337,7 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
       mode,
       settings: request.settings,
       embeddingApiKey,
+      spiceConfig: request.spiceConfig,
     };
 
     try {

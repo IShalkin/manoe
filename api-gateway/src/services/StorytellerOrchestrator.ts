@@ -37,7 +37,7 @@ import { LangfuseService, AGENT_PROMPTS } from "./LangfuseService";
 import { SupabaseService, Character, Draft } from "./SupabaseService";
 import { MetricsService } from "./MetricsService";
 import { AgentFactory } from "../agents/AgentFactory";
-import { AgentContext } from "../agents/types";
+import { AgentContext, SpiceConfig } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
@@ -103,6 +103,8 @@ export interface GenerationOptions {
   settings?: Record<string, unknown>;
   /** Embedding API key for WorldBibleEmbeddingService (Gemini API key) */
   embeddingApiKey?: string;
+  /** Opt-in spice rewrite config (Slice 2). Absent = feature off. */
+  spiceConfig?: SpiceConfig;
 }
 
 /**
