@@ -1,0 +1,88 @@
+# =============================================================================
+# MANOE narrative-prompt evaluation — CI VARIANT (OpenAI, non-Bedrock)
+# =============================================================================
+# Why a separate file: the local `promptfooconfig.yaml` runs on corporate AWS
+# Bedrock-via-SSO, which is NOT available on GitHub Actions ubuntu runners.
+# This variant runs the SAME Writer DRAFTING prompt under test, but on OpenAI,
+# reading OPENAI_API_KEY from the environment (a repo secret in CI).
+#
+# Run locally:   cd api-gateway/evals && \
+#                OPENAI_API_KEY=sk-... npx promptfoo@latest eval -c promptfooconfig.ci.yaml
+# Run in CI:     see .github/workflows/ci.yml job `eval-golden` (non-blocking).
+#
+# Model ids: confirm against the account that owns the secret. `gpt-4.1-mini`
+# is the assumed current cheap id for both the writer-under-test and the judge.
+# (NOTE: the in-code RUNTIME judge default is `gpt-5.4-mini` in
+#  ../src/services/EvaluationService.ts — that is a different, runtime concern;
+#  do not conflate it with this offline prompt-eval judge.)
+#
+# This config CONSUMES the curated golden set (golden/scenes.yaml and
+# golden/faithfulness-pairs.yaml) instead of inlining test cases.
+# Schema ref: https://promptfoo.dev/docs/configuration/reference/
+# =============================================================================
+
+description: "MANOE narrative-prompt quality eval — CI (OpenAI)"
+
+# -----------------------------------------------------------------------------
+# Providers — OpenAI only (CI has no Bedrock access).
+#   1. writer-under-test : runs the prompt and produces the scene.
+#   2. judge (defaultTest): grades llm-rubric assertions.
+# OPENAI_API_KEY is read from the environment by the OpenAI provider.
+# -----------------------------------------------------------------------------
+providers:
+  - id: openai:gpt-4.1-mini
+    label: writer-under-test
+    config:
+      temperature: 0.8 # MANOE drafts at higher temp for prose variety
+      max_tokens: 2048
+
+defaultTest:
+  options:
+    # Cheap judge to keep CI cost down; same family as the model-under-test.
+    provider: openai:gpt-4.1-mini
+
+# -----------------------------------------------------------------------------
+# Prompt under test — IDENTICAL to promptfooconfig.yaml (the real MANOE Writer
+# DRAFTING prompt, transcribed from ../src/agents/WriterAgent.ts). Keep in sync.
+# -----------------------------------------------------------------------------
+prompts:
+  - |
+    You are the Writer, a skilled prose craftsman in an autonomous story
+    generation pipeline. Your role is to transform outlines into vivid,
+    engaging prose that brings the story to life. Maintain consistency with
+    established facts.
+
+    CRITICAL INSTRUCTION: You are an autonomous agent. DO NOT ask the user for
+    feedback. DO NOT offer options (A/B/C). Always execute the best option
+    immediately. Never output meta-commentary like "Here is the revised scene".
+    Just output the story content directly.
+
+    Write Scene {{sceneNum}}: "{{sceneTitle}}"
+
+    Scene outline:
+    {{sceneOutline}}
+
+    SCOPE CONTROL (CRITICAL):
+    - Cover ONLY what's in this scene outline - do not advance the plot beyond it.
+    - FORBIDDEN: depicting events/revelations/conflicts from later scenes.
+    - End condition: the last paragraph MUST land on the specified hook.
+
+    Requirements:
+    - Follow the emotional beat and conflict specified.
+    - Maintain character voices and consistency.
+    - Include sensory details and atmosphere.
+    - End with the specified hook (not before, not after).
+    - Target word count: {{wordCount}} words.
+
+    KEY CONSTRAINTS (MUST NOT VIOLATE):
+    {{keyConstraints}}
+
+# -----------------------------------------------------------------------------
+# Test cases — externalized to the curated golden set. promptfoo loads each
+# referenced YAML file as a list of test cases (vars + assert per case).
+#   - golden/scenes.yaml           : writer-quality cases (Task 2)
+#   - golden/faithfulness-pairs.yaml: faithful-vs-unfaithful discrimination (Task 3)
+# -----------------------------------------------------------------------------
+tests:
+  - file://golden/scenes.yaml
+  - file://golden/faithfulness-pairs.yaml
