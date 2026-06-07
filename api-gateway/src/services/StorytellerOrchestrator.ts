@@ -48,44 +48,7 @@ import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
 import { assembleSceneContract } from "./StoryStateAssembler";
 import { applySpiceExtraction } from "./spiceParser";
 import { buildAmplifyMessages, spliceAmplified, contextAround } from "./SpiceRewriter";
-
-/**
- * Simple rate limiter for concurrent async operations
- * Limits the number of concurrent promises to avoid hitting API rate limits
- */
-function createRateLimiter(concurrency: number) {
-  let activeCount = 0;
-  const queue: Array<() => void> = [];
-
-  const next = () => {
-    if (queue.length > 0 && activeCount < concurrency) {
-      activeCount++;
-      const resolve = queue.shift()!;
-      resolve();
-    }
-  };
-
-  return <T>(fn: () => Promise<T>): Promise<T> => {
-    return new Promise<T>((resolve, reject) => {
-      const run = () => {
-        fn()
-          .then(resolve)
-          .catch(reject)
-          .finally(() => {
-            activeCount--;
-            next();
-          });
-      };
-
-      if (activeCount < concurrency) {
-        activeCount++;
-        run();
-      } else {
-        queue.push(run);
-      }
-    });
-  };
-}
+import { createRateLimiter } from "../utils/rateLimiter";
 
 /**
  * LLM Configuration for generation

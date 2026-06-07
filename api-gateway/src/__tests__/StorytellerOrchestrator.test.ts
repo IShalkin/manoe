@@ -1,28 +1,14 @@
 /**
  * Unit Tests for StorytellerOrchestrator
  *
- * Tests the core orchestration logic without making actual LLM calls.
- * 
- * DESIGN CHOICE: These tests use local function implementations that mirror
- * StorytellerOrchestrator logic, rather than importing the actual class.
- * This approach:
- * 
- * 1. Avoids complex dependency injection (agents, Redis, Langfuse, Supabase)
- * 2. Enables fast, isolated unit tests without external services
- * 3. Tests the pure logic of helper functions independently
- * 
- * TRADE-OFF: Changes to StorytellerOrchestrator methods won't automatically 
- * break these tests. To ensure production code stays in sync:
- * - Run integration tests that use actual orchestrator instances
- * - Review these tests when modifying orchestrator helper methods
- * 
- * NOTE: extractStringValue() here checks common narrative fields.
- * Production code may check additional fields like 'theme', 'type', 'structure'.
- * Keep field lists synchronized when extending either implementation.
+ * Tests use real production helpers from utils/ (extracted from the orchestrator)
+ * to ensure tests break when production logic changes.
  */
 
+import { createRateLimiter } from "../utils/rateLimiter";
+
 // ============================================================================
-// TYPE DEFINITIONS (mirrors StorytellerOrchestrator types)
+// TYPE DEFINITIONS (used by state management describe block)
 // ============================================================================
 
 interface KeyConstraint {
@@ -56,45 +42,8 @@ interface GenerationState {
 }
 
 // ============================================================================
-// LOCAL IMPLEMENTATIONS (mirrors StorytellerOrchestrator logic)
+// LOCAL IMPLEMENTATIONS (shadow copies — to be removed in subsequent tasks)
 // ============================================================================
-
-/**
- * Create rate limiter for concurrent operations
- */
-function createRateLimiter(concurrency: number) {
-  let activeCount = 0;
-  const queue: Array<() => void> = [];
-
-  const next = () => {
-    if (queue.length > 0 && activeCount < concurrency) {
-      activeCount++;
-      const resolve = queue.shift()!;
-      resolve();
-    }
-  };
-
-  return <T>(fn: () => Promise<T>): Promise<T> => {
-    return new Promise<T>((resolve, reject) => {
-      const run = () => {
-        fn()
-          .then(resolve)
-          .catch(reject)
-          .finally(() => {
-            activeCount--;
-            next();
-          });
-      };
-
-      if (activeCount < concurrency) {
-        activeCount++;
-        run();
-      } else {
-        queue.push(run);
-      }
-    });
-  };
-}
 
 /**
  * Extract string value from a field that might be string or object
