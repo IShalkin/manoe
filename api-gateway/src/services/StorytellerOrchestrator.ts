@@ -320,10 +320,19 @@ export class StorytellerOrchestrator {
       // checkpoint rather than mid agent/LLM call.
       state.inFlight = true;
 
+      // Phase-based regeneration (Decision 1/2): when start_from_phase is set,
+      // seed earlier phases from the previous run, then begin the chain there.
+      const startIdx = this.resolveStartPhaseIndex(options.startFromPhase);
+      if (startIdx > 0 && options.previousRunId) {
+        await this.seedStateFromPreviousRun(state, options.previousRunId, startIdx);
+      }
+
       // Phase 1: Genesis
-      $log.info(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
-      await this.runGenesisPhase(runId, options);
-      $log.info(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
+      if (startIdx <= 0) {
+        $log.info(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
+        await this.runGenesisPhase(runId, options);
+        $log.info(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
+      }
       state.inFlight = false; // safe checkpoint
       const shouldStopAfterGenesis = this.shouldStop(runId);
       $log.info(`[StorytellerOrchestrator] runGeneration: shouldStop after Genesis = ${shouldStopAfterGenesis}, runId: ${runId}`);
@@ -333,40 +342,53 @@ export class StorytellerOrchestrator {
       }
 
       // Phase 2: Characters
-      $log.info(`[StorytellerOrchestrator] runGeneration: about to call runCharactersPhase, runId: ${runId}`);
-      state.inFlight = true;
-      await this.runCharactersPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
-      $log.info(`[StorytellerOrchestrator] runGeneration: runCharactersPhase completed, runId: ${runId}`);
+      if (startIdx <= 1) {
+        $log.info(`[StorytellerOrchestrator] runGeneration: about to call runCharactersPhase, runId: ${runId}`);
+        state.inFlight = true;
+        await this.runCharactersPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+        $log.info(`[StorytellerOrchestrator] runGeneration: runCharactersPhase completed, runId: ${runId}`);
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 2.5: Narrator design (voice/POV) — depends on characters + narrative.
-      state.inFlight = true;
-      await this.runNarratorDesignPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
+      if (startIdx <= 2) {
+        state.inFlight = true;
+        await this.runNarratorDesignPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 3: Worldbuilding
-      state.inFlight = true;
-      await this.runWorldbuildingPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
+      if (startIdx <= 3) {
+        state.inFlight = true;
+        await this.runWorldbuildingPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 4: Outlining
-      state.inFlight = true;
-      await this.runOutliningPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
+      if (startIdx <= 4) {
+        state.inFlight = true;
+        await this.runOutliningPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 5: Advanced Planning (optional)
-      state.inFlight = true;
-      await this.runAdvancedPlanningPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
+      if (startIdx <= 5) {
+        state.inFlight = true;
+        await this.runAdvancedPlanningPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 6-9: Drafting → Critique → Revision → Polish (per scene).
       // runDraftingLoop manages its own per-scene inFlight checkpoints.
-      await this.runDraftingLoop(runId, options);
+      // Index 6 is the max — always runs unless start is somehow past it (impossible).
+      if (startIdx <= 6) {
+        await this.runDraftingLoop(runId, options);
+      }
       if (this.shouldStop(runId)) return;
 
       // Persist the run_config reproducibility artifact (#162).
