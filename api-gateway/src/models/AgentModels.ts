@@ -15,6 +15,7 @@
 
 import { Property, Required, Enum, Optional, CollectionOf } from "@tsed/schema";
 import { GenerationPhase } from "./LLMModels";
+import { RunConfigArtifact } from "../utils/runConfig";
 
 /**
  * Agent types in the MANOE system
@@ -481,6 +482,12 @@ export class GenerationState {
 
   @Property()
   error?: string;
+
+  @Optional() @Property()
+  seed?: number;
+
+  @Optional() @Property()
+  runConfig?: RunConfigArtifact;
 
   @Property()
   startedAt: string = new Date().toISOString();

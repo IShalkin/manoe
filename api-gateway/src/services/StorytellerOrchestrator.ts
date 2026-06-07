@@ -41,6 +41,7 @@ import { MetricsService } from "./MetricsService";
 import { AgentFactory } from "../agents/AgentFactory";
 import { AgentContext, SpiceConfig } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
+import { createRunConfig, recordPhase, RunConfigArtifact } from "../utils/runConfig";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
 import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
@@ -237,8 +238,31 @@ export class StorytellerOrchestrator {
       updatedAt: new Date().toISOString(),
     };
 
+    // Generate a per-run seed for reproducibility capture (issue #162).
+    const seed = Math.floor(Math.random() * 2_147_483_647);
+    state.seed = seed;
+    state.runConfig = createRunConfig(
+      runId,
+      seed,
+      {
+        provider: String(options.llmConfig?.provider ?? "openai"),
+        model: String(options.llmConfig?.model ?? ""),
+        temperature: options.llmConfig?.temperature ?? 0.7,
+      }
+    );
+    // Thread the seed into every agent LLM call via the llmConfig object (#162).
+    if (options.llmConfig && state.seed != null) {
+      (options.llmConfig as { seed?: number }).seed = state.seed;
+    }
+
     this.activeRuns.set(runId, state);
     $log.info(`[StorytellerOrchestrator] startGeneration: state initialized and stored, runId: ${runId}`);
+
+    // Wire the per-call metadata sink onto all agent singletons (#162).
+    // Agents are cached singletons; the sink uses runId to look up the correct state.
+    for (const agentType of Object.values(AgentType)) {
+      this.agentFactory.getAgent(agentType).onLLMCall = this.recordLLMMeta.bind(this);
+    }
 
     // Embedding API Key Resolution (in priority order):
     // 1. Dedicated embedding API key from frontend settings (always treated as Gemini key)
@@ -370,6 +394,9 @@ export class StorytellerOrchestrator {
       // runDraftingLoop manages its own per-scene inFlight checkpoints.
       await this.runDraftingLoop(runId, options);
       if (this.shouldStop(runId)) return;
+
+      // Persist the run_config reproducibility artifact (#162).
+      await this.persistRunConfig(runId);
 
       // Mark as completed
       state.isCompleted = true;
@@ -2560,6 +2587,36 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
   }
 
   /**
+   * Record per-phase resolved model + sampling params into the run's runConfig (#162).
+   * Bound to all agent sinks; uses runId to look up the correct activeRun state.
+   */
+  private recordLLMMeta(runId: string, meta: {
+    provider: string; requestedModel: string; resolvedModel: string;
+    temperature: number; seed?: number; maxTokens: number; phase: string;
+  }): void {
+    const st = this.activeRuns.get(runId);
+    if (!st?.runConfig) return;
+    recordPhase(st.runConfig, meta.phase, {
+      provider: meta.provider,
+      requestedModel: meta.requestedModel,
+      resolvedModel: meta.resolvedModel,
+      temperature: meta.temperature,
+      seed: meta.seed,
+      maxTokens: meta.maxTokens,
+    }, new Date().toISOString());
+  }
+
+  /**
+   * Persist the accumulated run_config artifact to Supabase (#162).
+   * Called at run completion and on error so a partial run is still diagnosable.
+   */
+  private async persistRunConfig(runId: string): Promise<void> {
+    const st = this.activeRuns.get(runId);
+    if (!st?.runConfig) return;
+    await this.saveArtifact(runId, st.projectId, "run_config", st.runConfig as unknown);
+  }
+
+  /**
    * Publish phase start event
    */
   private async publishPhaseStart(runId: string, phase: GenerationPhase): Promise<void> {
@@ -2643,6 +2700,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
     // Score the trace as failed for analytics
     this.langfuse.scoreTrace(runId, "success", 0, `Generation failed: ${errorMessage}`);
+
+    // Persist whatever run_config was accumulated so a partial run is still diagnosable (#162).
+    await this.persistRunConfig(runId);
   }
 
   /**
