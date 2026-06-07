@@ -20,6 +20,20 @@ import { createRunConfig } from "../utils/runConfig";
 
 type AnyObj = Record<string, unknown>;
 
+/** Signature of the private orchestrator recorder under test (issue #162). */
+type RecordLLMMeta = (
+  runId: string,
+  meta: {
+    provider: string;
+    requestedModel: string;
+    resolvedModel: string;
+    temperature: number;
+    seed?: number;
+    maxTokens: number;
+    phase: string;
+  }
+) => void;
+
 function newOrchestrator(): AnyObj {
   return new StorytellerOrchestrator() as unknown as AnyObj;
 }
@@ -28,7 +42,7 @@ describe("recordLLMMeta (run_config capture, issue #162)", () => {
   it("does nothing when no state exists for the runId", () => {
     const o = newOrchestrator();
     expect(() =>
-      (o.recordLLMMeta as Function)("no-such-run", {
+      (o.recordLLMMeta as RecordLLMMeta)("no-such-run", {
         provider: "openai",
         requestedModel: "gpt-5.5",
         resolvedModel: "gpt-5.5-2026-05-01",
@@ -49,7 +63,7 @@ describe("recordLLMMeta (run_config capture, issue #162)", () => {
     const fakeState = { projectId: "proj-1", runConfig: config };
     (o.activeRuns as Map<string, unknown>).set(runId, fakeState);
 
-    (o.recordLLMMeta as Function)(runId, {
+    (o.recordLLMMeta as RecordLLMMeta)(runId, {
       provider: "openai",
       requestedModel: "gpt-5.5",
       resolvedModel: "gpt-5.5-2026-05-01",
@@ -75,7 +89,7 @@ describe("recordLLMMeta (run_config capture, issue #162)", () => {
     (o.activeRuns as Map<string, unknown>).set(runId, fakeState);
 
     // First call (initial draft)
-    (o.recordLLMMeta as Function)(runId, {
+    (o.recordLLMMeta as RecordLLMMeta)(runId, {
       provider: "anthropic",
       requestedModel: "claude-opus-4-5",
       resolvedModel: "claude-opus-4-5-20250514",
@@ -86,7 +100,7 @@ describe("recordLLMMeta (run_config capture, issue #162)", () => {
     });
 
     // Second call (revision)
-    (o.recordLLMMeta as Function)(runId, {
+    (o.recordLLMMeta as RecordLLMMeta)(runId, {
       provider: "anthropic",
       requestedModel: "claude-opus-4-5",
       resolvedModel: "claude-opus-4-5-20250601",
@@ -108,7 +122,7 @@ describe("recordLLMMeta (run_config capture, issue #162)", () => {
     (o.activeRuns as Map<string, unknown>).set(runId, { projectId: "proj-3" });
 
     expect(() =>
-      (o.recordLLMMeta as Function)(runId, {
+      (o.recordLLMMeta as RecordLLMMeta)(runId, {
         provider: "openai",
         requestedModel: "gpt-5.5",
         resolvedModel: "gpt-5.5-2026-05-01",
