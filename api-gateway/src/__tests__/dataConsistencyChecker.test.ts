@@ -1,387 +1,144 @@
-/**
- * Unit Tests for DataConsistencyChecker Logic
- * 
- * Tests the data consistency verification logic without importing the actual module.
- * These tests verify the logic for detecting orphaned vectors and missing embeddings.
- */
+import { DataConsistencyChecker } from "../utils/dataConsistencyChecker";
 
-describe("DataConsistencyChecker Logic", () => {
-  describe("ConsistencyCheckResult structure", () => {
-    interface ConsistencyCheckResult {
-      supabaseCount: number;
-      qdrantCount: number;
-      orphanedVectorIds: string[];
-      missingEmbeddingIds: string[];
-      isConsistent: boolean;
-    }
+// Minimal fakes returning exactly the fields the real methods read.
+function makeFakes(opts: {
+  characters?: { id: string; qdrant_id?: string }[];
+  worldbuilding?: { id: string; element_type?: string; qdrant_id?: string }[];
+  drafts?: { id: string; scene_number: number; qdrant_id?: string }[];
+  qChars?: { character: { id?: string }; qdrantPointId: string; name?: string }[];
+  qWb?: { element: { id?: string }; qdrantPointId: string; elementType?: string }[];
+  qScenes?: { scene: { id?: string }; qdrantPointId: string; sceneNumber?: number }[];
+  projects?: { id: string }[];
+} = {}) {
+  const supabase = {
+    getCharacters: jest.fn(async () => opts.characters ?? []),
+    getWorldbuilding: jest.fn(async () => opts.worldbuilding ?? []),
+    getDrafts: jest.fn(async () => opts.drafts ?? []),
+    listProjects: jest.fn(async (_page: number, _size: number) => ({ projects: opts.projects ?? [] })),
+  };
+  const qdrant = {
+    getProjectCharacters: jest.fn(async () => opts.qChars ?? []),
+    getProjectWorldbuilding: jest.fn(async () => opts.qWb ?? []),
+    getProjectScenes: jest.fn(async () => opts.qScenes ?? []),
+    storeCharacter: jest.fn(async () => undefined),
+    storeWorldbuilding: jest.fn(async () => undefined),
+    storeScene: jest.fn(async () => undefined),
+  };
+  return { supabase, qdrant };
+}
 
-    it("should have correct structure for healthy result", () => {
-      const result: ConsistencyCheckResult = {
-        supabaseCount: 10,
-        qdrantCount: 10,
-        orphanedVectorIds: [],
-        missingEmbeddingIds: [],
-        isConsistent: true,
-      };
-
-      expect(result.supabaseCount).toBe(10);
-      expect(result.qdrantCount).toBe(10);
-      expect(result.orphanedVectorIds).toHaveLength(0);
-      expect(result.missingEmbeddingIds).toHaveLength(0);
-      expect(result.isConsistent).toBe(true);
+describe("DataConsistencyChecker.checkProjectConsistency (real class)", () => {
+  it("reports a fully consistent project", async () => {
+    const { supabase, qdrant } = makeFakes({
+      characters: [{ id: "c1", qdrant_id: "q1" }],
+      worldbuilding: [{ id: "w1", qdrant_id: "qw1" }],
+      drafts: [{ id: "d1", scene_number: 1, qdrant_id: "qs1" }],
+      qChars: [{ character: { id: "c1" }, qdrantPointId: "q1" }],
+      qWb: [{ element: { id: "w1" }, qdrantPointId: "qw1" }],
+      qScenes: [{ scene: { id: "d1" }, qdrantPointId: "qs1" }],
     });
-
-    it("should have correct structure for inconsistent result", () => {
-      const result: ConsistencyCheckResult = {
-        supabaseCount: 10,
-        qdrantCount: 12,
-        orphanedVectorIds: ["orphan-1", "orphan-2"],
-        missingEmbeddingIds: ["missing-1"],
-        isConsistent: false,
-      };
-
-      expect(result.supabaseCount).toBe(10);
-      expect(result.qdrantCount).toBe(12);
-      expect(result.orphanedVectorIds).toHaveLength(2);
-      expect(result.missingEmbeddingIds).toHaveLength(1);
-      expect(result.isConsistent).toBe(false);
-    });
+    const checker = new DataConsistencyChecker(supabase as never, qdrant as never);
+    const report = await checker.checkProjectConsistency("p1");
+    expect(report.summary.isConsistent).toBe(true);
+    expect(report.summary.orphanedVectors).toBe(0);
+    expect(report.summary.missingEmbeddings).toBe(0);
   });
 
-  describe("consistency calculation logic", () => {
-    const calculateConsistency = (
-      orphanedCount: number,
-      missingCount: number
-    ): boolean => {
-      return orphanedCount === 0 && missingCount === 0;
-    };
-
-    it("should return true when no issues", () => {
-      expect(calculateConsistency(0, 0)).toBe(true);
+  it("detects an orphaned character vector (in Qdrant, absent from Supabase)", async () => {
+    const { supabase, qdrant } = makeFakes({
+      characters: [{ id: "c1", qdrant_id: "q1" }],
+      qChars: [
+        { character: { id: "c1" }, qdrantPointId: "q1" },
+        { character: { id: "c2" }, qdrantPointId: "q2-orphan" },
+      ],
     });
-
-    it("should return false when there are orphaned vectors", () => {
-      expect(calculateConsistency(2, 0)).toBe(false);
-    });
-
-    it("should return false when there are missing embeddings", () => {
-      expect(calculateConsistency(0, 2)).toBe(false);
-    });
-
-    it("should return false when both issues exist", () => {
-      expect(calculateConsistency(1, 1)).toBe(false);
-    });
+    const checker = new DataConsistencyChecker(supabase as never, qdrant as never);
+    const report = await checker.checkProjectConsistency("p1");
+    expect(report.checks.characters.orphanedVectorIds).toContain("q2-orphan");
+    expect(report.summary.isConsistent).toBe(false);
   });
 
-  describe("orphaned vector detection logic", () => {
-    const findOrphanedVectors = (
-      supabaseIds: string[],
-      qdrantIds: string[]
-    ): string[] => {
-      const supabaseIdSet = new Set(supabaseIds);
-      return qdrantIds.filter(id => !supabaseIdSet.has(id));
-    };
-
-    it("should return empty array when all vectors have matching records", () => {
-      const supabaseIds = ["id-1", "id-2", "id-3"];
-      const qdrantIds = ["id-1", "id-2", "id-3"];
-      expect(findOrphanedVectors(supabaseIds, qdrantIds)).toHaveLength(0);
+  it("treats a Qdrant point with no inner id as orphaned", async () => {
+    const { supabase, qdrant } = makeFakes({
+      worldbuilding: [{ id: "w1", qdrant_id: "qw1" }],
+      qWb: [
+        { element: { id: "w1" }, qdrantPointId: "qw1" },
+        { element: {}, qdrantPointId: "qw-orphan" },
+      ],
     });
-
-    it("should detect orphaned vectors", () => {
-      const supabaseIds = ["id-1", "id-2"];
-      const qdrantIds = ["id-1", "id-2", "id-3", "id-4"];
-      const orphaned = findOrphanedVectors(supabaseIds, qdrantIds);
-      expect(orphaned).toHaveLength(2);
-      expect(orphaned).toContain("id-3");
-      expect(orphaned).toContain("id-4");
-    });
-
-    it("should handle empty supabase records", () => {
-      const supabaseIds: string[] = [];
-      const qdrantIds = ["id-1", "id-2"];
-      const orphaned = findOrphanedVectors(supabaseIds, qdrantIds);
-      expect(orphaned).toHaveLength(2);
-    });
-
-    it("should handle empty qdrant vectors", () => {
-      const supabaseIds = ["id-1", "id-2"];
-      const qdrantIds: string[] = [];
-      const orphaned = findOrphanedVectors(supabaseIds, qdrantIds);
-      expect(orphaned).toHaveLength(0);
-    });
+    const checker = new DataConsistencyChecker(supabase as never, qdrant as never);
+    const report = await checker.checkProjectConsistency("p1");
+    expect(report.checks.worldbuilding.orphanedVectorIds).toContain("qw-orphan");
   });
 
-  describe("missing embedding detection logic", () => {
-    interface EntityWithQdrantId {
-      id: string;
-      qdrant_id?: string | null;
-    }
-
-    const findMissingEmbeddings = (entities: EntityWithQdrantId[]): string[] => {
-      return entities
-        .filter(entity => !entity.qdrant_id)
-        .map(entity => entity.id);
-    };
-
-    it("should return empty array when all entities have embeddings", () => {
-      const entities: EntityWithQdrantId[] = [
-        { id: "entity-1", qdrant_id: "qdrant-1" },
-        { id: "entity-2", qdrant_id: "qdrant-2" },
-      ];
-      expect(findMissingEmbeddings(entities)).toHaveLength(0);
+  it("detects a missing embedding (Supabase row without qdrant_id)", async () => {
+    const { supabase, qdrant } = makeFakes({
+      characters: [{ id: "c1" }], // no qdrant_id
+      qChars: [],
     });
-
-    it("should detect entities without embeddings", () => {
-      const entities: EntityWithQdrantId[] = [
-        { id: "entity-1", qdrant_id: "qdrant-1" },
-        { id: "entity-2", qdrant_id: null },
-        { id: "entity-3" },
-      ];
-      const missing = findMissingEmbeddings(entities);
-      expect(missing).toHaveLength(2);
-      expect(missing).toContain("entity-2");
-      expect(missing).toContain("entity-3");
-    });
-
-    it("should handle empty entity list", () => {
-      const entities: EntityWithQdrantId[] = [];
-      expect(findMissingEmbeddings(entities)).toHaveLength(0);
-    });
-
-    it("should handle all entities missing embeddings", () => {
-      const entities: EntityWithQdrantId[] = [
-        { id: "entity-1" },
-        { id: "entity-2", qdrant_id: null },
-      ];
-      const missing = findMissingEmbeddings(entities);
-      expect(missing).toHaveLength(2);
-    });
+    const checker = new DataConsistencyChecker(supabase as never, qdrant as never);
+    const report = await checker.checkProjectConsistency("p1");
+    expect(report.checks.characters.missingEmbeddingIds).toEqual(["c1"]);
+    expect(report.summary.missingEmbeddings).toBe(1);
   });
 
-  describe("summary aggregation logic", () => {
-    interface CheckResult {
-      orphanedVectorIds: string[];
-      missingEmbeddingIds: string[];
-      isConsistent: boolean;
-    }
-
-    const aggregateSummary = (checks: CheckResult[]): {
-      totalOrphanedVectors: number;
-      totalMissingEmbeddings: number;
-      isConsistent: boolean;
-    } => {
-      const totalOrphanedVectors = checks.reduce(
-        (sum, check) => sum + check.orphanedVectorIds.length,
-        0
-      );
-      const totalMissingEmbeddings = checks.reduce(
-        (sum, check) => sum + check.missingEmbeddingIds.length,
-        0
-      );
-      const isConsistent = checks.every(check => check.isConsistent);
-
-      return {
-        totalOrphanedVectors,
-        totalMissingEmbeddings,
-        isConsistent,
-      };
-    };
-
-    it("should aggregate zero issues correctly", () => {
-      const checks: CheckResult[] = [
-        { orphanedVectorIds: [], missingEmbeddingIds: [], isConsistent: true },
-        { orphanedVectorIds: [], missingEmbeddingIds: [], isConsistent: true },
-      ];
-      const summary = aggregateSummary(checks);
-      expect(summary.totalOrphanedVectors).toBe(0);
-      expect(summary.totalMissingEmbeddings).toBe(0);
-      expect(summary.isConsistent).toBe(true);
+  it("detects an orphaned scene vector", async () => {
+    const { supabase, qdrant } = makeFakes({
+      drafts: [{ id: "d1", scene_number: 1, qdrant_id: "qs1" }],
+      qScenes: [
+        { scene: { id: "d1" }, qdrantPointId: "qs1" },
+        { scene: { id: "d3" }, qdrantPointId: "qs3-orphan" },
+      ],
     });
+    const checker = new DataConsistencyChecker(supabase as never, qdrant as never);
+    const report = await checker.checkProjectConsistency("p1");
+    expect(report.checks.scenes.orphanedVectorIds).toContain("qs3-orphan");
+  });
+});
 
-    it("should aggregate orphaned vectors correctly", () => {
-      const checks: CheckResult[] = [
-        { orphanedVectorIds: ["o1", "o2"], missingEmbeddingIds: [], isConsistent: false },
-        { orphanedVectorIds: ["o3"], missingEmbeddingIds: [], isConsistent: false },
-      ];
-      const summary = aggregateSummary(checks);
-      expect(summary.totalOrphanedVectors).toBe(3);
-      expect(summary.isConsistent).toBe(false);
+describe("DataConsistencyChecker.checkGlobalConsistency (real class)", () => {
+  it("aggregates per-project reports, counts inconsistent ones", async () => {
+    // Single project with a missing embedding — produces one inconsistent report
+    const { supabase, qdrant } = makeFakes({
+      projects: [{ id: "p1" }],
+      characters: [{ id: "c1" }], // no qdrant_id -> missing embedding
+      qChars: [],
     });
-
-    it("should aggregate missing embeddings correctly", () => {
-      const checks: CheckResult[] = [
-        { orphanedVectorIds: [], missingEmbeddingIds: ["m1"], isConsistent: false },
-        { orphanedVectorIds: [], missingEmbeddingIds: ["m2", "m3"], isConsistent: false },
-      ];
-      const summary = aggregateSummary(checks);
-      expect(summary.totalMissingEmbeddings).toBe(3);
-      expect(summary.isConsistent).toBe(false);
-    });
-
-    it("should mark as inconsistent if any check is inconsistent", () => {
-      const checks: CheckResult[] = [
-        { orphanedVectorIds: [], missingEmbeddingIds: [], isConsistent: true },
-        { orphanedVectorIds: ["o1"], missingEmbeddingIds: [], isConsistent: false },
-        { orphanedVectorIds: [], missingEmbeddingIds: [], isConsistent: true },
-      ];
-      const summary = aggregateSummary(checks);
-      expect(summary.isConsistent).toBe(false);
-    });
+    const checker = new DataConsistencyChecker(supabase as never, qdrant as never);
+    const report = await checker.checkGlobalConsistency();
+    expect(report.globalSummary.totalProjects).toBe(1);
+    expect(report.globalSummary.inconsistentProjects).toBe(1);
+    expect(report.projectReports).toHaveLength(1);
+    expect(report.projectReports[0].projectId).toBe("p1");
   });
 
-  describe("global report aggregation logic", () => {
-    interface ProjectSummary {
-      isConsistent: boolean;
-      orphanedVectors: number;
-      missingEmbeddings: number;
-    }
-
-    const aggregateGlobalReport = (projectSummaries: ProjectSummary[]): {
-      totalProjects: number;
-      consistentProjects: number;
-      inconsistentProjects: number;
-      totalOrphanedVectors: number;
-      totalMissingEmbeddings: number;
-    } => {
-      const consistentProjects = projectSummaries.filter(p => p.isConsistent).length;
-      const totalOrphanedVectors = projectSummaries.reduce(
-        (sum, p) => sum + p.orphanedVectors,
-        0
-      );
-      const totalMissingEmbeddings = projectSummaries.reduce(
-        (sum, p) => sum + p.missingEmbeddings,
-        0
-      );
-
-      return {
-        totalProjects: projectSummaries.length,
-        consistentProjects,
-        inconsistentProjects: projectSummaries.length - consistentProjects,
-        totalOrphanedVectors,
-        totalMissingEmbeddings,
-      };
-    };
-
-    it("should aggregate empty project list", () => {
-      const result = aggregateGlobalReport([]);
-      expect(result.totalProjects).toBe(0);
-      expect(result.consistentProjects).toBe(0);
-      expect(result.inconsistentProjects).toBe(0);
+  it("reports zero inconsistent projects when all are consistent", async () => {
+    const { supabase, qdrant } = makeFakes({
+      projects: [{ id: "p1" }],
+      characters: [{ id: "c1", qdrant_id: "q1" }],
+      qChars: [{ character: { id: "c1" }, qdrantPointId: "q1" }],
     });
-
-    it("should aggregate all consistent projects", () => {
-      const summaries: ProjectSummary[] = [
-        { isConsistent: true, orphanedVectors: 0, missingEmbeddings: 0 },
-        { isConsistent: true, orphanedVectors: 0, missingEmbeddings: 0 },
-      ];
-      const result = aggregateGlobalReport(summaries);
-      expect(result.totalProjects).toBe(2);
-      expect(result.consistentProjects).toBe(2);
-      expect(result.inconsistentProjects).toBe(0);
-    });
-
-    it("should aggregate mixed consistency projects", () => {
-      const summaries: ProjectSummary[] = [
-        { isConsistent: true, orphanedVectors: 0, missingEmbeddings: 0 },
-        { isConsistent: false, orphanedVectors: 2, missingEmbeddings: 1 },
-        { isConsistent: false, orphanedVectors: 1, missingEmbeddings: 0 },
-      ];
-      const result = aggregateGlobalReport(summaries);
-      expect(result.totalProjects).toBe(3);
-      expect(result.consistentProjects).toBe(1);
-      expect(result.inconsistentProjects).toBe(2);
-      expect(result.totalOrphanedVectors).toBe(3);
-      expect(result.totalMissingEmbeddings).toBe(1);
-    });
+    const checker = new DataConsistencyChecker(supabase as never, qdrant as never);
+    const report = await checker.checkGlobalConsistency();
+    expect(report.globalSummary.totalProjects).toBe(1);
+    expect(report.globalSummary.inconsistentProjects).toBe(0);
+    expect(report.projectReports).toHaveLength(0);
   });
+});
 
-  describe("repair action generation logic", () => {
-    interface RepairAction {
-      type: "delete_orphan" | "create_embedding";
-      entityType: string;
-      entityId: string;
-    }
-
-    interface ChecksWithIssues {
-      characters: { orphanedVectorIds: string[]; missingEmbeddingIds: string[] };
-      worldbuilding: { orphanedVectorIds: string[]; missingEmbeddingIds: string[] };
-      scenes: { orphanedVectorIds: string[]; missingEmbeddingIds: string[] };
-    }
-
-    const generateRepairActions = (checks: ChecksWithIssues): RepairAction[] => {
-      const actions: RepairAction[] = [];
-
-      for (const id of checks.characters.orphanedVectorIds) {
-        actions.push({ type: "delete_orphan", entityType: "character", entityId: id });
-      }
-      for (const id of checks.worldbuilding.orphanedVectorIds) {
-        actions.push({ type: "delete_orphan", entityType: "worldbuilding", entityId: id });
-      }
-      for (const id of checks.scenes.orphanedVectorIds) {
-        actions.push({ type: "delete_orphan", entityType: "scene", entityId: id });
-      }
-
-      for (const id of checks.characters.missingEmbeddingIds) {
-        actions.push({ type: "create_embedding", entityType: "character", entityId: id });
-      }
-      for (const id of checks.worldbuilding.missingEmbeddingIds) {
-        actions.push({ type: "create_embedding", entityType: "worldbuilding", entityId: id });
-      }
-      for (const id of checks.scenes.missingEmbeddingIds) {
-        actions.push({ type: "create_embedding", entityType: "scene", entityId: id });
-      }
-
-      return actions;
-    };
-
-    it("should generate no actions for consistent checks", () => {
-      const checks: ChecksWithIssues = {
-        characters: { orphanedVectorIds: [], missingEmbeddingIds: [] },
-        worldbuilding: { orphanedVectorIds: [], missingEmbeddingIds: [] },
-        scenes: { orphanedVectorIds: [], missingEmbeddingIds: [] },
-      };
-      const actions = generateRepairActions(checks);
-      expect(actions).toHaveLength(0);
+describe("DataConsistencyChecker.repairMissingEmbeddings (real class)", () => {
+  it("re-indexes only rows missing qdrant_id and counts repairs", async () => {
+    const { supabase, qdrant } = makeFakes({
+      characters: [{ id: "c1" }, { id: "c2", qdrant_id: "q2" }], // only c1 needs repair
+      worldbuilding: [{ id: "w1" }], // needs repair
+      drafts: [{ id: "d1", scene_number: 1 }], // needs repair (no runtime qdrant_id)
     });
-
-    it("should generate delete actions for orphaned vectors", () => {
-      const checks: ChecksWithIssues = {
-        characters: { orphanedVectorIds: ["orphan-1", "orphan-2"], missingEmbeddingIds: [] },
-        worldbuilding: { orphanedVectorIds: [], missingEmbeddingIds: [] },
-        scenes: { orphanedVectorIds: [], missingEmbeddingIds: [] },
-      };
-      const actions = generateRepairActions(checks);
-      expect(actions).toHaveLength(2);
-      expect(actions[0].type).toBe("delete_orphan");
-      expect(actions[0].entityType).toBe("character");
-    });
-
-    it("should generate create actions for missing embeddings", () => {
-      const checks: ChecksWithIssues = {
-        characters: { orphanedVectorIds: [], missingEmbeddingIds: [] },
-        worldbuilding: { orphanedVectorIds: [], missingEmbeddingIds: ["missing-1"] },
-        scenes: { orphanedVectorIds: [], missingEmbeddingIds: [] },
-      };
-      const actions = generateRepairActions(checks);
-      expect(actions).toHaveLength(1);
-      expect(actions[0].type).toBe("create_embedding");
-      expect(actions[0].entityType).toBe("worldbuilding");
-    });
-
-    it("should generate mixed actions", () => {
-      const checks: ChecksWithIssues = {
-        characters: { orphanedVectorIds: ["o1"], missingEmbeddingIds: ["m1"] },
-        worldbuilding: { orphanedVectorIds: [], missingEmbeddingIds: [] },
-        scenes: { orphanedVectorIds: ["o2"], missingEmbeddingIds: ["m2", "m3"] },
-      };
-      const actions = generateRepairActions(checks);
-      expect(actions).toHaveLength(5);
-      
-      const deleteActions = actions.filter(a => a.type === "delete_orphan");
-      const createActions = actions.filter(a => a.type === "create_embedding");
-      expect(deleteActions).toHaveLength(2);
-      expect(createActions).toHaveLength(3);
-    });
+    const checker = new DataConsistencyChecker(supabase as never, qdrant as never);
+    const result = await checker.repairMissingEmbeddings("p1");
+    expect(result.repairedCharacters).toBe(1);
+    expect(result.repairedWorldbuilding).toBe(1);
+    expect(result.repairedScenes).toBe(1);
+    expect(qdrant.storeCharacter).toHaveBeenCalledTimes(1);
+    expect(result.errors).toEqual([]);
   });
 });
