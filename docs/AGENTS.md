@@ -284,6 +284,21 @@ The Writer and Critic agents operate in a feedback loop:
 - Maximum revisions reached (default: 3)
 - User manual approval
 
+### LLM-as-a-Judge (observability, not a gate)
+
+The judge scores faithfulness (Writer vs Architect plan) and relevance (Profiler vs
+seed idea) on a 0–1 scale. It runs N=3 samples at temperature 0 and reports the
+median to reduce single-sample noise. It is **default-on** (cheap, async) and
+**gates nothing** — scores are recorded to Prometheus (`manoe_evaluation_score`,
+`scale="0-1"`) and Langfuse for observability only. This is distinct from the
+Critic's 1–10 craft score, which DOES gate the revision loop.
+
+**Known gap (not closed here):** the 0–1 rubric bands are unvalidated against human
+labels; no inter-rater agreement (κ) has been measured. Calibrating against a
+human-labeled holdout is a prerequisite before any judge score is used to gate
+generation. Until then, treat absolute judge numbers as relative signals, not
+thresholds.
+
 ## Audit Logging
 
 All agent actions are logged to the `audit_logs` table:
