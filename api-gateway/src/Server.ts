@@ -15,6 +15,7 @@ dotenv.config();
 
 // Import utility for env validation
 import { validateAndLogEnvironment } from "./utils/envValidation";
+import { resolveCorsOrigin } from "./utils/corsConfig";
 
 // Validate environment variables at startup
 // Note: For secure logging of sensitive data (JWT tokens, API keys),
@@ -129,21 +130,12 @@ All endpoints require a valid API key passed via the \`x-api-key\` header or Bea
     cors({
       origin: (origin, callback) => {
         const corsOriginEnv = process.env.CORS_ORIGIN || "*";
-        
-        if (corsOriginEnv === "*") {
-          callback(null, "*");
+        const { allow, error } = resolveCorsOrigin(corsOriginEnv, origin);
+        if (error) {
+          callback(new Error(error));
           return;
         }
-        
-        const whitelist = corsOriginEnv.split(",").map(s => s.trim());
-        
-        if (!origin || whitelist.includes(origin)) {
-          // For requests without Origin header, return first whitelisted origin
-          // This allows server-to-server calls while maintaining CORS security
-          callback(null, origin || whitelist[0]);
-        } else {
-          callback(new Error(`Origin ${origin} not allowed by CORS`));
-        }
+        callback(null, allow as string);
       },
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
