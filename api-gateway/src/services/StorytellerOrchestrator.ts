@@ -2576,9 +2576,133 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     }
   }
 
+  // ==================== REGENERATION HELPERS ====================
+
+  /**
+   * Linear phase chain as executed by runGeneration. Index positions:
+   * 0 genesis, 1 characters, 2 narrator_design, 3 worldbuilding,
+   * 4 outlining, 5 advanced_planning, 6 drafting-loop (folds critique/revision/
+   * originality/impact/polish). Used by resolveStartPhaseIndex.
+   */
+  private static readonly PHASE_CHAIN: GenerationPhase[] = [
+    GenerationPhase.GENESIS,
+    GenerationPhase.CHARACTERS,
+    GenerationPhase.NARRATOR_DESIGN,
+    GenerationPhase.WORLDBUILDING,
+    GenerationPhase.OUTLINING,
+    GenerationPhase.ADVANCED_PLANNING,
+    GenerationPhase.DRAFTING,
+  ];
+
+  /**
+   * Per-phase artifact-type + state-field seeding map, in chain order. The artifact
+   * type strings are the REAL save-site keys (StorytellerOrchestrator saveArtifact
+   * calls), not PHASE_CONFIGS.outputArtifact labels.
+   */
+  private static readonly SEED_MAP: { artifactType: string; field: keyof GenerationState }[] = [
+    { artifactType: "narrative", field: "narrative" },
+    { artifactType: "characters", field: "characters" },
+    { artifactType: "narrator_voice", field: "narratorVoice" },
+    { artifactType: "worldbuilding", field: "worldbuilding" },
+    { artifactType: "outline", field: "outline" },
+    { artifactType: "advanced_plan", field: "advancedPlan" },
+  ];
+
+  /**
+   * Resolve start_from_phase to an index in PHASE_CHAIN. Undefined / genesis -> 0
+   * (full run). In-loop phases (critique/revision/originality/impact/polish) resolve
+   * to the drafting-loop index (6) since the loop owns those phases. Pure.
+   */
+  private resolveStartPhaseIndex(startFromPhase?: GenerationPhase): number {
+    if (!startFromPhase) return 0;
+    const idx = StorytellerOrchestrator.PHASE_CHAIN.indexOf(startFromPhase);
+    if (idx >= 0) return idx;
+    // In-loop phases not listed in PHASE_CHAIN -> drafting loop owns them.
+    return StorytellerOrchestrator.PHASE_CHAIN.indexOf(GenerationPhase.DRAFTING);
+  }
+
+  /**
+   * Decide, per scene, whether to regenerate or reuse. Pure. scenesToRegenerate
+   * absent -> regenerate all. 1-indexed scene numbers.
+   */
+  private scenesToRun(
+    sceneCount: number,
+    scenesToRegenerate?: number[]
+  ): { sceneNum: number; regenerate: boolean }[] {
+    const out: { sceneNum: number; regenerate: boolean }[] = [];
+    for (let i = 1; i <= sceneCount; i++) {
+      const regenerate = !scenesToRegenerate || scenesToRegenerate.includes(i);
+      out.push({ sceneNum: i, regenerate });
+    }
+    return out;
+  }
+
+  /**
+   * Phase-based regeneration: load prior-run artifacts for every phase BEFORE
+   * uptoPhaseIndex and seed them into state. Explicit per-artifactType reads
+   * (Decision 2a). getRunArtifact returns the full row { content } or null;
+   * a missing artifact is warned and skipped (field left at its default).
+   */
+  private async seedStateFromPreviousRun(
+    state: GenerationState,
+    previousRunId: string,
+    uptoPhaseIndex: number
+  ): Promise<void> {
+    for (let i = 0; i < uptoPhaseIndex && i < StorytellerOrchestrator.SEED_MAP.length; i++) {
+      const { artifactType, field } = StorytellerOrchestrator.SEED_MAP[i];
+      const row = (await this.supabase.getRunArtifact(previousRunId, artifactType)) as
+        | { content: unknown }
+        | null;
+      if (!row || row.content == null) {
+        console.warn(
+          `[Orchestrator] seedStateFromPreviousRun: no '${artifactType}' artifact on run ${previousRunId}; skipping`
+        );
+        continue;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (state as any)[field] = row.content;
+    }
+  }
+
+  /**
+   * Scene-level regeneration: load a kept scene's prior prose from previousRunId and
+   * place it into state.drafts. Prefers final_scene_N (polished terminal output),
+   * falls back to draft_scene_N. Returns true if a prior artifact was found.
+   */
+  private async reuseSceneFromPreviousRun(
+    runId: string,
+    options: GenerationOptions,
+    sceneNum: number
+  ): Promise<boolean> {
+    const state = this.activeRuns.get(runId);
+    if (!state || !options.previousRunId) return false;
+
+    let row = (await this.supabase.getRunArtifact(
+      options.previousRunId,
+      `final_scene_${sceneNum}`
+    )) as { content: unknown } | null;
+
+    if (!row || row.content == null) {
+      row = (await this.supabase.getRunArtifact(
+        options.previousRunId,
+        `draft_scene_${sceneNum}`
+      )) as { content: unknown } | null;
+    }
+
+    if (!row || row.content == null) {
+      console.warn(
+        `[Orchestrator] reuseSceneFromPreviousRun: no prior artifact for scene ${sceneNum} on run ${options.previousRunId}; will draft instead`
+      );
+      return false;
+    }
+
+    state.drafts.set(sceneNum, row.content as Record<string, unknown>);
+    return true;
+  }
+
   /**
    * Handle generation error
-   * 
+   *
    * IMPORTANT: Publishes ERROR event to Redis Stream so clients don't hang forever
    * Client should check for event.type === "ERROR" and stop waiting
    */
