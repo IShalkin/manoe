@@ -123,6 +123,10 @@ export class CompletionOptions {
 
   @Optional()
   @Property()
+  seed?: number;
+
+  @Optional()
+  @Property()
   responseFormat?: { type: "json_object" | "text" };
 
   @Optional()

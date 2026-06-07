@@ -655,6 +655,10 @@ export class LLMProviderService {
       requestParams.response_format = { type: "json_object" };
     }
 
+    if (typeof options.seed === "number") {
+      requestParams.seed = options.seed;
+    }
+
     const response = await client.chat.completions.create(requestParams);
 
     return {
@@ -733,6 +737,7 @@ export class LLMProviderService {
       console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
     }
 
+    // seed recorded in run_config but not sent (provider does not accept a sampling seed).
     const response = await client.messages.create(requestOptions);
 
     const content = response.content[0]?.type === "text" 
@@ -807,6 +812,7 @@ export class LLMProviderService {
       console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
     }
 
+    // seed recorded in run_config but not sent (provider does not accept a sampling seed).
     const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
       generationConfig,
