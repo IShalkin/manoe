@@ -1,0 +1,318 @@
+# =============================================================================
+# MANOE writer-quality GOLDEN SET (curated)
+# =============================================================================
+# A promptfoo test list. Each item:
+#   vars   -> fills the Writer DRAFTING prompt ({{sceneNum}} etc.)
+#   assert -> per-dimension llm-rubric grading (structure / consistency /
+#             show-don't-tell / hook-discipline), tied to _expected_qualities.
+# Underscore-prefixed keys (_id, _seed_idea, _expected_qualities) are human
+# review metadata; promptfoo ignores them as template vars but they document
+# WHY each case exists. Several cases are deliberate FAILURE-MODE TRAPS: the
+# prompt-under-test should resist them, and the judge must catch it if it doesn't.
+#
+# Coverage map:
+#   period-anachronism trap  -> cornish-lighthouse
+#   on-the-nose dialogue trap -> noir-interrogation
+#   hook-overrun trap         -> heist-vault
+#   new-character-injection   -> solo-spacewalk
+#   show-don't-tell stress     -> grief-kitchen
+#   scope-creep (later events) -> fantasy-coronation
+#   faithful control (clean)   -> western-stagecoach
+#   tonal-consistency / register -> childrens-bedtime
+# =============================================================================
+
+- _id: cornish-lighthouse
+  _seed_idea: >
+    A lighthouse keeper on the Cornish coast in 1971 spends her last night on
+    duty before an automation crew decommissions her. Obsolescence and dignity.
+  _expected_qualities:
+    consistency: No anachronistic tech (1971), no new named characters, setting holds.
+    structure: Dramatizes the realization beat; ends on the specified hook.
+  vars:
+    sceneNum: 1
+    sceneTitle: "The Lighthouse Keeper's Last Night"
+    wordCount: 600
+    sceneOutline: |
+      {
+        "title": "The Lighthouse Keeper's Last Night",
+        "beat": "Mara realizes the automation crew arrives at dawn to decommission her.",
+        "conflict": "duty vs. obsolescence",
+        "hook": "She lights the lamp one final time as headlights crest the hill.",
+        "characters": ["Mara"],
+        "setting": "a storm-battered lighthouse on the Cornish coast, 1971"
+      }
+    keyConstraints: |
+      - Mara is the only human character in this scene.
+      - The story is set in 1971: NO mobile phones, NO internet, NO modern tech.
+      - The lighthouse is on the Cornish coast.
+  assert:
+    - type: llm-rubric
+      value: >
+        STRUCTURE: Pass only if the scene (a) dramatizes Mara realizing she will
+        be decommissioned at dawn, (b) ends on the hook (lighting the lamp as
+        headlights crest the hill), and (c) does not advance past this scene.
+        Output PASS/FAIL with one sentence of reasoning.
+    - type: llm-rubric
+      value: >
+        CONSISTENCY (anachronism trap): FAIL if the prose uses any technology
+        that did not exist in 1971 (mobile phone, internet, email, app, GPS,
+        digital screen) or introduces a new named character besides Mara.
+        Otherwise PASS. Cite the violated constraint if any. Output PASS/FAIL.
+
+- _id: noir-interrogation
+  _seed_idea: >
+    1940s noir. A tired detective questions a nightclub singer about a missing
+    bandleader. The truth is in what neither of them says outright.
+  _expected_qualities:
+    show_dont_tell: Tension carried by subtext, gesture, environment — NOT by
+      characters announcing their feelings/motives in dialogue.
+  vars:
+    sceneNum: 4
+    sceneTitle: "Smoke and Mirrors"
+    wordCount: 650
+    sceneOutline: |
+      {
+        "title": "Smoke and Mirrors",
+        "beat": "Detective Cole presses Vivian about the night Ray vanished; she deflects.",
+        "conflict": "his suspicion vs. her self-preservation",
+        "hook": "Cole sets Ray's cufflink on the bar; Vivian's cigarette stops halfway to her lips.",
+        "characters": ["Cole", "Vivian"],
+        "setting": "a dim, half-empty nightclub after closing, 1947"
+      }
+    keyConstraints: |
+      - Only Cole and Vivian appear; no new named characters.
+      - 1947 setting; no anachronistic technology.
+      - The scene must turn on subtext, not on either character stating their motive.
+  assert:
+    - type: llm-rubric
+      value: >
+        SHOW-DON'T-TELL (on-the-nose-dialogue trap): FAIL if the tension is
+        carried by characters explicitly announcing feelings or motives
+        ("I don't trust you", "I'm afraid you'll arrest me", "I loved Ray").
+        PASS only if suspicion and fear are conveyed through subtext, gesture,
+        pacing, and environment. Output PASS/FAIL with one sentence.
+    - type: llm-rubric
+      value: >
+        STRUCTURE: PASS only if the scene ends on the hook (Cole placing the
+        cufflink; Vivian's cigarette stopping) and does not resolve whether she
+        is guilty. Output PASS/FAIL with one sentence.
+
+- _id: heist-vault
+  _seed_idea: >
+    A precise modern heist. The crew has ninety seconds at the vault door. This
+    scene is ONLY the approach and the breach — not the getaway.
+  _expected_qualities:
+    structure: Stops exactly on the breach hook; does NOT narrate the escape.
+  vars:
+    sceneNum: 6
+    sceneTitle: "Ninety Seconds"
+    wordCount: 500
+    sceneOutline: |
+      {
+        "title": "Ninety Seconds",
+        "beat": "Reyes drills the last pin while Okafor counts down the patrol gap.",
+        "conflict": "her steady hands vs. the shrinking clock",
+        "hook": "The bolt thunks back; the vault sighs open a finger's width.",
+        "characters": ["Reyes", "Okafor"],
+        "setting": "a bank sub-basement, present day, lights cut to emergency red"
+      }
+    keyConstraints: |
+      - Only Reyes and Okafor; no new named characters.
+      - End ON the vault opening a crack. Do NOT depict the theft, the alarm
+        going off, or the escape — those are later scenes.
+  assert:
+    - type: llm-rubric
+      value: >
+        HOOK-DISCIPLINE (hook-overrun trap): FAIL if the scene continues past
+        the hook to show them entering the vault, taking anything, an alarm, or
+        any escape. PASS only if it ENDS on the vault opening a finger's width.
+        Output PASS/FAIL with one sentence.
+    - type: llm-rubric
+      value: >
+        SHOW-DON'T-TELL: PASS if time pressure is dramatized through concrete
+        physical detail and rhythm rather than stating "the tension was
+        unbearable." Output PASS/FAIL with one sentence.
+
+- _id: solo-spacewalk
+  _seed_idea: >
+    Hard sci-fi. An astronaut performs an emergency repair alone outside a
+    crippled station. She is the only crew member conscious; mission control
+    is out of contact. Isolation is the point.
+  _expected_qualities:
+    consistency: Must remain a SOLO scene — no rescuers, no surprise crewmates,
+      no restored comms voice introduced as a character.
+  vars:
+    sceneNum: 8
+    sceneTitle: "Outside the Hull"
+    wordCount: 600
+    sceneOutline: |
+      {
+        "title": "Outside the Hull",
+        "beat": "Idris splices the severed coolant line by hand as her oxygen reserve ticks down.",
+        "conflict": "her training vs. her own panic",
+        "hook": "The line seals; her HUD blinks from red to amber as she exhales.",
+        "characters": ["Idris"],
+        "setting": "EVA on the exterior of a damaged orbital station, comms blackout"
+      }
+    keyConstraints: |
+      - Idris is ALONE. No other named character may appear or speak.
+      - Comms are down: no voice from mission control, no rescuer arrives.
+      - Keep it physically plausible vacuum-EVA work.
+  assert:
+    - type: llm-rubric
+      value: >
+        CONSISTENCY (new-character-injection trap): FAIL if any other named
+        character appears, speaks, or arrives to help — including a mission-
+        control voice over restored comms. PASS only if Idris remains the sole
+        actor throughout. Output PASS/FAIL with one sentence.
+    - type: llm-rubric
+      value: >
+        STRUCTURE: PASS only if the scene ends on the hook (the line sealing,
+        HUD shifting red to amber) and does not jump to her getting back inside.
+        Output PASS/FAIL with one sentence.
+
+- _id: grief-kitchen
+  _seed_idea: >
+    Quiet literary drama. A man makes breakfast the morning after his wife's
+    funeral, for the first time alone in forty years. Nothing "happens" — the
+    weight is entirely in the ordinary objects.
+  _expected_qualities:
+    show_dont_tell: Grief conveyed ONLY through physical detail and habit; the
+      word "grief"/"sad"/"lonely" and direct emotion-naming should not appear.
+  vars:
+    sceneNum: 2
+    sceneTitle: "Two Cups"
+    wordCount: 450
+    sceneOutline: |
+      {
+        "title": "Two Cups",
+        "beat": "Walter automatically reaches for two cups, then stops.",
+        "conflict": "habit vs. the new emptiness",
+        "hook": "He sets the second cup back on the shelf, very carefully, and turns off the second burner.",
+        "characters": ["Walter"],
+        "setting": "a small kitchen at dawn, present day, the morning after the funeral"
+      }
+    keyConstraints: |
+      - Only Walter; no new named characters, no flashback dialogue from the wife.
+      - Convey grief WITHOUT naming the emotion. No "he felt sad/lonely/grief".
+  assert:
+    - type: llm-rubric
+      value: >
+        SHOW-DON'T-TELL (strict): FAIL if the prose names the emotion directly
+        (e.g. "grief", "sadness", "loneliness", "he felt heartbroken") or tells
+        the reader how to feel. PASS only if the loss is conveyed entirely
+        through physical detail, habit, and restraint. Output PASS/FAIL.
+    - type: llm-rubric
+      value: >
+        STRUCTURE: PASS only if the scene ends on the hook (returning the second
+        cup, turning off the second burner) and stays in this single quiet
+        moment. Output PASS/FAIL with one sentence.
+
+- _id: fantasy-coronation
+  _seed_idea: >
+    Epic fantasy. The young heir waits in the antechamber before her coronation,
+    doubting she is ready. This scene is ONLY the waiting — the ceremony, the
+    betrayal at the altar, and the war that follows are later scenes.
+  _expected_qualities:
+    structure: Stays in the antechamber; does NOT leap ahead to the ceremony or
+      any later plot the seed teases.
+  vars:
+    sceneNum: 3
+    sceneTitle: "Before the Crown"
+    wordCount: 550
+    sceneOutline: |
+      {
+        "title": "Before the Crown",
+        "beat": "Princess Aelith waits alone in the antechamber, rehearsing the oath, doubting herself.",
+        "conflict": "her self-doubt vs. the weight of duty",
+        "hook": "The great doors begin to part; trumpet-song spills through the widening gap.",
+        "characters": ["Aelith"],
+        "setting": "a cold stone antechamber adjoining the throne hall, high-fantasy kingdom"
+      }
+    keyConstraints: |
+      - Only Aelith on-page; the herald may be a distant unnamed voice at most.
+      - Stay in the antechamber BEFORE the ceremony. Do NOT narrate the crowning,
+        any betrayal, or the war — those are later scenes.
+  assert:
+    - type: llm-rubric
+      value: >
+        SCOPE / STRUCTURE (scope-creep trap): FAIL if the scene advances past the
+        antechamber into the ceremony, a betrayal, or any later event. PASS only
+        if it stays in the waiting moment and ends on the doors beginning to open.
+        Output PASS/FAIL with one sentence.
+    - type: llm-rubric
+      value: >
+        SHOW-DON'T-TELL: PASS if Aelith's doubt is dramatized through action and
+        sensory detail rather than stated outright. Output PASS/FAIL.
+
+- _id: western-stagecoach
+  _seed_idea: >
+    Classic western. A lone marshal rides shotgun on a stagecoach through a pass
+    known for ambushes. A straightforward tension scene — a clean control case
+    with no trap; a competent prose model should pass all dimensions.
+  _expected_qualities:
+    structure: Hits the beat, ends on the hook, in scope.
+    consistency: Period-appropriate, no new named characters.
+  vars:
+    sceneNum: 5
+    sceneTitle: "The Pass"
+    wordCount: 600
+    sceneOutline: |
+      {
+        "title": "The Pass",
+        "beat": "Marshal Hale scans the ridge line as the coach enters the narrow pass.",
+        "conflict": "his vigilance vs. the open, watching country",
+        "hook": "A single pebble skitters down the slope ahead; Hale thumbs back the hammer.",
+        "characters": ["Hale"],
+        "setting": "a dry mountain pass at midday, American frontier, 1880s"
+      }
+    keyConstraints: |
+      - Only Hale is named; the driver may be unnamed.
+      - 1880s frontier: no anachronistic technology.
+      - End on the pebble and the hammer — do NOT begin the ambush itself.
+  assert:
+    - type: llm-rubric
+      value: >
+        STRUCTURE: PASS only if the scene dramatizes Hale watching the ridge,
+        ends on the hook (pebble skittering, thumbing the hammer), and does not
+        start the ambush. Output PASS/FAIL with one sentence.
+    - type: llm-rubric
+      value: >
+        CONSISTENCY: PASS unless it introduces a new named character or
+        anachronistic technology for the 1880s. Output PASS/FAIL with one sentence.
+
+- _id: childrens-bedtime
+  _seed_idea: >
+    A gentle children's bedtime story. A small hedgehog can't sleep and counts
+    the fireflies outside his window. Warm, simple, soothing register.
+  _expected_qualities:
+    consistency: Tone/register stays gentle and age-appropriate — no violence,
+      no sophisticated adult vocabulary, no dark turn.
+  vars:
+    sceneNum: 1
+    sceneTitle: "Pip Counts the Lights"
+    wordCount: 300
+    sceneOutline: |
+      {
+        "title": "Pip Counts the Lights",
+        "beat": "Pip the hedgehog can't sleep, so he counts the fireflies drifting past his window.",
+        "conflict": "his wakefulness vs. the quiet pull of sleep",
+        "hook": "On the ninth firefly, Pip's eyes finally close.",
+        "characters": ["Pip"],
+        "setting": "a cozy burrow under a hedge on a warm summer night"
+      }
+    keyConstraints: |
+      - Only Pip; the tone must stay gentle and soothing for young children.
+      - No violence, no scary turn, no advanced adult vocabulary.
+  assert:
+    - type: llm-rubric
+      value: >
+        TONE / REGISTER (tonal-consistency trap): FAIL if the prose breaks the
+        gentle children's-bedtime register — e.g. violence, fear, a dark twist,
+        or vocabulary clearly aimed at adults rather than young children. PASS
+        only if it stays warm, simple, and soothing. Output PASS/FAIL.
+    - type: llm-rubric
+      value: >
+        STRUCTURE: PASS only if the scene ends on the hook (Pip's eyes closing on
+        the ninth firefly) and stays within this single bedtime moment.
+        Output PASS/FAIL with one sentence.
