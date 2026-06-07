@@ -1120,6 +1120,9 @@ export class StorytellerOrchestrator {
 
       // Safe checkpoint between scenes: gracefulShutdown may snapshot here.
       state.inFlight = false;
+      // #157 Slice A: persist crash-recovery checkpoint and mirror status at scene boundary.
+      await this.checkpointScene(runId, sceneNum + 1);
+      void this.mirrorStatus(runId);
     }
 
     // Final Archivist flush: the per-scene trigger only fires on multiples of 3,
@@ -2778,6 +2781,63 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     return [parsed];
   }
 
+  // ==================== STATE SERIALIZATION / CHECKPOINTING (issue #157, Slice A) ====================
+
+  /** Serialize a run's state for persistence (Maps -> plain objects). */
+  private serializeState(state: GenerationState): Record<string, unknown> {
+    return {
+      ...state,
+      drafts: Object.fromEntries(state.drafts),
+      critiques: Object.fromEntries(state.critiques),
+      revisionCount: Object.fromEntries(state.revisionCount),
+      valueShifts: Object.fromEntries(state.valueShifts),
+      spiceRegions: Object.fromEntries(state.spiceRegions),
+    };
+  }
+
+  /** Deserialize a persisted state back into a live GenerationState (plain objects -> Maps). */
+  private deserializeState(savedState: Record<string, unknown>): GenerationState {
+    const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
+    const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
+    const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
+    const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
+    const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
+
+    return {
+      ...(savedState as unknown as GenerationState),
+      drafts: new Map(Object.entries(draftsObj).map(([k, v]) => [parseInt(k, 10), v])),
+      critiques: new Map(Object.entries(critiquesObj).map(([k, v]) => [parseInt(k, 10), v])),
+      revisionCount: new Map(Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])),
+      valueShifts: new Map(Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])),
+      spiceRegions: new Map(Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])),
+      // Default to [] for snapshots saved before rollingSynopsis existed,
+      // so the .push() in runDraftingLoop does not throw on restore.
+      rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
+      isPaused: true, // Keep paused until explicitly resumed
+    };
+  }
+
+  /**
+   * Persist a full state checkpoint at a scene boundary so a hard crash loses at
+   * most the in-progress scene (issue #157, Slice A). Distinct artifact type from
+   * the graceful-shutdown snapshot; phase varies per scene to retain history.
+   */
+  private async checkpointScene(runId: string, sceneNumber: number): Promise<void> {
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+    try {
+      await this.supabase.saveRunArtifact({
+        runId: state.runId,
+        projectId: state.projectId,
+        artifactType: "run_state_checkpoint",
+        phase: `checkpoint_scene_${sceneNumber}`,
+        content: this.serializeState(state),
+      });
+    } catch (err) {
+      console.warn(`[Orchestrator] checkpointScene failed for ${runId} scene ${sceneNumber}: ${String(err)}`);
+    }
+  }
+
   // ==================== REDIS STATUS MIRROR (issue #157, Slice A) ====================
 
   /** Mirror the small run-status record to Redis (issue #157, Slice A). Best-effort. */
@@ -2997,15 +3057,8 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     let savedCount = 0;
     for (const state of activeRuns) {
       try {
-        // Serialize the state (Maps need special handling)
-        const serializedState = {
-          ...state,
-          drafts: Object.fromEntries(state.drafts),
-          critiques: Object.fromEntries(state.critiques),
-          revisionCount: Object.fromEntries(state.revisionCount),
-          valueShifts: Object.fromEntries(state.valueShifts),
-          spiceRegions: Object.fromEntries(state.spiceRegions),
-        };
+        // Serialize the state (Maps need special handling) — uses shared serializeState()
+        const serializedState = this.serializeState(state);
 
         await this.supabase.saveRunArtifact({
           runId: state.runId,
@@ -3047,8 +3100,26 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         return 0;
       }
 
-      // Get saved run state from Supabase
-      const artifact = await this.supabase.getRunArtifact(runId, "run_state_snapshot");
+      // Get saved run state from Supabase — prefer graceful-shutdown snapshot,
+      // fall back to the highest-numbered scene checkpoint (issue #157, Slice A).
+      let artifact = await this.supabase.getRunArtifact(runId, "run_state_snapshot");
+
+      if (!artifact) {
+        // No graceful-shutdown snapshot — look for the latest scene checkpoint.
+        const allArtifacts = await this.supabase.getRunArtifacts(runId);
+        const checkpoints = (allArtifacts as Array<{ artifact_type: string; content: unknown; phase?: string }>)
+          .filter((a) => a.artifact_type === "run_state_checkpoint" && typeof a.phase === "string");
+        if (checkpoints.length > 0) {
+          // Sort by scene number extracted from phase "checkpoint_scene_N"
+          checkpoints.sort((a, b) => {
+            const numA = parseInt(a.phase!.replace("checkpoint_scene_", ""), 10) || 0;
+            const numB = parseInt(b.phase!.replace("checkpoint_scene_", ""), 10) || 0;
+            return numA - numB;
+          });
+          artifact = checkpoints[checkpoints.length - 1] as unknown;
+          console.log(`Orchestrator: No snapshot for run ${runId}; restoring from latest scene checkpoint (${checkpoints[checkpoints.length - 1].phase})`);
+        }
+      }
 
       if (!artifact) {
         console.log("Orchestrator: No saved run state found");
@@ -3057,37 +3128,8 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
       try {
         const artifactData = artifact as { content: Record<string, unknown> };
-        const savedState = artifactData.content;
-        
-        // Deserialize the state (restore Maps from serialized objects)
-        const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
-        const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
-        const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
-        const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
-        const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
-
-        const state: GenerationState = {
-          ...(savedState as unknown as GenerationState),
-          drafts: new Map(
-            Object.entries(draftsObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          critiques: new Map(
-            Object.entries(critiquesObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          revisionCount: new Map(
-            Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          valueShifts: new Map(
-            Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          spiceRegions: new Map(
-            Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          // Default to [] for snapshots saved before rollingSynopsis existed,
-          // so the .push() in runDraftingLoop does not throw on restore.
-          rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
-          isPaused: true, // Keep paused until explicitly resumed
-        };
+        // Deserialize via shared method — uses deserializeState()
+        const state = this.deserializeState(artifactData.content);
 
         this.activeRuns.set(state.runId, state);
 
@@ -3135,45 +3177,19 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
       let restoredCount = 0;
       for (const snapshot of snapshots) {
         try {
-          const savedState = snapshot.content as Record<string, unknown>;
-          
           // Check if this run is already active (shouldn't happen, but safety check)
           if (this.activeRuns.has(snapshot.run_id)) {
             console.log(`Orchestrator: Run ${snapshot.run_id} already active, skipping`);
             continue;
           }
 
-          // Deserialize the state (restore Maps from serialized objects)
-          const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
-          const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
-          const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
-          const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
-          const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
-
-          const state: GenerationState = {
-            ...(savedState as unknown as GenerationState),
+          // Deserialize via shared method — uses deserializeState()
+          const savedState = snapshot.content as Record<string, unknown>;
+          const state = this.deserializeState({
+            ...savedState,
             runId: snapshot.run_id,
             projectId: snapshot.project_id,
-            drafts: new Map(
-              Object.entries(draftsObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            critiques: new Map(
-              Object.entries(critiquesObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            revisionCount: new Map(
-              Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            valueShifts: new Map(
-              Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            spiceRegions: new Map(
-              Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            // Default to [] for snapshots saved before rollingSynopsis existed,
-            // so the .push() in runDraftingLoop does not throw on restore.
-            rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
-            isPaused: true, // Keep paused until explicitly resumed
-          };
+          });
 
           this.activeRuns.set(state.runId, state);
 
