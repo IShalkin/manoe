@@ -6,6 +6,7 @@
  */
 
 import { AgentType, GenerationState, MessageType, KeyConstraint, WorldState, NarratorVoice, SynopsisEntry, SceneContract } from "../models/AgentModels";
+import { buildConstraintsBlock as buildConstraintsBlockHelper } from "../utils/constraintsBlock";
 import { GenerationPhase, ChatMessage, MessageRole, getMaxTokensForPhase, LLMProvider } from "../models/LLMModels";
 import { LLMProviderService } from "../services/LLMProviderService";
 import { LangfuseService } from "../services/LangfuseService";
@@ -207,13 +208,7 @@ export abstract class BaseAgent {
    * Build constraints block for prompts
    */
   protected buildConstraintsBlock(constraints: { key: string; value: string; sceneNumber: number }[]): string {
-    if (constraints.length === 0) {
-      return "No constraints established yet.";
-    }
-
-    return constraints
-      .map((c) => `- ${c.key}: ${c.value} (Scene ${c.sceneNumber})`)
-      .join("\n");
+    return buildConstraintsBlockHelper(constraints);
   }
 
   /**
