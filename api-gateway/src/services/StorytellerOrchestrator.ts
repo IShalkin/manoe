@@ -700,7 +700,7 @@ export class StorytellerOrchestrator {
     // LLM-as-a-Judge: Evaluate relevance of character profiles to seed idea
     // Runs asynchronously to not block generation
     // Uses rate limiting (max 3 concurrent) to avoid hitting LLM provider rate limits
-    if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+    if (this.isEvaluationEnabled()) {
       try {
         if (Array.isArray(state.characters)) {
           for (const character of state.characters) {
@@ -1267,7 +1267,7 @@ export class StorytellerOrchestrator {
     // LLM-as-a-Judge: Evaluate faithfulness of Writer output to Architect plan
     // Runs asynchronously to not block generation
     // Uses shared rate limiter (max 3 concurrent) to avoid hitting LLM provider rate limits
-    if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+    if (this.isEvaluationEnabled()) {
       try {
         const architectPlan = JSON.stringify(sceneOutline, null, 2);
         
@@ -1524,7 +1524,7 @@ export class StorytellerOrchestrator {
     });
 
     // LLM-as-a-Judge evaluation (same as draftScene)
-    if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+    if (this.isEvaluationEnabled()) {
       try {
         const architectPlan = JSON.stringify(sceneOutline, null, 2);
         
@@ -2563,6 +2563,11 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     // ... or an explicit approval flag that isn't contradicted by a low score.
     if (critique.approved === true && (score === null || score >= StorytellerOrchestrator.APPROVAL_THRESHOLD)) return true;
     return false;
+  }
+
+  /** Judge is observability-only and default-ON; set EVALUATION_ENABLED=false to disable. */
+  private isEvaluationEnabled(): boolean {
+    return process.env.EVALUATION_ENABLED !== "false" && this.evaluationService.isEnabled;
   }
 
   /**
