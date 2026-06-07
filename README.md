@@ -924,6 +924,12 @@ The following tables are used for persistence:
 
 `spiceConfig` is optional and **off by default**; omit it for unchanged behavior. See [Dialogue Depth & Spice Rewrite](#dialogue-depth--spice-rewrite) below.
 
+**Regeneration (implemented):**
+
+- `start_from_phase` (optional, a `GenerationPhase` value) + `previous_run_id` — phase-based regeneration. The orchestrator loads the prior run's artifacts for every phase before `start_from_phase`, seeds them into a fresh run, and resumes the phase chain at `start_from_phase`. `previous_run_id` is required whenever `start_from_phase` is not `genesis`.
+- `scenes_to_regenerate` (optional, `number[]`, 1-indexed) + `previous_run_id` — scene-level regeneration. Only the listed scenes are re-drafted; every other scene reuses the prior run's `final_scene_N` (or `draft_scene_N` if no final exists). `previous_run_id` is required.
+- All three fields are optional; omitting them yields a full run from genesis (unchanged behavior).
+
 ## Environment Variables
 
 ### Frontend

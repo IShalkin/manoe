@@ -342,6 +342,14 @@ process heap.
 **Run the api-gateway as a single replica** (`deploy.replicas: 1` is pinned in
 `docker-compose.vps.yml`) until Slice B (Redis pub/sub control channel) lands.
 
+### Regeneration paths (implemented)
+
+Two regeneration modes are wired end-to-end (the frontend has always sent these fields; the backend previously dropped them — fixed in the regeneration plan):
+
+- **Phase-based:** `start_from_phase` + `previous_run_id` → `StorytellerOrchestrator.seedStateFromPreviousRun()` loads prior `narrative`/`characters`/`narrator_voice`/`worldbuilding`/`outline`/`advanced_plan` artifacts for phases before the start phase, then `runGeneration` skips those phases via `resolveStartPhaseIndex()`.
+- **Scene-level:** `scenes_to_regenerate` + `previous_run_id` → `runDraftingLoop` re-drafts only listed scenes; others are reused via `reuseSceneFromPreviousRun()` (final-then-draft fallback).
+- Controller rejects invalid combos (bad phase, missing `previous_run_id`, malformed scene list) with 400.
+
 ## Extending Agents
 
 To add a new agent:
