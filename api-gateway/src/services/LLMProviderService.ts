@@ -592,16 +592,17 @@ export class LLMProviderService {
     );
   }
 
+  /** Seam for tests: build the OpenAI client. */
+  private makeOpenAIClient(apiKey: string): OpenAI {
+    return new OpenAI({ apiKey, baseURL: PROVIDER_BASE_URLS.openai, timeout: 120000 });
+  }
+
   /**
    * OpenAI completion
    */
   private async openAICompletion(options: CompletionOptions): Promise<LLMResponse> {
     const apiKey = this.getApiKey(LLMProvider.OPENAI, options.apiKey);
-    const client = new OpenAI({
-      apiKey,
-      baseURL: PROVIDER_BASE_URLS.openai,
-      timeout: 120000, // 2 minute timeout
-    });
+    const client = this.makeOpenAIClient(apiKey);
 
     const requestParams: OpenAI.ChatCompletionCreateParams = {
       model: options.model,
