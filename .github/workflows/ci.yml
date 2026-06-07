@@ -104,3 +104,53 @@ jobs:
       - name: Build Docker image
         run: |
           docker build -t manoe-frontend:test ./frontend
+
+  eval-golden:
+    name: Golden-set Eval (promptfoo, non-blocking)
+    runs-on: ubuntu-latest
+    # NON-BLOCKING: no other job has this in `needs:`, and a failure here never
+    # fails the overall run. This is an observability signal on prompt quality,
+    # not a merge gate. Promote to blocking only once the golden set is stable
+    # (see api-gateway/evals/README.md "promote to blocking" follow-up).
+    continue-on-error: true
+    env:
+      # The user must add OPENAI_API_KEY as a repo secret. If it is absent
+      # (e.g. on a fork or before it is set), the guard step below no-ops.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    defaults:
+      run:
+        working-directory: api-gateway/evals
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Skip if OPENAI_API_KEY is not configured
+        id: guard
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY not set — skipping golden-set eval (non-blocking)."
+            echo "run_eval=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_eval=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run promptfoo golden-set eval (OpenAI)
+        if: steps.guard.outputs.run_eval == 'true'
+        run: |
+          npx promptfoo@latest eval \
+            -c promptfooconfig.ci.yaml \
+            --no-table \
+            --output results.json
+
+      - name: Upload eval results
+        if: steps.guard.outputs.run_eval == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptfoo-eval-results
+          path: api-gateway/evals/results.json
+          retention-days: 7
