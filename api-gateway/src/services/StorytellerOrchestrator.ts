@@ -49,6 +49,8 @@ import { assembleSceneContract } from "./StoryStateAssembler";
 import { applySpiceExtraction } from "./spiceParser";
 import { buildAmplifyMessages, spliceAmplified, contextAround } from "./SpiceRewriter";
 import { createRateLimiter } from "../utils/rateLimiter";
+import { extractStringValue as extractStringValueHelper } from "../utils/extractStringValue";
+import { addSeedConstraints as addSeedConstraintsHelper } from "../utils/seedConstraints";
 
 /**
  * LLM Configuration for generation
@@ -472,60 +474,10 @@ export class StorytellerOrchestrator {
    * Prevents context drift where LLM "forgets" the original story concept
    */
   private addSeedConstraints(state: GenerationState, seedIdea: string): void {
-    const narrative = state.narrative as Record<string, unknown>;
-    const timestamp = new Date().toISOString();
-
-    // Add seed idea as immutable constraint
-    state.keyConstraints.push({
-      key: "seed_idea",
-      value: seedIdea,
-      sceneNumber: 0,
-      timestamp,
-      immutable: true,
-    });
-
-    // Extract key story elements from narrative
-    // Use extractStringValue to handle both string and object formats
-    if (narrative.genre) {
-      state.keyConstraints.push({
-        key: "genre",
-        value: this.extractStringValue(narrative.genre),
-        sceneNumber: 0,
-        timestamp,
-        immutable: true,
-      });
-    }
-
-    if (narrative.premise) {
-      state.keyConstraints.push({
-        key: "premise",
-        value: this.extractStringValue(narrative.premise),
-        sceneNumber: 0,
-        timestamp,
-        immutable: true,
-      });
-    }
-
-    if (narrative.tone) {
-      state.keyConstraints.push({
-        key: "tone",
-        value: this.extractStringValue(narrative.tone),
-        sceneNumber: 0,
-        timestamp,
-        immutable: true,
-      });
-    }
-
-    if (narrative.arc) {
-      state.keyConstraints.push({
-        key: "narrative_arc",
-        value: this.extractStringValue(narrative.arc),
-        sceneNumber: 0,
-        timestamp,
-        immutable: true,
-      });
-    }
-
+    addSeedConstraintsHelper(
+      { keyConstraints: state.keyConstraints as unknown as import("../utils/seedConstraints").SeedConstraint[], narrative: state.narrative as Record<string, unknown> },
+      seedIdea
+    );
     $log.info(`[StorytellerOrchestrator] Added ${state.keyConstraints.length} seed constraints`);
   }
 
@@ -535,21 +487,7 @@ export class StorytellerOrchestrator {
    * Prevents [object Object] serialization issues in constraints
    */
   private extractStringValue(value: unknown): string {
-    if (typeof value === "string") {
-      return value;
-    }
-    if (value && typeof value === "object") {
-      const obj = value as Record<string, unknown>;
-      // Try common field names that LLMs use
-      if (typeof obj.name === "string") return obj.name;
-      if (typeof obj.theme === "string") return obj.theme;
-      if (typeof obj.description === "string") return obj.description;
-      if (typeof obj.type === "string") return obj.type;
-      if (typeof obj.structure === "string") return obj.structure;
-      // Fallback to JSON stringification for complex objects
-      return JSON.stringify(value);
-    }
-    return "";
+    return extractStringValueHelper(value);
   }
 
   /**
