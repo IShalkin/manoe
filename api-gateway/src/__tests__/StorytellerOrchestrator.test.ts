@@ -3,6 +3,15 @@
  *
  * Tests use real production helpers from utils/ (extracted from the orchestrator)
  * to ensure tests break when production logic changes.
+ *
+ * Deleted fiction (confirmed not in production via grep):
+ * - shouldStop: real prod method takes runId, trivial boolean-or; gap noted
+ * - getNextPhase: fictional 9-phase linear order omitting NARRATOR_DESIGN/ORIGINALITY_CHECK/IMPACT_ASSESSMENT
+ *   and using uppercase names instead of real lowercase string values; backfilled in phaseOrder.test.ts
+ * - sceneNeedsRevision: does not exist in prod; real gate is isApproved() + utils/revisionGate.ts
+ *   already covered by revisionGate.test.ts and ApprovalThreshold.test.ts
+ * - validatePhaseTransition: local closure, not in prod; Writer↔Critic cycle covered by FinalRecritique.test.ts
+ * - formatSSEEvent: not in prod; real SSE goes through publishEvent→redisStreams, covered by EventsController.test.ts
  */
 
 import { createRateLimiter } from "../utils/rateLimiter";
@@ -39,56 +48,6 @@ interface GenerationState {
   isCompleted: boolean;
   startedAt: string;
   updatedAt: string;
-}
-
-// ============================================================================
-// LOCAL IMPLEMENTATIONS (remaining shadow copies — to be removed in Task 4)
-// ============================================================================
-
-/**
- * Check if generation should stop
- */
-function shouldStop(state: Pick<GenerationState, 'isPaused' | 'isCompleted'>): boolean {
-  return state.isPaused || state.isCompleted;
-}
-
-/**
- * Get next phase in generation flow
- */
-function getNextPhase(
-  currentPhase: string
-): string | null {
-  const phaseOrder = [
-    'GENESIS',
-    'CHARACTERS',
-    'WORLDBUILDING',
-    'OUTLINING',
-    'ADVANCED_PLANNING',
-    'DRAFTING',
-    'CRITIQUE',
-    'REVISION',
-    'POLISH',
-  ];
-
-  const currentIndex = phaseOrder.indexOf(currentPhase);
-  if (currentIndex === -1 || currentIndex === phaseOrder.length - 1) {
-    return null;
-  }
-  return phaseOrder[currentIndex + 1];
-}
-
-/**
- * Check if scene needs revision based on critique
- */
-function sceneNeedsRevision(
-  critique: { passedQuality: boolean; issues?: string[] } | undefined,
-  revisionCount: number,
-  maxRevisions: number
-): boolean {
-  if (!critique) return false;
-  if (critique.passedQuality) return false;
-  if (revisionCount >= maxRevisions) return false;
-  return true;
 }
 
 // ============================================================================
@@ -160,76 +119,6 @@ describe('StorytellerOrchestrator', () => {
     });
   });
 
-  describe('shouldStop', () => {
-    it('should return true when paused', () => {
-      expect(shouldStop({ isPaused: true, isCompleted: false })).toBe(true);
-    });
-
-    it('should return true when completed', () => {
-      expect(shouldStop({ isPaused: false, isCompleted: true })).toBe(true);
-    });
-
-    it('should return true when both paused and completed', () => {
-      expect(shouldStop({ isPaused: true, isCompleted: true })).toBe(true);
-    });
-
-    it('should return false when active', () => {
-      expect(shouldStop({ isPaused: false, isCompleted: false })).toBe(false);
-    });
-  });
-
-  describe('getNextPhase', () => {
-    it('should return CHARACTERS after GENESIS', () => {
-      expect(getNextPhase('GENESIS')).toBe('CHARACTERS');
-    });
-
-    it('should return WORLDBUILDING after CHARACTERS', () => {
-      expect(getNextPhase('CHARACTERS')).toBe('WORLDBUILDING');
-    });
-
-    it('should return OUTLINING after WORLDBUILDING', () => {
-      expect(getNextPhase('WORLDBUILDING')).toBe('OUTLINING');
-    });
-
-    it('should return ADVANCED_PLANNING after OUTLINING', () => {
-      expect(getNextPhase('OUTLINING')).toBe('ADVANCED_PLANNING');
-    });
-
-    it('should return DRAFTING after ADVANCED_PLANNING', () => {
-      expect(getNextPhase('ADVANCED_PLANNING')).toBe('DRAFTING');
-    });
-
-    it('should return null for POLISH (final phase)', () => {
-      expect(getNextPhase('POLISH')).toBe(null);
-    });
-
-    it('should return null for unknown phase', () => {
-      expect(getNextPhase('UNKNOWN')).toBe(null);
-    });
-  });
-
-  describe('sceneNeedsRevision', () => {
-    it('should return false when no critique', () => {
-      expect(sceneNeedsRevision(undefined, 0, 2)).toBe(false);
-    });
-
-    it('should return false when critique passed', () => {
-      expect(sceneNeedsRevision({ passedQuality: true }, 0, 2)).toBe(false);
-    });
-
-    it('should return true when critique failed and under max revisions', () => {
-      expect(sceneNeedsRevision({ passedQuality: false, issues: ['pacing'] }, 0, 2)).toBe(true);
-    });
-
-    it('should return false when at max revisions', () => {
-      expect(sceneNeedsRevision({ passedQuality: false, issues: ['pacing'] }, 2, 2)).toBe(false);
-    });
-
-    it('should return false when over max revisions', () => {
-      expect(sceneNeedsRevision({ passedQuality: false }, 3, 2)).toBe(false);
-    });
-  });
-
   describe('state management', () => {
     const createTestState = (): GenerationState => ({
       runId: 'test-run-id',
@@ -287,107 +176,6 @@ describe('StorytellerOrchestrator', () => {
 
       expect(existingImmutable).toBeDefined();
       expect(existingImmutable?.value).toBe('original');
-    });
-  });
-
-  describe('phase transition validation', () => {
-    const validatePhaseTransition = (
-      currentPhase: string,
-      targetPhase: string
-    ): { valid: boolean; reason?: string } => {
-      const validTransitions: Record<string, string[]> = {
-        GENESIS: ['CHARACTERS'],
-        CHARACTERS: ['WORLDBUILDING'],
-        WORLDBUILDING: ['OUTLINING'],
-        OUTLINING: ['ADVANCED_PLANNING'],
-        ADVANCED_PLANNING: ['DRAFTING'],
-        DRAFTING: ['CRITIQUE', 'POLISH'],
-        CRITIQUE: ['REVISION', 'DRAFTING'],
-        REVISION: ['CRITIQUE', 'DRAFTING'],
-        POLISH: [],
-      };
-
-      const allowed = validTransitions[currentPhase] || [];
-      if (allowed.includes(targetPhase)) {
-        return { valid: true };
-      }
-      return {
-        valid: false,
-        reason: `Cannot transition from ${currentPhase} to ${targetPhase}`,
-      };
-    };
-
-    it('should allow valid forward transition', () => {
-      expect(validatePhaseTransition('GENESIS', 'CHARACTERS')).toEqual({ valid: true });
-    });
-
-    it('should allow critique-revision loop', () => {
-      expect(validatePhaseTransition('CRITIQUE', 'REVISION')).toEqual({ valid: true });
-      expect(validatePhaseTransition('REVISION', 'CRITIQUE')).toEqual({ valid: true });
-    });
-
-    it('should reject invalid transition', () => {
-      const result = validatePhaseTransition('GENESIS', 'DRAFTING');
-      expect(result.valid).toBe(false);
-      expect(result.reason).toContain('Cannot transition');
-    });
-
-    it('should reject backward transition', () => {
-      const result = validatePhaseTransition('WORLDBUILDING', 'GENESIS');
-      expect(result.valid).toBe(false);
-    });
-
-    it('should reject any transition from POLISH', () => {
-      const result = validatePhaseTransition('POLISH', 'DRAFTING');
-      expect(result.valid).toBe(false);
-    });
-  });
-
-  describe('event publishing format', () => {
-    interface SSEEvent {
-      type: string;
-      data: Record<string, unknown>;
-      timestamp: string;
-    }
-
-    const formatSSEEvent = (type: string, data: Record<string, unknown>): SSEEvent => ({
-      type,
-      data,
-      timestamp: new Date().toISOString(),
-    });
-
-    it('should format phase_start event', () => {
-      const event = formatSSEEvent('phase_start', {
-        phase: 'GENESIS',
-        runId: 'run-123',
-      });
-
-      expect(event.type).toBe('phase_start');
-      expect(event.data.phase).toBe('GENESIS');
-      expect(event.timestamp).toBeDefined();
-    });
-
-    it('should format agent_message event', () => {
-      const event = formatSSEEvent('agent_message', {
-        agent: 'WRITER',
-        content: 'Scene content here',
-        sceneNum: 1,
-      });
-
-      expect(event.type).toBe('agent_message');
-      expect(event.data.agent).toBe('WRITER');
-      expect(event.data.sceneNum).toBe(1);
-    });
-
-    it('should format generation_complete event', () => {
-      const event = formatSSEEvent('generation_complete', {
-        projectId: 'proj-123',
-        totalScenes: 5,
-        totalWords: 10000,
-      });
-
-      expect(event.type).toBe('generation_complete');
-      expect(event.data.totalScenes).toBe(5);
     });
   });
 });
