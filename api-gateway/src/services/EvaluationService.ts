@@ -13,16 +13,10 @@ import { LangfuseService } from "./LangfuseService";
 import { LLMProviderService } from "./LLMProviderService";
 import { MetricsService } from "./MetricsService";
 import { LLMProvider, MessageRole } from "../models/LLMModels";
+import { parseEvaluationResponse as parseJudgeResponse, EvaluationResult } from "../utils/evaluationResponseParser";
 
-/**
- * Evaluation result from LLM-as-a-Judge
- */
-export interface EvaluationResult {
-  score: number;
-  reasoning: string;
-  evaluationModel: string;
-  durationMs: number;
-}
+// Re-export so existing importers of EvaluationResult from this module continue to work.
+export { EvaluationResult } from "../utils/evaluationResponseParser";
 
 /**
  * Faithfulness evaluation input
@@ -298,27 +292,6 @@ Evaluate how relevant this character profile is to the user's story idea. Consid
    * Returns null if parsing fails to distinguish from actual scores
    */
   private parseEvaluationResponse(content: string, model: string, durationMs: number): EvaluationResult | null {
-    try {
-      // Try to extract JSON from the response - use non-greedy match to get first JSON object
-      const jsonMatch = content.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
-      if (!jsonMatch) {
-        throw new Error("No JSON found in response");
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-      const score = Math.max(0, Math.min(1, Number(parsed.score) || 0));
-      const reasoning = String(parsed.reasoning || "No reasoning provided");
-
-      return {
-        score,
-        reasoning,
-        evaluationModel: model,
-        durationMs,
-      };
-    } catch (error) {
-      console.warn(`[EvaluationService] Failed to parse evaluation response: ${content}`);
-      // Return null to indicate parse failure rather than masking with arbitrary score
-      return null;
-    }
+    return parseJudgeResponse(content, model, durationMs);
   }
 }
