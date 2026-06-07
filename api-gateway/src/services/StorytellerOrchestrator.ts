@@ -77,6 +77,12 @@ export interface GenerationOptions {
   embeddingApiKey?: string;
   /** Opt-in spice rewrite config (Slice 2). Absent = feature off. */
   spiceConfig?: SpiceConfig;
+  /** Phase-based regeneration: start the chain at this phase, seeding earlier phases from previousRunId. Absent = start at genesis (full run). */
+  startFromPhase?: GenerationPhase;
+  /** Source run whose artifacts seed skipped phases / reused scenes. Required when startFromPhase != genesis or scenesToRegenerate is set. */
+  previousRunId?: string;
+  /** Scene-level regeneration: 1-indexed scene numbers to regenerate; all other scenes reuse previousRunId artifacts. Absent = draft all scenes. */
+  scenesToRegenerate?: number[];
 }
 
 /**
