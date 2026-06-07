@@ -660,6 +660,7 @@ export class LLMProviderService {
     return {
       content: response.choices[0]?.message?.content ?? "",
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.OPENAI,
       usage: {
         promptTokens: response.usage?.prompt_tokens ?? 0,
@@ -746,6 +747,7 @@ export class LLMProviderService {
     return {
       content,
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.ANTHROPIC,
       usage: {
         promptTokens: inputTokens,
@@ -815,6 +817,7 @@ export class LLMProviderService {
     return {
       content: parsed.content,
       model: options.model,
+      resolvedModel: options.model,
       provider: LLMProvider.GEMINI,
       usage: parsed.usage,
       finishReason: parsed.finishReason,
@@ -907,6 +910,7 @@ export class LLMProviderService {
     return {
       content: response.choices[0]?.message?.content ?? "",
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.OPENROUTER,
       usage: {
         promptTokens: response.usage?.prompt_tokens ?? 0,
@@ -954,6 +958,7 @@ export class LLMProviderService {
     return {
       content: response.choices[0]?.message?.content ?? "",
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.DEEPSEEK,
       usage: {
         promptTokens: response.usage?.prompt_tokens ?? 0,
@@ -1001,6 +1006,7 @@ export class LLMProviderService {
     return {
       content: response.choices[0]?.message?.content ?? "",
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.VENICE,
       usage: {
         promptTokens: response.usage?.prompt_tokens ?? 0,

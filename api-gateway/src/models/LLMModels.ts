@@ -87,6 +87,10 @@ export class LLMResponse {
   @Optional()
   @Property()
   latencyMs?: number;
+
+  @Optional()
+  @Property()
+  resolvedModel?: string;
 }
 
 /**
