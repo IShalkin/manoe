@@ -21,6 +21,12 @@ import { ContentGuardrail, ConsistencyGuardrail, GuardrailResult } from "../guar
 export abstract class BaseAgent {
   protected redisStreams?: RedisStreamsService;
 
+  /** Optional sink the orchestrator wires up to record per-phase resolved model + sampling params (issue #162). */
+  public onLLMCall?: (runId: string, meta: {
+    provider: string; requestedModel: string; resolvedModel: string;
+    temperature: number; seed?: number; maxTokens: number; phase: string;
+  }) => void;
+
   constructor(
     protected agentType: AgentType,
     protected llmProvider: LLMProviderService,
@@ -73,6 +79,18 @@ export abstract class BaseAgent {
       // Track in Langfuse
       this.langfuse.trackLLMCall(runId, this.agentType, messages, response, spanId);
       this.langfuse.endSpan(runId, spanId, { content: response.content.substring(0, 500) });
+
+      // Notify the orchestrator sink (if wired) with resolved model + sampling params (#162).
+      const llmMeta = {
+        provider: llmConfig.provider as string,
+        requestedModel: llmConfig.model,
+        resolvedModel: response.resolvedModel ?? llmConfig.model,
+        temperature: llmConfig.temperature ?? 0.7,
+        seed: (llmConfig as { seed?: number }).seed,
+        maxTokens: getMaxTokensForPhase(phase),
+        phase: String(phase),
+      };
+      this.onLLMCall?.(runId, llmMeta);
 
       return response.content;
     } catch (error) {
