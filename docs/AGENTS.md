@@ -319,6 +319,29 @@ This enables:
 
 - **Run reproducibility (`run_config` artifact):** each run persists a `run_config` artifact capturing the per-run `seed`, the requested provider/model/temperature, and a per-phase record of the *resolved* model id and sampling params (temperature, seed, maxTokens). Use it to bisect a quality regression to model vs. prompt vs. sampling. Floating model aliases are unchanged; the resolved id is what the provider actually served.
 
+## Run State & Scaling (issue #157)
+
+### Slice A (shipped)
+
+Run *status* is mirrored to Redis (`manoe:run_status:{runId}`) at every lifecycle
+transition (start, phase change, pause/resume/cancel, completion, error, scene
+boundary). Any replica can answer `GET /orchestrate/status/:runId` and
+`GET /orchestrate/stream/:runId` for a live run, even one it does not own in heap.
+
+Full state is checkpointed to Supabase (`artifact_type: run_state_checkpoint`,
+`phase: checkpoint_scene_N`) at each scene boundary. A hard crash loses at most
+the in-progress scene; `restoreFromShutdown` falls back to the latest checkpoint
+when no graceful-shutdown snapshot exists.
+
+### NOT yet shipped
+
+Cross-instance pause/resume/cancel and mid-LLM-call abort. The running loop and
+its control flags (`isPaused`, `isCancelled`) remain in the owning instance's
+process heap.
+
+**Run the api-gateway as a single replica** (`deploy.replicas: 1` is pinned in
+`docker-compose.vps.yml`) until Slice B (Redis pub/sub control channel) lands.
+
 ## Extending Agents
 
 To add a new agent:
