@@ -898,6 +898,9 @@ export class StorytellerOrchestrator {
     const scenes = (state.outline as Record<string, unknown>)?.scenes as unknown[];
     if (!Array.isArray(scenes)) return;
 
+    // Scene-level regeneration (Decision 3): compute per-scene plan once before the loop.
+    const scenePlan = this.scenesToRun(scenes.length, options.scenesToRegenerate);
+
     for (let sceneNum = 0; sceneNum < scenes.length; sceneNum++) {
       if (this.shouldStop(runId)) return;
 
@@ -905,6 +908,18 @@ export class StorytellerOrchestrator {
       // at the end of the scene (a safe boundary) so gracefulShutdown can wait.
       state.inFlight = true;
       state.currentScene = sceneNum + 1;
+
+      // Scene-level regeneration: reuse prior prose for scenes not in scenesToRegenerate,
+      // instead of re-running the full draft→polish work.
+      if (!scenePlan[sceneNum].regenerate && options.previousRunId) {
+        const reused = await this.reuseSceneFromPreviousRun(runId, options, sceneNum + 1);
+        if (reused) {
+          state.inFlight = false;
+          continue;
+        }
+        // If no prior artifact existed, fall through and draft this scene normally.
+      }
+
       // Slice 2: assemble the per-scene contract from blackboard regions and
       // stash it on state so Writer/Critic can read it without re-assembling.
       state.currentSceneContract = assembleSceneContract(state, sceneNum + 1);
