@@ -13,6 +13,7 @@ import { BaseAgent } from "./BaseAgent";
 import { AgentContext, AgentOutput, GenerationOptions } from "./types";
 import { ContentGuardrail, ConsistencyGuardrail } from "../guardrails";
 import { RedisStreamsService } from "../services/RedisStreamsService";
+import { buildCanonicalNamesBlock as buildCanonicalNamesBlockHelper } from "../utils/canonicalNames";
 
 export class WriterAgent extends BaseAgent {
   constructor(
@@ -505,27 +506,7 @@ ${autonomousInstruction}`;
    * Used to prevent "name amnesia" where LLM introduces new character names during revision
    */
   private buildCanonicalNamesBlock(characters: unknown): string {
-    if (!characters || !Array.isArray(characters)) {
-      return "No characters established yet.";
-    }
-
-    const names: string[] = [];
-    for (const char of characters) {
-      if (typeof char === "object" && char !== null) {
-        const charObj = char as Record<string, unknown>;
-        // Extract name from various possible fields
-        const name = charObj.name || charObj.fullName || charObj.characterName;
-        if (typeof name === "string" && name.trim()) {
-          names.push(name.trim());
-        }
-      }
-    }
-
-    if (names.length === 0) {
-      return "No named characters established yet.";
-    }
-
-    return names.map(name => `- ${name}`).join("\n");
+    return buildCanonicalNamesBlockHelper(characters);
   }
 }
 
