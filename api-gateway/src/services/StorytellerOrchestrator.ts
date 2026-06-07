@@ -256,6 +256,7 @@ export class StorytellerOrchestrator {
     }
 
     this.activeRuns.set(runId, state);
+    void this.mirrorStatus(runId); // #157 Slice A: mirror initial state
     $log.info(`[StorytellerOrchestrator] startGeneration: state initialized and stored, runId: ${runId}`);
 
     // Wire the per-call metadata sink onto all agent singletons (#162).
@@ -401,6 +402,7 @@ export class StorytellerOrchestrator {
       // Mark as completed
       state.isCompleted = true;
       state.updatedAt = new Date().toISOString();
+      await this.mirrorStatus(runId); // #157 Slice A: terminal mirror (await for durability)
 
       await this.publishEvent(runId, "generation_complete", {
         projectId: options.projectId,
@@ -2627,6 +2629,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
   private async publishPhaseStart(runId: string, phase: GenerationPhase): Promise<void> {
     await this.publishEvent(runId, "phase_start", { phase });
     this.langfuse.addEvent(runId, "phase_start", { phase });
+    void this.mirrorStatus(runId); // #157 Slice A
   }
 
   /**
@@ -2639,6 +2642,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
   ): Promise<void> {
     await this.publishEvent(runId, "phase_complete", { phase, artifact });
     this.langfuse.addEvent(runId, "phase_complete", { phase });
+    void this.mirrorStatus(runId); // #157 Slice A
   }
 
   /**
@@ -2676,6 +2680,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     if (state) {
       state.error = errorMessage;
       state.updatedAt = new Date().toISOString();
+      await this.mirrorStatus(runId); // #157 Slice A: terminal mirror on error
     }
 
     // Publish detailed ERROR event - clients MUST check for this
@@ -2773,27 +2778,72 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     return [parsed];
   }
 
+  // ==================== REDIS STATUS MIRROR (issue #157, Slice A) ====================
+
+  /** Mirror the small run-status record to Redis (issue #157, Slice A). Best-effort. */
+  private async mirrorStatus(runId: string): Promise<void> {
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+    try {
+      await this.redisStreams.setRunStatus({
+        runId: state.runId,
+        projectId: state.projectId,
+        phase: String(state.phase),
+        currentScene: state.currentScene,
+        totalScenes: state.totalScenes,
+        isPaused: state.isPaused,
+        isCompleted: state.isCompleted,
+        error: state.error,
+        startedAt: state.startedAt,
+        updatedAt: state.updatedAt,
+      });
+    } catch (err) {
+      console.warn(`[Orchestrator] mirrorStatus failed for ${runId}: ${String(err)}`);
+    }
+  }
+
   // ==================== PUBLIC API ====================
 
   /**
-   * Get run status
+   * Get run status. Falls back to the Redis mirror so cross-replica status/stream
+   * requests succeed for a live run (issue #157, Slice A).
    */
-  getRunStatus(runId: string): RunStatus | null {
+  async getRunStatus(runId: string): Promise<RunStatus | null> {
     const state = this.activeRuns.get(runId);
-    if (!state) return null;
-
-    return {
-      runId: state.runId,
-      projectId: state.projectId,
-      phase: state.phase,
-      currentScene: state.currentScene,
-      totalScenes: state.totalScenes,
-      isPaused: state.isPaused,
-      isCompleted: state.isCompleted,
-      error: state.error,
-      startedAt: state.startedAt,
-      updatedAt: state.updatedAt,
-    };
+    if (state) {
+      return {
+        runId: state.runId,
+        projectId: state.projectId,
+        phase: state.phase,
+        currentScene: state.currentScene,
+        totalScenes: state.totalScenes,
+        isPaused: state.isPaused,
+        isCompleted: state.isCompleted,
+        error: state.error,
+        startedAt: state.startedAt,
+        updatedAt: state.updatedAt,
+      };
+    }
+    // Cross-instance fallback: this run may be live on another replica.
+    try {
+      const mirror = await this.redisStreams.getRunStatusMirror(runId);
+      if (!mirror) return null;
+      return {
+        runId: mirror.runId,
+        projectId: mirror.projectId,
+        phase: mirror.phase as RunStatus["phase"],
+        currentScene: mirror.currentScene,
+        totalScenes: mirror.totalScenes,
+        isPaused: mirror.isPaused,
+        isCompleted: mirror.isCompleted,
+        error: mirror.error,
+        startedAt: mirror.startedAt ?? new Date().toISOString(),
+        updatedAt: mirror.updatedAt ?? new Date().toISOString(),
+      };
+    } catch (err) {
+      console.warn(`[Orchestrator] getRunStatus Redis fallback failed for ${runId}: ${String(err)}`);
+      return null;
+    }
   }
 
   /**
@@ -2812,6 +2862,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
     state.isPaused = true;
     state.updatedAt = new Date().toISOString();
+    void this.mirrorStatus(runId); // #157 Slice A
     return true;
   }
 
@@ -2824,6 +2875,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
     state.isPaused = false;
     state.updatedAt = new Date().toISOString();
+    void this.mirrorStatus(runId); // #157 Slice A
     return true;
   }
 
@@ -2855,6 +2907,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     state.isCancelled = true;
     state.error = "Cancelled by user";
     state.updatedAt = new Date().toISOString();
+    void this.mirrorStatus(runId); // #157 Slice A
     return true;
   }
 

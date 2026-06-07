@@ -395,8 +395,8 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     @Req() req: Request,
     @Res() res: Response
   ): Promise<void> {
-    // Check if run exists
-    const status = this.orchestrator.getRunStatus(runId);
+    // Check if run exists (falls back to Redis mirror for cross-replica runs — #157 Slice A)
+    const status = await this.orchestrator.getRunStatus(runId);
     if (!status) {
       res.status(404).json({ error: "Run not found" });
       return;
@@ -549,11 +549,11 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
   @Description("Returns the current status of a generation run including phase, progress, and any errors.")
   @Returns(200, RunStatusDTO)
   @Returns(404)
-  getStatus(
+  async getStatus(
     @PathParams("runId") runId: string
-  ): RunStatusDTO | { error: string } {
-    const status = this.orchestrator.getRunStatus(runId);
-    
+  ): Promise<RunStatusDTO | { error: string }> {
+    const status = await this.orchestrator.getRunStatus(runId);
+
     if (!status) {
       return { error: "Run not found" };
     }

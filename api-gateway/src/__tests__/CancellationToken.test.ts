@@ -72,7 +72,7 @@ function seed(orch: StorytellerOrchestrator, runId: string, state: AnyObj) {
 }
 
 describe("StorytellerOrchestrator cooperative cancellation", () => {
-  it("cancelRun marks the run cancelled cooperatively without deleting it", () => {
+  it("cancelRun marks the run cancelled cooperatively without deleting it", async () => {
     const orch = new StorytellerOrchestrator();
     const runId = "run-cancel";
     const state = makeState(runId);
@@ -87,7 +87,7 @@ describe("StorytellerOrchestrator cooperative cancellation", () => {
 
     // The state must STILL be retrievable (not immediately deleted) so in-flight
     // code that re-reads activeRuns sees a coherent cancelled state.
-    const status = orch.getRunStatus(runId);
+    const status = await orch.getRunStatus(runId);
     expect(status).not.toBeNull();
     expect(status!.error).toBeTruthy();
   });
