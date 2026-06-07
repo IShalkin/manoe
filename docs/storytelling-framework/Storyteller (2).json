@@ -1,0 +1,1399 @@
+{
+  "name": "Storyteller",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "Genesis: Seed the story with initial concept and artistic intent.\n\n"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        180,
+        -260
+      ],
+      "typeVersion": 1,
+      "id": "1cf19cdf-d389-470f-9b92-5c6114c9eea9",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Audience: Define the target audience (without moral pre-judgment).\n\n"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        520,
+        -260
+      ],
+      "typeVersion": 1,
+      "id": "402f5824-b82b-4b73-b150-22f04b048055",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "Compass: Set the moral compass (ethical, unethical, amoral, ambiguous, etc.)."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        840,
+        -260
+      ],
+      "typeVersion": 1,
+      "id": "5978ec17-35b4-4c65-a2c5-2c9b5464e86f",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "Foundation: Establish archetypal, mythic, and thematic frameworks (optional and versatile).\n\n"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1120,
+        -260
+      ],
+      "typeVersion": 1,
+      "id": "3b81ce0f-2310-4dd8-94e5-4f2572270948",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "Character: Craft morally flexible characters and narrators."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1400,
+        -260
+      ],
+      "typeVersion": 1,
+      "id": "d33eeeb9-6e2e-4e85-8fa5-33bfd3f3f292",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "Plot: Design morally directed plot arcs with user-guided shaping.",
+        "width": 220
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1680,
+        -260
+      ],
+      "typeVersion": 1,
+      "id": "e63bfb08-c38e-4303-9815-1cb7b731f61e",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "Timeline: Develop an ethically informed timeline and pacing."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        180,
+        -40
+      ],
+      "typeVersion": 1,
+      "id": "93c17b6d-077f-4944-a56c-82a7afe0797c",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "Drafting: Generate the first draft with a stylistically tuned voice."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        520,
+        -40
+      ],
+      "typeVersion": 1,
+      "id": "722de8e2-616d-4e78-bcc3-9831b0bb01ad",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "Feedback: Receive ethically neutral artistic critique (AI and optional human)."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        840,
+        -40
+      ],
+      "typeVersion": 1,
+      "id": "d19bd830-b877-4e08-95df-033645159ba3",
+      "name": "Sticky Note8"
+    },
+    {
+      "parameters": {
+        "content": "Refinement:** Iteratively refine the story based on feedback."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1120,
+        -40
+      ],
+      "typeVersion": 1,
+      "id": "a171a78f-c411-456d-b8ec-700658ff0ff6",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "content": "Originality: Ensure ethically unconstrained originality and impact."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1400,
+        -40
+      ],
+      "typeVersion": 1,
+      "id": "bff114b0-f8c5-4f30-a3d6-2fafa4acb7b8",
+      "name": "Sticky Note10"
+    },
+    {
+      "parameters": {
+        "content": "Archive: Save and organize the final narrative.",
+        "width": 220
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1680,
+        -40
+      ],
+      "typeVersion": 1,
+      "id": "90e3c4e6-70e3-42fe-9adc-082cb8096db6",
+      "name": "Sticky Note11"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7b42abb6-f452-48be-bed0-6f982063bd68",
+              "name": "Prompt for a story",
+              "value": "Story about an Alice in Wonderland marketing world, like 99 franks.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3d9f00f4-cd06-4380-8fab-ed55a68c5f5b",
+      "name": "$INPUTS$",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        520,
+        760
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "f7a426c2-4d47-44c9-9a72-8e987a98f7ef",
+      "name": "Sentiment Analysis",
+      "type": "@n8n/n8n-nodes-langchain.sentimentAnalysis",
+      "position": [
+        800,
+        960
+      ],
+      "retryOnFail": true,
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "ae82d231-fd5c-4dc6-ae4e-b5dd0aa6b332",
+      "name": "Connect",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1340,
+        840
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "062d65b2-757a-4654-94c1-eda614cee964",
+      "name": "Convince",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1160,
+        840
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "5a3dca78-ef74-4fc5-9c32-2805f69c67f3",
+      "name": "Explain",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1340,
+        1000
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "bf07b719-c510-43eb-a3b0-fa5efb3c5181",
+      "name": "Impress",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1160,
+        1000
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "54176e46-ebfc-4ca7-a837-1a53e01ebd17",
+      "name": "Lead",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1160,
+        1160
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "d04d9635-4518-4139-bc02-a5f33aa2a5a3",
+      "name": "Motivate",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1340,
+        1160
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "2c4737ac-afb7-4dbb-a42b-2befd1ee9fae",
+      "name": "Sell",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1520,
+        1000
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "acedbccf-9e55-4a6e-bddf-660400440fab",
+      "name": "prompt",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1760,
+        840
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "881216a3-c6f2-46f8-8c32-53caa79d33de",
+      "name": "pick cards",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        260,
+        1440
+      ],
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "4850b163-6fb3-4268-ac84-c5d859070b22",
+      "name": "story baseline",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1900,
+        840
+      ],
+      "retryOnFail": true,
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "db70a570-b437-402c-9ed9-1a90c3a659c7",
+      "name": "story plot",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1880,
+        1440
+      ],
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "a58c9438-a877-4707-a112-726f7ae3c6cd",
+      "name": "Split Out",
+      "type": "n8n-nodes-base.splitOut",
+      "position": [
+        640,
+        1440
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "c286aef7-58de-479d-86db-0603d7d4f3fa",
+      "name": "story enhancement",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1100,
+        1440
+      ],
+      "retryOnFail": true,
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "bc10c0c7-76b9-49b1-b82e-8d67ba478b70",
+      "name": "characters",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1740,
+        1140
+      ],
+      "retryOnFail": true,
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "244588ba-1c40-4b77-a2b3-96554f7c84d2",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [
+        880,
+        1440
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "id": "a238079b-ead1-481c-ba22-47dc2f5d2812",
+      "name": "Aggregate",
+      "type": "n8n-nodes-base.aggregate",
+      "position": [
+        1600,
+        1440
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "da723ad4-d6dc-4612-9ded-cfb825c0111a",
+      "name": "story timeline",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "maxTries": 5,
+      "position": [
+        260,
+        1740
+      ],
+      "retryOnFail": true,
+      "typeVersion": 1.7,
+      "waitBetweenTries": 100
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "b7993b62-25f7-49c6-94a7-c9c5f4594add",
+      "name": "story draft",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "maxTries": 5,
+      "position": [
+        840,
+        1740
+      ],
+      "retryOnFail": true,
+      "typeVersion": 1.7,
+      "waitBetweenTries": 100
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "438e6a54-0bee-4163-b7a4-96754bdd31e2",
+      "name": "edit notes",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "maxTries": 5,
+      "position": [
+        1340,
+        1740
+      ],
+      "retryOnFail": true,
+      "typeVersion": 1.7,
+      "waitBetweenTries": 100
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "002074b6-4609-4f42-b196-92e7895f57bc",
+      "name": "story_final",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1800,
+        1740
+      ],
+      "retryOnFail": true,
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "root",
+          "cachedResultName": "/ (Root folder)"
+        },
+        "options": {}
+      },
+      "id": "bf93487f-0baf-457f-a05b-aa9e3bdb7e66",
+      "name": "create_story_file",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [
+        380,
+        2000
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "9b720bd4-9e88-4715-9449-dd3503b3ac74",
+      "name": "Edit Fields1",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        840,
+        2000
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 260,
+        "width": 580
+      },
+      "id": "7b65be46-2214-4339-a1ec-d45d94caa085",
+      "name": "Sticky Note16",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1680,
+        1040
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 280,
+        "width": 440
+      },
+      "id": "fd0055ab-543d-4b6f-b333-b6e3785fbc65",
+      "name": "Sticky Note17",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        760,
+        1640
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 300,
+        "width": 460
+      },
+      "id": "e47d39ad-cf8a-43d9-8f57-3aaec5217eb3",
+      "name": "Sticky Note19",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1800,
+        1320
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 300,
+        "width": 920
+      },
+      "id": "9ad2ce7b-263a-445d-a05a-d3d0c040db4a",
+      "name": "Sticky Note20",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        840,
+        1320
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 360,
+        "width": 480
+      },
+      "id": "29d1bb00-2aa5-4f95-8183-14937e40f304",
+      "name": "Sticky Note21",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        220,
+        940
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 280,
+        "width": 500
+      },
+      "id": "58a6c2cb-5387-482a-af03-1f0d1e8c5aae",
+      "name": "Sticky Note22",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        220,
+        1640
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 280,
+        "width": 440
+      },
+      "id": "bda46d07-13fb-43ae-9308-c7e37b611974",
+      "name": "Sticky Note23",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1240,
+        1640
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "width": 220
+      },
+      "id": "437b27a0-997d-45db-8f6a-3cc4b266dab9",
+      "name": "Sticky Note24",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        220,
+        740
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 560,
+        "width": 900
+      },
+      "id": "ce7f8e13-7874-4cf4-9209-a0e232dbd05f",
+      "name": "Sticky Note25",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        740,
+        740
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "ebc20666-91c0-4c6d-b940-a016eae28c49",
+      "name": "story rules1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        260,
+        1040
+      ],
+      "retryOnFail": true,
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "content": "",
+        "width": 200
+      },
+      "id": "afc11163-8fba-40c1-9de0-8c8423429bd4",
+      "name": "Sticky Note26",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        500,
+        740
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 260,
+        "width": 580
+      },
+      "id": "2bdd94ae-4e91-4e28-bb24-6ff4abeff076",
+      "name": "Sticky Note27",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1680,
+        740
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 300,
+        "width": 580
+      },
+      "id": "59d5b7df-40ca-4291-8190-0ca3b4de15e7",
+      "name": "Sticky Note28",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        220,
+        1320
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        280,
+        760
+      ],
+      "id": "5029650f-6a08-44d8-8f5a-0136fc1a74a5",
+      "name": "When clicking ‘Test workflow’"
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 280,
+        "width": 540
+      },
+      "id": "68be530e-d2c5-43a2-b507-37fae4fd9384",
+      "name": "Sticky Note29",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1720,
+        1640
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 280,
+        "width": 500
+      },
+      "id": "4fbf53c9-2e42-4e82-9377-d9431c71077b",
+      "name": "Sticky Note30",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        220,
+        1940
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 280,
+        "width": 440
+      },
+      "id": "1fb81571-8a6a-4b2e-9781-e84b210fd8cb",
+      "name": "Sticky Note31",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        760,
+        1940
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 280,
+        "width": 440
+      },
+      "id": "26505893-0003-4eee-b7c6-7e0f45d7f321",
+      "name": "Sticky Note32",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1240,
+        1940
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-2.0-flash-exp:free",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1480,
+        2060
+      ],
+      "id": "d2285c55-fc97-4fc6-a833-cbf134c18adf",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "3r7lAuuD4etghHzi",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        540,
+        1000
+      ],
+      "id": "cf419521-bd06-480c-b045-1bfd625bd3b2",
+      "name": "rules json2"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        2140,
+        760
+      ],
+      "id": "99a2b5a6-3647-49f6-a6c8-20717528c1b9",
+      "name": "json schema"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        2060,
+        1100
+      ],
+      "id": "1f28048e-adce-425a-b6b6-551fb1dd4107",
+      "name": "character json"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        2180,
+        1340
+      ],
+      "id": "08f651dc-f23a-4a03-9c83-d1c0fe3fb9cd",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        2080,
+        1700
+      ],
+      "id": "92b9e4ab-eaae-4114-baba-7ea12a95324f",
+      "name": "Structured Output Parser2"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        1600,
+        1640
+      ],
+      "id": "a51e1793-b170-499f-8b99-864411f95b4a",
+      "name": "edit notes json"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        1680
+      ],
+      "id": "6ecfa6b2-43af-4add-924c-e04fc753a248",
+      "name": "Structured Output Parser3"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        560,
+        1660
+      ],
+      "id": "b64c9f91-ae58-48c9-abb2-acc28a3bba40",
+      "name": "timeline json"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        560,
+        1380
+      ],
+      "id": "0b24755a-dbe7-42ba-940c-04a0b13cc426",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        1360
+      ],
+      "id": "b29d2ae8-f8c5-464f-98b0-6ede756f4c53",
+      "name": "story enhancements json"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "$INPUTS$": {
+      "main": [
+        [
+          {
+            "node": "story rules1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sentiment Analysis": {
+      "main": [
+        [
+          {
+            "node": "Connect",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Convince",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Explain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Connect": {
+      "main": [
+        [
+          {
+            "node": "prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convince": {
+      "main": [
+        [
+          {
+            "node": "prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explain": {
+      "main": [
+        [
+          {
+            "node": "prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Impress": {
+      "main": [
+        [
+          {
+            "node": "prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead": {
+      "main": [
+        [
+          {
+            "node": "prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Motivate": {
+      "main": [
+        [
+          {
+            "node": "prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sell": {
+      "main": [
+        [
+          {
+            "node": "prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prompt": {
+      "main": [
+        [
+          {
+            "node": "story baseline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "pick cards": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "story baseline": {
+      "main": [
+        [
+          {
+            "node": "characters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "story plot": {
+      "main": [
+        [
+          {
+            "node": "story timeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "story enhancement": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "characters": {
+      "main": [
+        [
+          {
+            "node": "pick cards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "story enhancement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "story plot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "story timeline": {
+      "main": [
+        [
+          {
+            "node": "story draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "story draft": {
+      "main": [
+        [
+          {
+            "node": "edit notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "edit notes": {
+      "main": [
+        [
+          {
+            "node": "story_final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "story_final": {
+      "main": [
+        [
+          {
+            "node": "create_story_file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_story_file": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "story rules1": {
+      "main": [
+        [
+          {
+            "node": "Sentiment Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Test workflow’": {
+      "main": [
+        [
+          {
+            "node": "$INPUTS$",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "story_final",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "story plot",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "edit notes",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "characters",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "story baseline",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "story enhancement",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Sentiment Analysis",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "story rules1",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "pick cards",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "story draft",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "story timeline",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "rules json2": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "story rules1",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "json schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "story baseline",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "character json": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "characters",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "story plot",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser2": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "story_final",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "edit notes json": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "edit notes",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser3": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "story draft",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "timeline json": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "story timeline",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "pick cards",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "story enhancements json": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "story enhancement",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "67b2cc40-c6b7-4fa6-a0cb-ae847e0a6f8a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "51a02fc190ddba6112c3a2867fcf334ebf31d6f91d687aa0290a16a2659613cb"
+  },
+  "id": "2ivPe7qBOAmneb6j",
+  "tags": []
+}

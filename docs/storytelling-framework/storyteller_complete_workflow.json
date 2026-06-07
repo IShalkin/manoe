@@ -1,0 +1,1094 @@
+[
+  {
+    "name": "Storyteller Framework Complete Workflow",
+    "description": "12-stage AI-powered story generation framework",
+    "nodes": [
+      {
+        "parameters": {},
+        "name": "Start",
+        "type": "n8n-nodes-base.start",
+        "typeVersion": 1,
+        "position": [100, 300]
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "story/create",
+          "options": {
+            "responseMode": "responseNode",
+            "responseData": "allEntries"
+          }
+        },
+        "name": "Webhook - Entry",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1,
+        "position": [300, 300]
+      },
+      {
+        "parameters": {
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "nodeCredentialName": "OpenAI API",
+          "options": {
+            "allowUnauthorizedCerts": false,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "name": "OpenAI - Initialize",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [500, 300]
+      },
+      {
+        "parameters": {
+          "values": {
+            "string": [
+              {
+                "name": "seedIdea",
+                "value": "={{ $json.body.seedIdea }}"
+              },
+              {
+                "name": "title",
+                "value": "={{ $json.body.title || 'Untitled Story' }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "Set - Extract Request Data",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 1,
+        "position": [500, 450]
+      },
+      {
+        "parameters": {
+          "keepOnlySet": true,
+          "values": {
+            "string": [
+              {
+                "name": "storyId",
+                "value": "={{ UUID.V4() }}"
+              },
+              {
+                "name": "timestamp",
+                "value": "={{ DateTime.now().toISO() }}"
+              },
+              {
+                "name": "status",
+                "value": "initializing"
+              },
+              {
+                "name": "seedIdea",
+                "value": "={{ $json.seedIdea }}"
+              },
+              {
+                "name": "title",
+                "value": "={{ $json.title }}"
+              }
+            ],
+            "object": [
+              {
+                "name": "metadata",
+                "value": {
+                  "version": "1.0",
+                  "framework": "storyteller",
+                  "stage": "genesis",
+                  "aiModels": {
+                    "primary": "gpt-4",
+                    "creative": "deepseek-r",
+                    "rapid": "o1"
+                  }
+                }
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "Set - Initialize Story",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 1,
+        "position": [700, 300]
+      },
+      {
+        "parameters": {
+          "operation": "insert",
+          "schema": "public",
+          "table": "stories",
+          "columns": "id,title,seed_idea,moral_compass,target_audience,framework,status,created_at,metadata",
+          "values": {
+            "id": "={{ $json.storyId }}",
+            "title": "={{ $json.title }}",
+            "seed_idea": "={{ $json.seedIdea }}",
+            "moral_compass": "={{ $json.moralCompass }}",
+            "target_audience": "={{ $json.targetAudience }}",
+            "framework": "standard",
+            "status": "={{ $json.status }}",
+            "created_at": "={{ $json.timestamp }}",
+            "metadata": "={{ $json.metadata }}"
+          }
+        },
+        "name": "PostgreSQL - Create Story",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 1,
+        "position": [900, 300]
+      },
+      {
+        "parameters": {
+          "command": "set",
+          "key": "={{ 'story:' + $json.storyId + ':status' }}",
+          "value": "={{ $json.status }}",
+          "options": {
+            "expireTime": 86400
+          }
+        },
+        "name": "Redis - Set Status",
+        "type": "n8n-nodes-base.redis",
+        "typeVersion": 1,
+        "position": [1100, 300]
+      },
+      {
+        "parameters": {
+          "values": {
+            "string": [
+              {
+                "name": "moralCompass",
+                "value": "={{ $json.body.moralCompass }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "Set - Define Moral Compass",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 1,
+        "position": [300, 450]
+      },
+      {
+        "parameters": {
+          "values": {
+            "string": [
+              {
+                "name": "targetAudience",
+                "value": "={{ $json.body.targetAudience }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "Set - Target Audience",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 1,
+        "position": [500, 450]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a storytelling assistant specializing in narrative possibilities analysis."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Generate narrative possibilities for this story idea: ' + $json.seedIdea }}"
+                  }
+                ]
+              },
+              {
+                "name": "temperature",
+                "value": 0.7
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Generate Narrative Possibilities",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [700, 450]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "string": [
+              {
+                "value1": "={{ $json.body.narrativeFramework }}",
+                "operation": "equals",
+                "value2": "Hero's Journey"
+              }
+            ]
+          }
+        },
+        "name": "Switch - Choose Framework",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 1,
+        "position": [900, 450]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a narrative framework specialist."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Analyze and choose the best framework for this story: ' + $json.seedIdea }}"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Choose Framework",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [1100, 450]
+      }
+    ],
+    "connections": {
+      "Start": {
+        "main": [
+          [
+            {
+              "node": "Webhook - Entry",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook - Entry": {
+        "main": [
+          [
+            {
+              "node": "OpenAI - Initialize",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenAI - Initialize": {
+        "main": [
+          [
+            {
+              "node": "Set - Extract Request Data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Set - Extract Request Data": {
+        "main": [
+          [
+            {
+              "node": "Set - Initialize Story",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Set - Initialize Story": {
+        "main": [
+          [
+            {
+              "node": "PostgreSQL - Create Story",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PostgreSQL - Create Story": {
+        "main": [
+          [
+            {
+              "node": "Redis - Set Status",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Redis - Set Status": {
+        "main": [
+          [
+            {
+              "node": "Set - Define Moral Compass",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Set - Define Moral Compass": {
+        "main": [
+          [
+            {
+              "node": "Set - Target Audience",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Set - Target Audience": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Generate Narrative Possibilities",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Generate Narrative Possibilities": {
+        "main": [
+          [
+            {
+              "node": "Switch - Choose Framework",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Switch - Choose Framework": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Choose Framework",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Choose Framework": {
+        "main": [
+          [
+            {
+              "node": "Set - Plot Structure Flags",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "Storyteller Framework Complete Workflow - Part 2",
+    "description": "12-stage AI-powered story generation framework - Plot Structure to Final Polish",
+    "nodes": [
+      {
+        "parameters": {
+          "values": {
+            "boolean": [
+              {
+                "name": "isNonlinear",
+                "value": false
+              },
+              {
+                "name": "isCircular",
+                "value": false
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "Set - Plot Structure Flags",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 1,
+        "position": [300, 600]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a story structure specialist focusing on scene and sequel development."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Develop scene and sequel structure for this framework: ' + $json.chosenFramework }}"
+                  }
+                ]
+              },
+              {
+                "name": "temperature",
+                "value": 0.8
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Scene/Sequel Development",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [500, 600]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a literary device specialist focusing on foreshadowing and irony."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Develop foreshadowing and irony elements for these scenes: ' + $json.scenes }}"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Foreshadowing & Irony",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [700, 600]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a character development specialist."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Generate detailed character profiles for this story: ' + $json.seedIdea }}"
+                  }
+                ]
+              },
+              {
+                "name": "temperature",
+                "value": 0.8
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Generate Characters",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [900, 600]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a psychological profiling specialist for fictional characters."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Add psychological depth to these characters: ' + $json.characters }}"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Add Psychological Depth",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [1100, 600]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a Jungian archetype specialist."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Identify archetypes and shadows for these characters: ' + $json.characters }}"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Archetypes & Shadows",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [300, 750]
+      },
+      {
+        "parameters": {
+          "values": {
+            "string": [
+              {
+                "name": "worldGeography",
+                "value": "={{ $json.body.worldbuilding.geography }}"
+              },
+              {
+                "name": "worldEnvironment",
+                "value": "={{ $json.body.worldbuilding.environment }}"
+              }
+            ]
+          }
+        },
+        "name": "Set - World Geography & Environment",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 1,
+        "position": [500, 750]
+      }
+    ],
+    "connections": {
+      "Set - Plot Structure Flags": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Scene/Sequel Development",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Scene/Sequel Development": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Foreshadowing & Irony",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Foreshadowing & Irony": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Generate Characters",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Generate Characters": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Add Psychological Depth",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Add Psychological Depth": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Archetypes & Shadows",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Archetypes & Shadows": {
+        "main": [
+          [
+            {
+              "node": "Set - World Geography & Environment",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Set - World Geography & Environment": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Culture & Society",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "Storyteller Framework Complete Workflow - Part 3",
+    "description": "12-stage AI-powered story generation framework - Final Stages",
+    "nodes": [
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a cultural worldbuilding specialist."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Develop cultural and societal elements for this setting: ' + $json.worldGeography }}"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Culture & Society",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [300, 900]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a narrative voice specialist."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Develop narrative voice and style for this story: ' + $json.seedIdea }}"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Narration & Voice",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [500, 900]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a dialogue specialist."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Create dialogue patterns for characters: ' + $json.characters }}"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Dialogue Development",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [700, 900]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are an emotional development specialist."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Enhance emotional depth for these characters and scenes: ' + JSON.stringify({characters: $json.characters, scenes: $json.scenes}) }}"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Emotional Depth",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [900, 900]
+      },
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a pacing and tension specialist."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Analyze and optimize narrative drive and tension for plot structure: ' + JSON.stringify({scenes: $json.scenes, storyStructure: $json.storyStructure}) }}"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Narrative Drive",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [1100, 900]
+      }
+    ],
+    "connections": {
+      "AI Agent - Culture & Society": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Narration & Voice",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Narration & Voice": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Dialogue Development",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Dialogue Development": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Emotional Depth",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Emotional Depth": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Narrative Drive",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent - Narrative Drive": {
+        "main": [
+          [
+            {
+              "node": "AI Agent - Final Polish",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "Storyteller Framework Complete Workflow - Part 4",
+    "description": "12-stage AI-powered story generation framework - Final Output & Storage",
+    "nodes": [
+      {
+        "parameters": {
+          "url": "={{ $env.OPENAI_API_URL }}/v1/chat/completions",
+          "authentication": "headerAuth",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bearer ={{ $env.OPENAI_API_KEY }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "gpt-4"
+              },
+              {
+                "name": "messages",
+                "value": [
+                  {
+                    "role": "system",
+                    "content": "You are a story polish and refinement specialist."
+                  },
+                  {
+                    "role": "user",
+                    "content": "={{ 'Provide final polish and refinements for the story with title: ' + $json.title + ', framework: ' + $json.chosenFramework + ', and characters: ' + JSON.stringify($json.characters) }}"
+                  }
+                ]
+              },
+              {
+                "name": "temperature",
+                "value": 0.7
+              },
+              {
+                "name": "max_tokens",
+                "value": 4000
+              }
+            ]
+          },
+          "options": {}
+        },
+        "name": "AI Agent - Final Polish",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 1,
+        "position": [300, 1050]
+      },
+      {
+        "parameters": {
+          "operation": "insert",
+          "schema": "public",
+          "table": "story_versions",
+          "columns": "story_id,version_number,content,changes_summary,created_at",
+          "values": {
+            "story_id": "={{ $json.

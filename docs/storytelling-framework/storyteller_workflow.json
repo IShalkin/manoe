@@ -1,0 +1,405 @@
+{
+  "name": "Storyteller Framework Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "seed-idea",
+        "options": {}
+      },
+      "name": "Webhook - Collect Seed Idea",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        450,
+        300
+      ],
+      "webhookId": "1-1-seed-idea"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "moralCompass",
+              "value": "={{ $json.moralCompass }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set - Define Moral Compass",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "targetAudience",
+              "value": "={{ $json.targetAudience }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set - Target Audience",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate narrative possibilities using the seed idea\nconst seedIdea = $input.item.json.seedIdea;\nconst moralCompass = $input.item.json.moralCompass;\nconst targetAudience = $input.item.json.targetAudience;\n\n// Store data in PostgreSQL for persistence\n// In a real implementation, this would connect to PostgreSQL\n// Here we'll just return placeholder narrative possibilities\nreturn [\n  {\n    json: {\n      seedIdea,\n      moralCompass,\n      targetAudience,\n      narrativePossibilities: [\n        {\n          summary: \"Possibility 1: Hero's Journey\",\n          plotOutline: \"The protagonist starts in their ordinary world, receives a call to adventure...\",\n          conflicts: \"Internal: self-doubt, External: antagonistic force\",\n          potentialTwists: \"Mentor betrayal, unexpected ally\"\n        },\n        {\n          summary: \"Possibility 2: Tragedy\",\n          plotOutline: \"The protagonist starts with high ambitions but a fatal flaw leads to downfall...\",\n          conflicts: \"Internal: hubris, External: societal pressure\",\n          potentialTwists: \"Moment of realization comes too late\"\n        },\n        {\n          summary: \"Possibility 3: Coming of Age\",\n          plotOutline: \"The protagonist navigates challenges that force them to mature...\",\n          conflicts: \"Internal: identity crisis, External: peer pressure\",\n          potentialTwists: \"Loss of innocence moment, mentor relationship\"\n        }\n      ]\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Generate Narrative Possibilities",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.chosenFramework }}",
+              "operation": "equals",
+              "value2": "Hero's Journey"
+            }
+          ]
+        }
+      },
+      "name": "Switch - Choose Framework",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        250,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to choose appropriate framework based on narrative possibilities\nconst narrativePossibilities = $input.item.json.narrativePossibilities;\n\n// This would use LangChain or OpenRouter in a real implementation\n// Here we'll just return a placeholder chosen framework\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      chosenFramework: \"Hero's Journey\",\n      frameworkDetails: {\n        description: \"The classic monomyth structure identified by Joseph Campbell\",\n        stages: [\n          \"Ordinary World\",\n          \"Call to Adventure\",\n          \"Refusal of the Call\",\n          \"Meeting the Mentor\",\n          \"Crossing the Threshold\",\n          \"Tests, Allies, Enemies\",\n          \"Approach to the Inmost Cave\",\n          \"Ordeal\",\n          \"Reward\",\n          \"The Road Back\",\n          \"Resurrection\",\n          \"Return with the Elixir\"\n        ]\n      }\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Choose Framework",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [
+            {
+              "name": "isNonlinear",
+              "value": false
+            },
+            {
+              "name": "isCircular",
+              "value": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set - Nonlinear/Circular Flags",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        450,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to develop scenes and identify key elements\nconst framework = $input.item.json.chosenFramework;\nconst isNonlinear = $input.item.json.isNonlinear;\nconst isCircular = $input.item.json.isCircular;\n\n// In a real implementation, this would use langchain or GPT-4o\n// Here we'll just return placeholder scene development\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      sceneSequelStructure: {\n        scenes: [\n          {\n            name: \"Opening Scene\",\n            purpose: \"Establish ordinary world and introduce protagonist\",\n            chekhov_guns: [\"Mention of a special artifact that will be important later\"]\n          },\n          {\n            name: \"Inciting Incident\",\n            purpose: \"Disturb the status quo and begin the hero's journey\",\n            chekhov_guns: [\"Introduction of a character who will later become crucial\"]\n          }\n        ],\n        sequels: [\n          {\n            name: \"Aftermath of Opening\",\n            purpose: \"Show character's reaction to established situation\",\n            emotional_journey: \"Discontent with ordinary world\"\n          },\n          {\n            name: \"Reaction to Inciting Incident\",\n            purpose: \"Show character processing the call to adventure\",\n            emotional_journey: \"Fear mixed with curiosity\"\n          }\n        ]\n      }\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Scene/Sequel & Chekhov's Gun",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        650,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to develop foreshadowing and irony elements\nconst scenes = $input.item.json.sceneSequelStructure.scenes;\n\n// This would use GPT-4o for creative tasks in a real implementation\n// Here we'll just return placeholder foreshadowing and irony plan\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      foreshadowingPlan: {\n        elements: [\n          {\n            element: \"The artifact mentioned in opening\",\n            foreshadows: \"The climactic confrontation where artifact's power is revealed\",\n            howImplemented: \"Subtle references throughout, growing more prominent\"\n          },\n          {\n            element: \"Protagonist's fear of heights\",\n            foreshadows: \"Final battle taking place on a high structure\",\n            howImplemented: \"Character avoids high places early in story\"\n          }\n        ]\n      },\n      ironyPlan: {\n        elements: [\n          {\n            type: \"Dramatic irony\",\n            description: \"Audience knows the mentor is hiding something, but protagonist doesn't\",\n            payoff: \"Revelation scene in the second act\"\n          },\n          {\n            type: \"Situational irony\",\n            description: \"Character's attempts to avoid destiny lead directly to fulfilling it\",\n            payoff: \"Moment of realization near climax\"\n          }\n        ]\n      }\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Foreshadow & Irony Plan",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        850,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to generate character profiles\nconst seedIdea = $input.item.json.seedIdea;\nconst targetAudience = $input.item.json.targetAudience;\n\n// In a real implementation this would use Deep Seek R for creative generation\n// Here we'll just return placeholder character profiles\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      characters: [\n        {\n          name: \"Alex Chen\",\n          role: \"Protagonist\",\n          occupation: \"Graduate student in archaeology\",\n          demographics: \"28 years old, mixed heritage\",\n          appearance: \"Athletic build, distinctive scar on left hand, usually dressed in practical field clothes\",\n          insecurities: \"Imposter syndrome, fear of failure\",\n          motivation: \"To prove academic theories and gain recognition\",\n          publicGoal: \"Complete dissertation research\",\n          hiddenGoal: \"Surpass famous parent's legacy\",\n          fear: \"Being forgotten or irrelevant\",\n          background: \"Child of renowned archaeologist, struggled to establish own identity\",\n          quirks: \"Talks to artifacts, obsessive note-taking\",\n          skills: \"Languages, rock climbing, photographic memory\"\n        },\n        {\n          name: \"Dr. Eleanor Wright\",\n          role: \"Mentor/Potential Antagonist\",\n          occupation: \"Senior archaeologist, department head\",\n          demographics: \"Late 50s, British\",\n          appearance: \"Silver hair always in a precise bun, impeccably dressed, uses an ornate cane\",\n          insecurities: \"Fear of obsolescence, health concerns\",\n          motivation: \"Preserve archaeological legacy and methods\",\n          publicGoal: \"Guide the next generation of archaeologists\",\n          hiddenGoal: \"Suppress certain discoveries that would invalidate life's work\",\n          fear: \"Being wrong about major theories\",\n          background: \"Traditional academic background, gradually become more rigid with age\",\n          quirks: \"Never takes off gloves at dig sites, quotes obscure academic texts\",\n          skills: \"Unparalleled knowledge of ancient writing systems, institutional influence\"\n        }\n      ]\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Generate Basic Profiles",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "name",
+              "field2": "name"
+            }
+          ]
+        },
+        "options": {
+          "multipleMatches": "first"
+        }
+      },
+      "name": "Merge - Combine with Psychological Depth",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to add psychological depth to characters\nconst characters = $input.item.json.characters;\n\n// In a real implementation this would use GPT-4o for understanding human psychology\n// Here we'll just return placeholder psychological depth additions\nreturn [\n  {\n    json: {\n      characterPsychology: characters.map(character => ({\n        name: character.name,\n        psychologicalTraits: {\n          attachmentStyle: character.name === \"Alex Chen\" ? \"Anxious-Preoccupied\" : \"Dismissive-Avoidant\",\n          maslowHierarchy: character.name === \"Alex Chen\" ? \"Esteem Needs\" : \"Self-Actualization\",\n          coreWound: character.name === \"Alex Chen\" ? \"Feeling overshadowed by parent's success\" : \"Early academic humiliation\",\n          defenseMechanisms: character.name === \"Alex Chen\" ? [\"Rationalization\", \"Compensation\"] : [\"Intellectualization\", \"Denial\"],\n          cognitiveBiases: character.name === \"Alex Chen\" ? [\"Imposter Syndrome\", \"Confirmation Bias\"] : [\"Authority Bias\", \"Sunk Cost Fallacy\"],\n          internalContradictions: character.name === \"Alex Chen\" ? \"Craves recognition yet fears being in the spotlight\" : \"Mentors young archaeologists while secretly sabotaging some\"\n        }\n      }))\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Add Psychological Depth",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        250,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to identify archetypes and shadows\nconst characters = $input.item.json.characters;\nconst characterPsychology = $input.item.json.characterPsychology;\n\n// In a real implementation this would use LangChain or GPT-4o\n// Here we'll just return placeholder archetypes and shadows\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      characterArchetypes: characters.map((character, index) => ({\n        name: character.name,\n        archetypes: {\n          primaryArchetype: character.name === \"Alex Chen\" ? \"The Seeker\" : \"The Guardian\",\n          secondaryArchetype: character.name === \"Alex Chen\" ? \"The Rebel\" : \"The Ruler\",\n          shadowArchetype: character.name === \"Alex Chen\" ? \"The Trickster\" : \"The Destroyer\",\n          jungianArchetypes: character.name === \"Alex Chen\" ? {\n            persona: \"Dedicated academic with something to prove\",\n            shadow: \"Ruthless ambition that might compromise ethics for discovery\",\n            anima_animus: \"Nurturing, collaborative researcher hidden within competitive exterior\",\n            self: \"Becoming a balanced scholar who values both achievement and integrity\"\n          } : {\n            persona: \"Wise, supportive mentor\",\n            shadow: \"Insecure academic threatened by new ideas\",\n            anima_animus: \"Risk-taking explorer suppressed by years of institutional conformity\",\n            self: \"Integration of traditional wisdom with openness to new discoveries\"\n          }\n        }\n      }))\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Archetypes & Shadows",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        450,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "innerConflict",
+              "value": "={{ $json.characters[0].name }} struggles between academic integrity and the temptation to fake evidence to prove their theories."
+            },
+            {
+              "name": "defenseMechanism",
+              "value": "Rationalization - {{ $json.characters[0].name }} justifies questionable research methods by focusing on the greater good of discovery."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set - Inner Conflict & Defense",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        650,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to map character arcs\nconst characters = $input.item.json.characters;\nconst characterArchetypes = $input.item.json.characterArchetypes;\nconst innerConflict = $input.item.json.innerConflict;\n\n// In a real implementation this would save to Redis for agent coordination\n// Here we'll just return placeholder character arcs\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      characterArcs: characters.map((character, index) => ({\n        name: character.name,\n        arcType: character.name === \"Alex Chen\" ? \"Growth Arc\" : \"Fall Arc\",\n        stages: [\n          {\n            stage: \"Beginning State\",\n            description: character.name === \"Alex Chen\" ? \n              \"Ambitious but insecure, willing to cut corners for recognition\" : \n              \"Respected mentor figure with hidden insecurities about relevance\"\n          },\n          {\n            stage: \"Inciting Challenge\",\n            description: character.name === \"Alex Chen\" ? \n              \"Discovery that could make career but evidence is ambiguous\" : \n              \"Student's research threatens to disprove life's work\"\n          },\n          {\n            stage: \"Progressive Complications\",\n            description: character.name === \"Alex Chen\" ? \n              \"Temptation to fabricate evidence grows as pressure increases\" : \n              \"Begins subtle sabotage while maintaining mentor facade\"\n          },\n          {\n            stage: \"Midpoint Reversal\",\n            description: character.name === \"Alex Chen\" ? \n              \"Discovers genuine evidence but it contradicts established theories\" : \n              \"Caught in act of sabotage by another colleague\"\n          },\n          {\n            stage: \"Lowest/Highest Point\",\n            description: character.name === \"Alex Chen\" ? \n              \"Must choose between truth that will be rejected or lie that will be celebrated\" : \n              \"Openly tries to discredit student research, losing colleagues' respect\"\n          },\n          {\n            stage: \"Climactic Decision\",\n            description: character.name === \"Alex Chen\" ? \n              \"Chooses academic integrity despite personal cost\" : \n              \"Final attempt to suppress findings backfires dramatically\"\n          },\n          {\n            stage: \"Resolution State\",\n            description: character.name === \"Alex Chen\" ? \n              \"Less celebrated but internally at peace with contribution to knowledge\" : \n              \"Legacy tarnished but opportunity for redemption through honesty\"\n          }\n        ],\n        dramaTriangle: {\n          startingRole: character.name === \"Alex Chen\" ? \"Victim\" : \"Rescuer\",\n          midpointShift: character.name === \"Alex Chen\" ? \"Rescuer\" : \"Persecutor\",\n          potentialResolution: character.name === \"Alex Chen\" ? \"Creator\" : \"Coach\"\n        }\n      }))\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Character Arc Mapping",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        850,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "geography",
+              "value": "Remote archaeological dig site in mountainous region, nearby small village with limited resources, university campus in major city"
+            },
+            {
+              "name": "environment",
+              "value": "Harsh weather conditions at dig site, contrast between dusty field conditions and sterile academic environments"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set - Geography & Environment",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to develop culture and society\nconst geography = $input.item.json.geography;\n\n// In a real implementation this would use GPT-4o-mini for lighter creative tasks\n// Here we'll just return placeholder culture and society\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      cultureSociety: {\n        localCulture: {\n          traditions: \"Annual festival celebrating ancient civilization, superstitions about disturbing archaeological sites\",\n          language: \"Local dialect differs from national language, few locals speak English\",\n          socialHierarchy: \"Village elder system, respect based on age and wisdom\",\n          attitudeToOutsiders: \"Initial suspicion of archaeologists, warming to those who show respect\"\n        },\n        academicCulture: {\n          politics: \"Competitive funding environment, publish-or-perish mentality\",\n          factions: \"Traditional methodologists vs. technology adopters, theoretical vs. practical approaches\",\n          ethics: \"Ongoing debates about artifact ownership and repatriation\",\n          hierarchy: \"Rigid structure based on publication history and institutional affiliation\"\n        }\n      }\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Culture & Society",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "history",
+              "value": "Ancient civilization flourished 3000-2000 BCE, collapsed mysteriously, site rediscovered in 1920s, major excavations in 1950s-60s, current project is first using new technology"
+            }
+          ],
+          "number": [
+            {
+              "name": "timelinePresentYear",
+              "value": 2025
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set - History & Timeline",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        250,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to develop technology or magic systems\nconst history = $input.item.json.history;\nconst timelinePresentYear = $input.item.json.timelinePresentYear;\n\n// In a real implementation this would use O1 for fast iteration\n// Here we'll just return placeholder technology systems\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      technologySystems: {\n        contemporaryTech: {\n          archaeologicalTools: \"Ground-penetrating radar, portable XRF analyzers, photogrammetry drones, 3D scanning\",\n          communicationLimitations: \"Spotty satellite internet at dig site, local cellular network unreliable\",\n          transportationChallenges: \"Rugged terrain requires specialized vehicles, sometimes pack animals\",\n          researchTechnology: \"AI-assisted pattern recognition for artifacts, virtual reality reconstruction\"\n        },\n        ancientTech: {\n          knownCapabilities: \"Advanced metallurgy for their time, sophisticated water management, astronomical tracking\",\n          mysteriousElements: \"Artifacts with unexplained properties, structures aligned with celestial events\",\n          technologicalGap: \"Evidence suggests capabilities beyond what historians believed possible for the era\"\n        }\n      }\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Tech/Magic Systems",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        450,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "politics",
+              "value": "Local government eager for tourism from archaeological discoveries, university politics affecting funding, tensions between academic institutions"
+            },
+            {
+              "name": "economics",
+              "value": "Limited grant funding creating competition, local economy becoming dependent on archaeological tourism"
+            },
+            {
+              "name": "religion",
+              "value": "Local spiritual beliefs about ancestral sites, academic secular approach creating occasional conflicts with local religious leaders"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set - Politics/Economics/Religion",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        650,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to develop mythic motifs\nconst cultureSociety = $input.item.json.cultureSociety;\nconst history = $input.item.json.history;\n\n// In a real implementation this would use GPT-4o for creative tasks\n// Here we'll just return placeholder mythic motifs\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      mythicMotifs: {\n        universalMyths: [\n          {\n            motif: \"Hero's Journey\",\n            application: \"Protagonist's transformation through archaeological discovery process\",\n            symbolism: \"Dig site as the 'special world', mentor figures, threshold guardians\"\n          },\n          {\n            motif: \"Descent to the Underworld\",\n            application: \"Physical excavation mirroring psychological uncovering of truth\",\n            symbolism: \"Ancient burial chambers, facing the past, retrieving lost knowledge\"\n          },\n          {\n            motif: \"Creation/Destruction Cycle\",\n            application: \"Ancient civilization's rise and fall paralleling modern academic careers\",\n            symbolism: \"Layers of civilization in excavation, building new theories on ruins of old\"\n          }\n        ],\n        culturalReferences: [\n          {\n            source: \"Local mythology\",\n            motif: \"Guardian spirits of ancestral sites\",\n            integration: \"Mysterious events at dig site, local resistance to certain excavations\"\n          },\n          {\n            source: \"Academic folklore\",\n            motif: \"Cursed discoveries\",\n            integration: \"Rumors about previous expeditions, superstitions among research team\"\n          }\n        ]\n      }\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Mythic Motifs",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        850,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "semiotics",
+              "value": "Dust and dirt represent uncovered truth, height (mountains, university tower) represents academic ambition and achievement"
+            },
+            {
+              "name": "symbolTools",
+              "value": "Archaeological tools as metaphors for discovery process - trowels for careful precision, brushes for gentle revealing of truth"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set - Semiotics & Symbol Tools",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// AI function to develop objective correlative\nconst characters = $input.item.json.characters;\nconst semiotics = $input.item.json.semiotics;\n\n// In a real implementation this would use GPT-4o for complex tasks\n// Here we'll just return placeholder objective correlative\nreturn [\n  {\n    json: {\n      ...$input.item.json,\n      objectiveCorrelative: {\n        emotionalStates: [\n          {\n            emotion: \"Ambition\",\n            externalObjects: \"University tower visible from protagonist's apartment, awards displayed in mentor's office\",\n            environment: \"Competitive academic conference settings, grant application deadlines\",\n            sensoryDetails: \"Sound of typing late at night, smell of coffee, blurred vision from exhaustion\"\n          },\n          {\n            emotion: \"Discovery excitement\",\n            externalObjects: \"Unearthed artifacts, field journal entries becoming more frantic\",\n            environment: \"Dig site illuminated by work lights at night, team members rushing to excavation point\",\n            sensoryDetails: \"Dirt under fingernails, quickened heartbeat, sudden silence when something significant is found\"\n          },\n          {\n            emotion: \"Ethical doubt\",\n            externalObjects: \"Ancient artifact that challenges established theories, torn research notes\",\n            environment: \"Isolated tent at night, rain on canvas while making difficult decisions\",\n            sensoryDetails: \"Stomach tightness, hesitation before documenting findings, repeatedly cleaning hands\"\n          },\n          {\n            emotion: \"Professional jealousy\",\n            externalObjects: \"Publication featuring colleague's work, prestigious grant awarded to rival\",\n            environment: \"Department meetings where others are praised, conference panels where others present\",\n            sensoryDetails: \"Tight smile, clenched jaw, drinking too much at academic functions\"\n          }\n        ]\n      }\n    }\n  }\n];"
+      },
+      "name": "AI Agent - Objective Correlative",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        900
+      ]
+    },
