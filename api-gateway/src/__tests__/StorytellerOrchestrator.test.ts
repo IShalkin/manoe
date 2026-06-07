@@ -91,27 +91,6 @@ function sceneNeedsRevision(
   return true;
 }
 
-/**
- * Calculate word count from content
- */
-function calculateWordCount(content: string): number {
-  return content.split(/\s+/).filter((w) => w.length > 0).length;
-}
-
-/**
- * Determine if beats method should be used for long scenes
- */
-function shouldUseBeatsMethod(targetWordCount: number, threshold: number = 1500): boolean {
-  return targetWordCount > threshold;
-}
-
-/**
- * Calculate parts for beats method
- */
-function calculateBeatsParts(targetWordCount: number, wordsPerPart: number = 500): number {
-  return Math.ceil(targetWordCount / wordsPerPart);
-}
-
 // ============================================================================
 // TESTS
 // ============================================================================
@@ -248,82 +227,6 @@ describe('StorytellerOrchestrator', () => {
 
     it('should return false when over max revisions', () => {
       expect(sceneNeedsRevision({ passedQuality: false }, 3, 2)).toBe(false);
-    });
-  });
-
-  describe('calculateWordCount', () => {
-    it('should count words correctly', () => {
-      expect(calculateWordCount('one two three')).toBe(3);
-    });
-
-    it('should handle multiple spaces', () => {
-      expect(calculateWordCount('one   two    three')).toBe(3);
-    });
-
-    it('should handle newlines', () => {
-      expect(calculateWordCount('one\ntwo\nthree')).toBe(3);
-    });
-
-    it('should handle tabs', () => {
-      expect(calculateWordCount('one\ttwo\tthree')).toBe(3);
-    });
-
-    it('should handle empty string', () => {
-      expect(calculateWordCount('')).toBe(0);
-    });
-
-    it('should handle whitespace only', () => {
-      expect(calculateWordCount('   \n\t  ')).toBe(0);
-    });
-
-    it('should handle realistic paragraph', () => {
-      const paragraph = `
-        The detective walked into the dimly lit bar,
-        his coat still wet from the rain outside.
-        He ordered a whiskey and sat at the corner booth.
-      `;
-      expect(calculateWordCount(paragraph)).toBe(26);
-    });
-  });
-
-  describe('shouldUseBeatsMethod', () => {
-    it('should return false for short scenes', () => {
-      expect(shouldUseBeatsMethod(500)).toBe(false);
-    });
-
-    it('should return false at threshold boundary', () => {
-      expect(shouldUseBeatsMethod(1500)).toBe(false);
-    });
-
-    it('should return true above threshold', () => {
-      expect(shouldUseBeatsMethod(1501)).toBe(true);
-    });
-
-    it('should respect custom threshold', () => {
-      expect(shouldUseBeatsMethod(800, 700)).toBe(true);
-      expect(shouldUseBeatsMethod(600, 700)).toBe(false);
-    });
-  });
-
-  describe('calculateBeatsParts', () => {
-    it('should return 1 for small word count', () => {
-      expect(calculateBeatsParts(300)).toBe(1);
-    });
-
-    it('should return 2 for medium word count', () => {
-      expect(calculateBeatsParts(750)).toBe(2);
-    });
-
-    it('should return 3 for larger word count', () => {
-      expect(calculateBeatsParts(1200)).toBe(3);
-    });
-
-    it('should handle exact multiples', () => {
-      expect(calculateBeatsParts(1000)).toBe(2);
-    });
-
-    it('should respect custom words per part', () => {
-      expect(calculateBeatsParts(1000, 250)).toBe(4);
     });
   });
 

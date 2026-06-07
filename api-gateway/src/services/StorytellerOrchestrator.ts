@@ -51,6 +51,8 @@ import { buildAmplifyMessages, spliceAmplified, contextAround } from "./SpiceRew
 import { createRateLimiter } from "../utils/rateLimiter";
 import { extractStringValue as extractStringValueHelper } from "../utils/extractStringValue";
 import { addSeedConstraints as addSeedConstraintsHelper } from "../utils/seedConstraints";
+import { wordCount } from "../utils/wordCount";
+import { shouldUseBeatsMethod, calculateBeatsParts, BEATS_THRESHOLD } from "../utils/beatsPlanning";
 
 /**
  * LLM Configuration for generation
@@ -886,8 +888,7 @@ export class StorytellerOrchestrator {
 
       // PROACTIVE BEATS METHOD: For scenes with target > 1000 words, split into parts upfront
       // This prevents the Writer↔Critic deadlock where LLMs can't produce 1500+ words in one shot
-      const BEATS_THRESHOLD = 1000;
-      if (targetWordCount > BEATS_THRESHOLD) {
+      if (shouldUseBeatsMethod(targetWordCount)) {
         console.log(`[Orchestrator] Scene ${sceneNum + 1} target ${targetWordCount} words > ${BEATS_THRESHOLD}, using Proactive Beats Method`);
         await this.draftSceneWithBeats(runId, options, sceneNum + 1, scene, targetWordCount);
       } else {
@@ -1092,7 +1093,7 @@ export class StorytellerOrchestrator {
       sceneNum,
       title: sceneTitle,
       content: response,
-      wordCount: response.split(/\s+/).length,
+      wordCount: wordCount(response),
       createdAt: new Date().toISOString(),
     };
 
@@ -1223,8 +1224,7 @@ export class StorytellerOrchestrator {
 
     // Calculate number of parts (3-4 based on target word count)
     // ~500 words per part is optimal for LLM generation
-    const WORDS_PER_PART = 500;
-    const partsTotal = Math.min(4, Math.max(3, Math.ceil(targetWordCount / WORDS_PER_PART)));
+    const partsTotal = calculateBeatsParts(targetWordCount);
     const partTargetWords = Math.ceil(targetWordCount / partsTotal);
 
     console.log(`[Orchestrator] Scene ${sceneNum} Beats Method: ${partsTotal} parts, ~${partTargetWords} words each`);
@@ -1288,7 +1288,7 @@ export class StorytellerOrchestrator {
           }
         }
 
-        const partWordCount = partContent.split(/\s+/).length;
+        const partWordCount = wordCount(partContent);
         
         if (partWordCount >= minPartWords) {
           console.log(`[Orchestrator] Scene ${sceneNum} Part ${partIndex}/${partsTotal}: ${partWordCount} words (target: ${partTargetWords})`);
@@ -1300,7 +1300,7 @@ export class StorytellerOrchestrator {
       }
 
       // FAIL-FAST: Check if we exhausted retries without meeting minimum word count
-      const finalPartWordCount = partContent.split(/\s+/).length;
+      const finalPartWordCount = wordCount(partContent);
       if (retryCount >= maxRetriesPerPart && finalPartWordCount < minPartWords) {
         await this.publishEvent(runId, "scene_beat_error", {
           sceneNum,
@@ -1327,8 +1327,8 @@ export class StorytellerOrchestrator {
         sceneNum, 
         partIndex, 
         partsTotal,
-        partWordCount: partContent.split(/\s+/).length,
-        totalWordCount: combinedContent.split(/\s+/).length
+        partWordCount: wordCount(partContent),
+        totalWordCount: wordCount(combinedContent)
       });
     }
 
@@ -1342,7 +1342,7 @@ export class StorytellerOrchestrator {
       sceneNum,
       title: sceneTitle,
       content: combinedContent,
-      wordCount: combinedContent.split(/\s+/).length,
+      wordCount: wordCount(combinedContent),
       createdAt: new Date().toISOString(),
       beatsMethod: true,
       partsGenerated: partsTotal,
@@ -1544,7 +1544,7 @@ export class StorytellerOrchestrator {
       sceneNum,
       title: (draft as Record<string, unknown>).title,
       content: response,
-      wordCount: response.split(/\s+/).length,
+      wordCount: wordCount(response),
       revisionNumber: (state.revisionCount.get(sceneNum) ?? 0) + 1,
       createdAt: new Date().toISOString(),
     };
@@ -1626,7 +1626,7 @@ export class StorytellerOrchestrator {
       sceneNum,
       title: draft.title,
       content: combinedContent,
-      wordCount: combinedContent.split(/\s+/).length,
+      wordCount: wordCount(combinedContent),
       expansionCount: (Number(draft.expansionCount) || 0) + 1,
       createdAt: new Date().toISOString(),
     };
@@ -1770,7 +1770,7 @@ export class StorytellerOrchestrator {
 
     // Store pre-polish content for validation/fallback
     const prePolishContent = String((draft as Record<string, unknown>).content ?? "");
-    const prePolishWordCount = prePolishContent.split(/\s+/).length;
+    const prePolishWordCount = wordCount(prePolishContent);
 
     // Use WriterAgent through AgentFactory
     const agent = this.agentFactory.getAgent(AgentType.WRITER);
@@ -1783,7 +1783,7 @@ export class StorytellerOrchestrator {
     const output = await agent.execute(context, options);
     // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
     const response = this.stripFakeWordCount(output.content as string);
-    const polishedWordCount = response.split(/\s+/).length;
+    const polishedWordCount = wordCount(response);
 
     // POST-POLISH VALIDATION: Check if polish is acceptable
     // Reject polish if it's significantly shorter (lost chunks) or missing ending
@@ -1951,13 +1951,13 @@ export class StorytellerOrchestrator {
       await this.saveArtifact(runId, options.projectId, `spiced_scene_${sceneNum}`, {
         sceneNum,
         content: spiced,
-        wordCount: spiced.split(/\s+/).length,
+        wordCount: wordCount(spiced),
       });
       await this.publishEvent(runId, "scene_spiced", {
         sceneNum,
         amplified: amplifiedCount,
         finalContent: spiced,
-        wordCount: spiced.split(/\s+/).length,
+        wordCount: wordCount(spiced),
       });
     } catch (spicePassError) {
       // Optional enhancement: a failure here (e.g. Redis publish) must NEVER fail
