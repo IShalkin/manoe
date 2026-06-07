@@ -318,8 +318,8 @@ export class MetricsService {
   private initializeEvaluationMetrics(): void {
     this.evaluationScoreGauge = new Gauge({
       name: "manoe_evaluation_score",
-      help: "LLM-as-a-Judge evaluation scores (0-1)",
-      labelNames: ["evaluation_type", "agent_name", "run_id"],
+      help: "LLM-as-a-Judge evaluation scores; scale label distinguishes 0-1 (judge) from other scales",
+      labelNames: ["evaluation_type", "agent_name", "run_id", "scale"],
       registers: [this.registry],
     });
 
@@ -576,6 +576,7 @@ export class MetricsService {
           evaluation_type: evaluationType,
           agent_name: agentName,
           run_id: runId,
+          scale: "0-1",
         },
         score
       );
