@@ -42,7 +42,7 @@ export class StateController {
    */
   @Get("/graph")
   async getStateGraph(@PathParams("runId") runId: string): Promise<StateGraphResponse> {
-    const runStatus = this.orchestrator.getRunStatus(runId);
+    const runStatus = await this.orchestrator.getRunStatus(runId);
     if (!runStatus) {
       throw new Error(`Run ${runId} not found`);
     }

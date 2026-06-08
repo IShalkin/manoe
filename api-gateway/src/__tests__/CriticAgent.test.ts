@@ -1,13 +1,15 @@
 /**
  * Unit Tests for CriticAgent
- * 
+ *
  * Tests the Critic agent's logic functions without making actual LLM calls.
  * These tests verify revision decision logic, score handling, and constraint checking.
  */
 
+import { isRevisionNeeded, calculateWordCountCompliance } from "../utils/revisionGate";
+
 describe("CriticAgent", () => {
   describe("isRevisionNeeded", () => {
-    interface Critique {
+    interface Critique extends Record<string, unknown> {
       approved?: boolean;
       score?: number;
       issues?: string[];
@@ -15,48 +17,6 @@ describe("CriticAgent", () => {
       wordCountCompliance?: boolean;
       scopeAdherence?: boolean;
     }
-
-    const isRevisionNeeded = (critique: Critique): boolean => {
-      const hasIssues = Array.isArray(critique.issues) && critique.issues.length > 0;
-      const hasRevisionRequests = Array.isArray(critique.revisionRequests) && critique.revisionRequests.length > 0;
-      const score = typeof critique.score === "number" ? critique.score : null;
-
-      // 1. Check hard failures first (guard clauses)
-      if (critique.wordCountCompliance === false) {
-        return true;
-      }
-
-      if (critique.scopeAdherence === false) {
-        return true;
-      }
-
-      // Score below 7 always needs revision
-      if (score !== null && score < 7) {
-        return true;
-      }
-
-      // Score 7-8 needs revision if there are any issues
-      if (score !== null && score < 8 && hasIssues) {
-        return true;
-      }
-
-      // Any issues or revision requests require revision
-      if (hasIssues || hasRevisionRequests) {
-        return true;
-      }
-
-      // 2. Check success conditions
-      if (critique.approved === true && score !== null && score >= 8) {
-        return false;
-      }
-
-      if (score !== null && score >= 8) {
-        return false;
-      }
-
-      // 3. Default to safe behavior
-      return true;
-    };
 
     describe("hard failure conditions", () => {
       it("should require revision when wordCountCompliance is false", () => {
@@ -188,17 +148,6 @@ describe("CriticAgent", () => {
   });
 
   describe("word count compliance calculation", () => {
-    const calculateWordCountCompliance = (
-      actualWordCount: number,
-      targetWordCount: number
-    ): { compliant: boolean; ratio: number } => {
-      const ratio = actualWordCount / targetWordCount;
-      return {
-        compliant: ratio >= 0.7,
-        ratio,
-      };
-    };
-
     it("should pass when actual equals target", () => {
       const result = calculateWordCountCompliance(1500, 1500);
       expect(result.compliant).toBe(true);
@@ -258,7 +207,8 @@ describe("CriticAgent", () => {
     });
   });
 
-  describe("scope adherence detection", () => {
+  describe("checkScopeAdherence (test-only simulation of an LLM-judged field — not shipped code)", () => {
+    // NOTE: simulation only. Real scope adherence is judged by the Critic LLM and arrives as critique.scopeAdherence; the gate consumption of that field is covered by revisionGate.test.ts.
     const checkScopeAdherence = (
       content: string,
       sceneHook: string,

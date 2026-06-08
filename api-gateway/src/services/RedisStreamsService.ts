@@ -18,6 +18,22 @@ import Redis from "ioredis";
 import { MetricsService } from "./MetricsService";
 
 /**
+ * Small run-status record mirrored to Redis for cross-instance lookups (issue #157, Slice A).
+ */
+export interface RunStatusMirror {
+  runId: string;
+  projectId: string;
+  phase: string;
+  currentScene: number;
+  totalScenes: number;
+  isPaused: boolean;
+  isCompleted: boolean;
+  error?: string;
+  startedAt?: string;
+  updatedAt?: string;
+}
+
+/**
  * Event structure for Redis Streams
  */
 export interface StreamEvent {
@@ -771,5 +787,53 @@ export class RedisStreamsService {
       await this.writerClient.quit();
       this.writerClient = null;
     }
+  }
+
+  // ==================== RUN STATUS MIRROR (issue #157, Slice A) ====================
+
+  private getRunStatusKey(runId: string): string {
+    return `manoe:run_status:${runId}`;
+  }
+
+  /**
+   * Mirror the small run-status record to Redis so any instance can answer
+   * status/stream existence checks for a live run (issue #157, Slice A).
+   */
+  async setRunStatus(record: RunStatusMirror, ttlSeconds: number = 21600): Promise<void> {
+    const client = this.getClient();
+    const key = this.getRunStatusKey(record.runId);
+    const flat: Record<string, string> = {
+      runId: record.runId,
+      projectId: record.projectId,
+      phase: record.phase,
+      currentScene: String(record.currentScene),
+      totalScenes: String(record.totalScenes),
+      isPaused: record.isPaused ? "1" : "0",
+      isCompleted: record.isCompleted ? "1" : "0",
+      error: record.error ?? "",
+      startedAt: record.startedAt ?? "",
+      updatedAt: record.updatedAt ?? "",
+    };
+    // Atomic HSET+EXPIRE so a failure between them can't leave a stale key with
+    // no TTL (which would never get reclaimed).
+    await client.multi().hset(key, flat).expire(key, ttlSeconds).exec();
+  }
+
+  async getRunStatusMirror(runId: string): Promise<RunStatusMirror | null> {
+    const client = this.getClient();
+    const h = await client.hgetall(this.getRunStatusKey(runId));
+    if (!h || Object.keys(h).length === 0) return null;
+    return {
+      runId: h.runId,
+      projectId: h.projectId,
+      phase: h.phase,
+      currentScene: Number(h.currentScene || 0),
+      totalScenes: Number(h.totalScenes || 0),
+      isPaused: h.isPaused === "1",
+      isCompleted: h.isCompleted === "1",
+      error: h.error || undefined,
+      startedAt: h.startedAt || undefined,
+      updatedAt: h.updatedAt || undefined,
+    };
   }
 }

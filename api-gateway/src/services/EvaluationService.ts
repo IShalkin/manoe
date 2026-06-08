@@ -1,11 +1,12 @@
 /**
  * Evaluation Service for MANOE
  * Implements LLM-as-a-Judge evaluation for automatic quality scoring
- * 
+ *
  * Features:
  * - Faithfulness evaluation: How well Writer output matches Architect plan
  * - Relevance evaluation: How well Profiler output matches user's seed idea
  * - Records scores in Langfuse and Prometheus metrics
+ * - N=3 samples at temperature 0; median reported (issue #168)
  */
 
 import { Service, Inject } from "@tsed/di";
@@ -13,16 +14,39 @@ import { LangfuseService } from "./LangfuseService";
 import { LLMProviderService } from "./LLMProviderService";
 import { MetricsService } from "./MetricsService";
 import { LLMProvider, MessageRole } from "../models/LLMModels";
+import { parseEvaluationResponse as parseJudgeResponse, EvaluationResult } from "../utils/evaluationResponseParser";
+import { median } from "../utils/median";
 
-/**
- * Evaluation result from LLM-as-a-Judge
- */
-export interface EvaluationResult {
-  score: number;
-  reasoning: string;
-  evaluationModel: string;
-  durationMs: number;
-}
+// Re-export so existing importers of EvaluationResult from this module continue to work.
+export { EvaluationResult } from "../utils/evaluationResponseParser";
+
+// ---------------------------------------------------------------------------
+// Rubric system-prompt constants (DRY — used by sampleJudge)
+// ---------------------------------------------------------------------------
+
+const FAITHFULNESS_SYSTEM = `You are an expert evaluator assessing how faithfully a writer followed an architect's plan.
+You must respond with ONLY a JSON object in this exact format:
+{"score": <number 0-1>, "reasoning": "<brief explanation>"}
+
+Score guidelines:
+- 1.0: Perfect adherence to the plan
+- 0.8-0.9: Minor deviations but captures all key elements
+- 0.6-0.7: Some elements missing or changed
+- 0.4-0.5: Significant deviations from the plan
+- 0.2-0.3: Major elements missing or contradicted
+- 0.0-0.1: Completely ignores the plan`;
+
+const RELEVANCE_SYSTEM = `You are an expert evaluator assessing how relevant a character profile is to the user's original story idea.
+You must respond with ONLY a JSON object in this exact format:
+{"score": <number 0-1>, "reasoning": "<brief explanation>"}
+
+Score guidelines:
+- 1.0: Character perfectly fits the story concept
+- 0.8-0.9: Character fits well with minor adjustments possible
+- 0.6-0.7: Character is relevant but could be better aligned
+- 0.4-0.5: Character has some relevance but significant gaps
+- 0.2-0.3: Character barely relates to the story idea
+- 0.0-0.1: Character is completely irrelevant`;
 
 /**
  * Faithfulness evaluation input
@@ -66,6 +90,16 @@ export class EvaluationService {
 
   private evaluationConfig: EvaluationConfig | null = null;
 
+  /**
+   * Self-consistency samples per evaluation. Median is reported. Override via
+   * EVALUATION_SAMPLES. Parsed as a finite integer and clamped to [1, 10] so a
+   * non-integer/Infinity value can never create an unbounded judge loop.
+   */
+  private readonly sampleCount: number = (() => {
+    const configured = Number.parseInt(process.env.EVALUATION_SAMPLES || "", 10);
+    return Number.isFinite(configured) ? Math.min(10, Math.max(1, configured)) : 3;
+  })();
+
   constructor() {
     this.initializeConfig();
   }
@@ -96,8 +130,60 @@ export class EvaluationService {
   }
 
   /**
+   * Run the judge `sampleCount` times at temperature 0 and return the median-score
+   * result. Determinism (temp 0) + median reduces single-sample noise. The judge is
+   * an OBSERVABILITY signal only — it gates nothing (issue #168).
+   */
+  private async sampleJudge(
+    systemPrompt: string,
+    userPrompt: string,
+    runId: string,
+    agentName: string
+  ): Promise<EvaluationResult | null> {
+    if (!this.evaluationConfig) return null;
+    const startTime = Date.now();
+    const results: EvaluationResult[] = [];
+
+    for (let i = 0; i < this.sampleCount; i++) {
+      try {
+        const response = await this.llmProviderService.createCompletion({
+          provider: this.evaluationConfig.provider,
+          model: this.evaluationConfig.model,
+          apiKey: this.evaluationConfig.apiKey,
+          messages: [
+            { role: MessageRole.SYSTEM, content: systemPrompt },
+            { role: MessageRole.USER, content: userPrompt },
+          ],
+          temperature: 0,
+          maxTokens: 512,
+          runId,
+          agentName,
+        });
+        const parsed = this.parseEvaluationResponse(response.content, this.evaluationConfig.model, Date.now() - startTime);
+        if (parsed) results.push(parsed);
+      } catch (err) {
+        console.warn(`[EvaluationService] judge sample ${i + 1}/${this.sampleCount} failed: ${String(err)}`);
+      }
+    }
+
+    if (results.length === 0) return null;
+
+    const med = median(results.map(r => r.score));
+    // Pick the sample whose score is closest to the median for its reasoning.
+    const repr = results.reduce((best, r) =>
+      Math.abs(r.score - med) < Math.abs(best.score - med) ? r : best, results[0]);
+
+    return {
+      score: med,
+      reasoning: repr.reasoning,
+      evaluationModel: this.evaluationConfig.model,
+      durationMs: Date.now() - startTime,
+    };
+  }
+
+  /**
    * Evaluate faithfulness - how well Writer output matches Architect plan
-   * 
+   *
    * @param input - Faithfulness evaluation input
    * @returns Evaluation result with score 0-1
    */
@@ -112,74 +198,27 @@ export class EvaluationService {
 
     const prompt = this.buildFaithfulnessPrompt(writerOutput, architectPlan);
 
-    try {
-      const response = await this.llmProviderService.createCompletion({
-        provider: this.evaluationConfig.provider,
-        model: this.evaluationConfig.model,
-        apiKey: this.evaluationConfig.apiKey,
-        messages: [
-          {
-            role: MessageRole.SYSTEM,
-            content: `You are an expert evaluator assessing how faithfully a writer followed an architect's plan.
-You must respond with ONLY a JSON object in this exact format:
-{"score": <number 0-1>, "reasoning": "<brief explanation>"}
+    const result = await this.sampleJudge(FAITHFULNESS_SYSTEM, prompt, runId, "faithfulness_evaluator");
 
-Score guidelines:
-- 1.0: Perfect adherence to the plan
-- 0.8-0.9: Minor deviations but captures all key elements
-- 0.6-0.7: Some elements missing or changed
-- 0.4-0.5: Significant deviations from the plan
-- 0.2-0.3: Major elements missing or contradicted
-- 0.0-0.1: Completely ignores the plan`,
-          },
-          {
-            role: MessageRole.USER,
-            content: prompt,
-          },
-        ],
-        maxTokens: 512,
-        runId,
-        agentName: "faithfulness_evaluator",
-      });
-
-      const durationMs = Date.now() - startTime;
-      const result = this.parseEvaluationResponse(response.content, this.evaluationConfig.model, durationMs);
-
-      if (!result) {
-        // Record parse failure in Prometheus
-        this.metricsService.recordEvaluation("faithfulness", "writer", runId, 0, durationMs, false);
-        return null;
-      }
-
-      // Record in Langfuse
-      this.langfuseService.scoreFaithfulness(runId, result.score, "writer", result.reasoning);
-      this.langfuseService.addEvent(runId, "llm_judge_faithfulness", {
-        score: result.score,
-        reasoning: result.reasoning,
-        sceneNumber,
-        evaluationModel: result.evaluationModel,
-        durationMs: result.durationMs,
-      });
-
-      // Record in Prometheus
-      this.metricsService.recordEvaluation("faithfulness", "writer", runId, result.score, durationMs, true);
-
-      console.log(`[EvaluationService] Faithfulness score for run ${runId}: ${result.score}`);
-      return result;
-    } catch (error) {
-      const durationMs = Date.now() - startTime;
-      console.error(`[EvaluationService] Faithfulness evaluation failed:`, error);
-      
-      // Record failure in Prometheus
+    const durationMs = Date.now() - startTime;
+    if (!result) {
       this.metricsService.recordEvaluation("faithfulness", "writer", runId, 0, durationMs, false);
-      
       return null;
     }
+    this.langfuseService.scoreFaithfulness(runId, result.score, "writer", result.reasoning);
+    this.langfuseService.addEvent(runId, "llm_judge_faithfulness", {
+      score: result.score, scale: "0-1", samples: this.sampleCount,
+      reasoning: result.reasoning, sceneNumber,
+      evaluationModel: result.evaluationModel, durationMs: result.durationMs,
+    });
+    this.metricsService.recordEvaluation("faithfulness", "writer", runId, result.score, durationMs, true);
+    console.log(`[EvaluationService] Faithfulness (median of ${this.sampleCount}) for run ${runId}: ${result.score}`);
+    return result;
   }
 
   /**
    * Evaluate relevance - how well Profiler output matches user's seed idea
-   * 
+   *
    * @param input - Relevance evaluation input
    * @returns Evaluation result with score 0-1
    */
@@ -194,69 +233,22 @@ Score guidelines:
 
     const prompt = this.buildRelevancePrompt(profilerOutput, seedIdea);
 
-    try {
-      const response = await this.llmProviderService.createCompletion({
-        provider: this.evaluationConfig.provider,
-        model: this.evaluationConfig.model,
-        apiKey: this.evaluationConfig.apiKey,
-        messages: [
-          {
-            role: MessageRole.SYSTEM,
-            content: `You are an expert evaluator assessing how relevant a character profile is to the user's original story idea.
-You must respond with ONLY a JSON object in this exact format:
-{"score": <number 0-1>, "reasoning": "<brief explanation>"}
+    const result = await this.sampleJudge(RELEVANCE_SYSTEM, prompt, runId, "relevance_evaluator");
 
-Score guidelines:
-- 1.0: Character perfectly fits the story concept
-- 0.8-0.9: Character fits well with minor adjustments possible
-- 0.6-0.7: Character is relevant but could be better aligned
-- 0.4-0.5: Character has some relevance but significant gaps
-- 0.2-0.3: Character barely relates to the story idea
-- 0.0-0.1: Character is completely irrelevant`,
-          },
-          {
-            role: MessageRole.USER,
-            content: prompt,
-          },
-        ],
-        maxTokens: 512,
-        runId,
-        agentName: "relevance_evaluator",
-      });
-
-      const durationMs = Date.now() - startTime;
-      const result = this.parseEvaluationResponse(response.content, this.evaluationConfig.model, durationMs);
-
-      if (!result) {
-        // Record parse failure in Prometheus
-        this.metricsService.recordEvaluation("relevance", "profiler", runId, 0, durationMs, false);
-        return null;
-      }
-
-      // Record in Langfuse
-      this.langfuseService.scoreRelevance(runId, result.score, "profiler", result.reasoning);
-      this.langfuseService.addEvent(runId, "llm_judge_relevance", {
-        score: result.score,
-        reasoning: result.reasoning,
-        characterName,
-        evaluationModel: result.evaluationModel,
-        durationMs: result.durationMs,
-      });
-
-      // Record in Prometheus
-      this.metricsService.recordEvaluation("relevance", "profiler", runId, result.score, durationMs, true);
-
-      console.log(`[EvaluationService] Relevance score for run ${runId}: ${result.score}`);
-      return result;
-    } catch (error) {
-      const durationMs = Date.now() - startTime;
-      console.error(`[EvaluationService] Relevance evaluation failed:`, error);
-      
-      // Record failure in Prometheus
+    const durationMs = Date.now() - startTime;
+    if (!result) {
       this.metricsService.recordEvaluation("relevance", "profiler", runId, 0, durationMs, false);
-      
       return null;
     }
+    this.langfuseService.scoreRelevance(runId, result.score, "profiler", result.reasoning);
+    this.langfuseService.addEvent(runId, "llm_judge_relevance", {
+      score: result.score, scale: "0-1", samples: this.sampleCount,
+      reasoning: result.reasoning, characterName,
+      evaluationModel: result.evaluationModel, durationMs: result.durationMs,
+    });
+    this.metricsService.recordEvaluation("relevance", "profiler", runId, result.score, durationMs, true);
+    console.log(`[EvaluationService] Relevance (median of ${this.sampleCount}) for run ${runId}: ${result.score}`);
+    return result;
   }
 
   /**
@@ -298,27 +290,6 @@ Evaluate how relevant this character profile is to the user's story idea. Consid
    * Returns null if parsing fails to distinguish from actual scores
    */
   private parseEvaluationResponse(content: string, model: string, durationMs: number): EvaluationResult | null {
-    try {
-      // Try to extract JSON from the response - use non-greedy match to get first JSON object
-      const jsonMatch = content.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
-      if (!jsonMatch) {
-        throw new Error("No JSON found in response");
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-      const score = Math.max(0, Math.min(1, Number(parsed.score) || 0));
-      const reasoning = String(parsed.reasoning || "No reasoning provided");
-
-      return {
-        score,
-        reasoning,
-        evaluationModel: model,
-        durationMs,
-      };
-    } catch (error) {
-      console.warn(`[EvaluationService] Failed to parse evaluation response: ${content}`);
-      // Return null to indicate parse failure rather than masking with arbitrary score
-      return null;
-    }
+    return parseJudgeResponse(content, model, durationMs);
   }
 }

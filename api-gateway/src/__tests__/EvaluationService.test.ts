@@ -1,20 +1,14 @@
 /**
  * Unit Tests for EvaluationService
- * 
+ *
  * Tests the LLM-as-a-Judge evaluation system logic
  * These tests verify the core logic functions without importing the actual service
  * to avoid issues with langfuse's dynamic imports in Jest.
- * 
+ *
  * The actual service integration is tested via end-to-end tests.
  */
 
-// Define the EvaluationResult interface for testing
-interface EvaluationResult {
-  score: number;
-  reasoning: string;
-  evaluationModel: string;
-  durationMs: number;
-}
+import { parseEvaluationResponse, EvaluationResult } from "../utils/evaluationResponseParser";
 
 // Define input interfaces for testing
 interface FaithfulnessInput {
@@ -29,33 +23,6 @@ interface RelevanceInput {
   profilerOutput: string;
   seedIdea: string;
   characterName?: string;
-}
-
-/**
- * Parse LLM evaluation response
- * This is the same logic as in EvaluationService.parseEvaluationResponse
- */
-function parseEvaluationResponse(content: string, model: string, durationMs: number): EvaluationResult | null {
-  try {
-    // Try to extract JSON from the response - use non-greedy match to get first JSON object
-    const jsonMatch = content.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
-    if (!jsonMatch) {
-      throw new Error("No JSON found in response");
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    const score = Math.max(0, Math.min(1, Number(parsed.score) || 0));
-    const reasoning = String(parsed.reasoning || "No reasoning provided");
-
-    return {
-      score,
-      reasoning,
-      evaluationModel: model,
-      durationMs,
-    };
-  } catch {
-    return null;
-  }
 }
 
 /**

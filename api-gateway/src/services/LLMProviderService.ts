@@ -592,16 +592,17 @@ export class LLMProviderService {
     );
   }
 
+  /** Seam for tests: build the OpenAI client. */
+  private makeOpenAIClient(apiKey: string): OpenAI {
+    return new OpenAI({ apiKey, baseURL: PROVIDER_BASE_URLS.openai, timeout: 120000 });
+  }
+
   /**
    * OpenAI completion
    */
   private async openAICompletion(options: CompletionOptions): Promise<LLMResponse> {
     const apiKey = this.getApiKey(LLMProvider.OPENAI, options.apiKey);
-    const client = new OpenAI({
-      apiKey,
-      baseURL: PROVIDER_BASE_URLS.openai,
-      timeout: 120000, // 2 minute timeout
-    });
+    const client = this.makeOpenAIClient(apiKey);
 
     const requestParams: OpenAI.ChatCompletionCreateParams = {
       model: options.model,
@@ -655,11 +656,16 @@ export class LLMProviderService {
       requestParams.response_format = { type: "json_object" };
     }
 
+    if (Number.isInteger(options.seed)) {
+      requestParams.seed = options.seed;
+    }
+
     const response = await client.chat.completions.create(requestParams);
 
     return {
       content: response.choices[0]?.message?.content ?? "",
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.OPENAI,
       usage: {
         promptTokens: response.usage?.prompt_tokens ?? 0,
@@ -732,6 +738,7 @@ export class LLMProviderService {
       console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
     }
 
+    // seed recorded in run_config but not sent (provider does not accept a sampling seed).
     const response = await client.messages.create(requestOptions);
 
     const content = response.content[0]?.type === "text" 
@@ -746,6 +753,7 @@ export class LLMProviderService {
     return {
       content,
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.ANTHROPIC,
       usage: {
         promptTokens: inputTokens,
@@ -805,6 +813,7 @@ export class LLMProviderService {
       console.log(`[LLMProviderService] Model ${options.model} does not support temperature, omitting parameter`);
     }
 
+    // seed recorded in run_config but not sent (provider does not accept a sampling seed).
     const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
       generationConfig,
@@ -815,6 +824,10 @@ export class LLMProviderService {
     return {
       content: parsed.content,
       model: options.model,
+      // Prefer the provider-resolved version (e.g. a dated/preview alias) for
+      // reproducibility; fall back to the requested model when absent.
+      resolvedModel:
+        (result.response as { modelVersion?: string }).modelVersion ?? options.model,
       provider: LLMProvider.GEMINI,
       usage: parsed.usage,
       finishReason: parsed.finishReason,
@@ -907,6 +920,7 @@ export class LLMProviderService {
     return {
       content: response.choices[0]?.message?.content ?? "",
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.OPENROUTER,
       usage: {
         promptTokens: response.usage?.prompt_tokens ?? 0,
@@ -954,6 +968,7 @@ export class LLMProviderService {
     return {
       content: response.choices[0]?.message?.content ?? "",
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.DEEPSEEK,
       usage: {
         promptTokens: response.usage?.prompt_tokens ?? 0,
@@ -1001,6 +1016,7 @@ export class LLMProviderService {
     return {
       content: response.choices[0]?.message?.content ?? "",
       model: options.model,
+      resolvedModel: response.model ?? options.model,
       provider: LLMProvider.VENICE,
       usage: {
         promptTokens: response.usage?.prompt_tokens ?? 0,

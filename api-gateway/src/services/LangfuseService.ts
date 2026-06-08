@@ -362,6 +362,7 @@ export class LangfuseService {
     this.addEvent(runId, "quality_score_faithfulness", {
       agentName,
       score: value,
+      scale: "0-1",
       comment,
     });
   }
@@ -385,6 +386,7 @@ export class LangfuseService {
     this.addEvent(runId, "quality_score_relevance", {
       agentName,
       score: value,
+      scale: "0-1",
       comment,
     });
   }

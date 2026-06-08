@@ -87,6 +87,10 @@ export class LLMResponse {
   @Optional()
   @Property()
   latencyMs?: number;
+
+  @Optional()
+  @Property()
+  resolvedModel?: string;
 }
 
 /**
@@ -116,6 +120,10 @@ export class CompletionOptions {
   @Optional()
   @Property()
   maxTokens?: number;
+
+  @Optional()
+  @Property()
+  seed?: number;
 
   @Optional()
   @Property()

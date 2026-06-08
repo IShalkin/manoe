@@ -27,6 +27,7 @@ import {
   Enum,
 } from "@tsed/schema";
 import { Inject } from "@tsed/di";
+import { BadRequest } from "@tsed/exceptions";
 import { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { StorytellerOrchestrator, GenerationOptions, RunStatus } from "../services/StorytellerOrchestrator";
@@ -151,6 +152,20 @@ class GenerateRequestDTO {
   @Property()
   @Description("Embedding API key (legacy snake_case)")
   embedding_api_key?: string;
+
+  // Regeneration fields (frontend already sends these; previously dropped — see plan)
+  @Property()
+  @Enum(GenerationPhase)
+  @Description("Phase-based regeneration: begin the run at this phase, seeding earlier phases from previous_run_id")
+  start_from_phase?: GenerationPhase;
+
+  @Property()
+  @Description("Source run whose artifacts seed skipped phases and reused scenes")
+  previous_run_id?: string;
+
+  @Property()
+  @Description("Scene-level regeneration: 1-indexed scene numbers to regenerate; others reuse previous_run_id artifacts")
+  scenes_to_regenerate?: number[];
 }
 
 /**
@@ -337,7 +352,39 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
       settings: request.settings,
       embeddingApiKey,
       spiceConfig: request.spiceConfig,
+      startFromPhase: request.start_from_phase,
+      // Normalize to a trimmed non-empty id or undefined, so a blank/whitespace
+      // value cannot pass the "required" guards below or reach the orchestrator.
+      previousRunId:
+        typeof request.previous_run_id === "string" && request.previous_run_id.trim()
+          ? request.previous_run_id.trim()
+          : undefined,
+      scenesToRegenerate: request.scenes_to_regenerate,
     };
+
+    // Regeneration validation guards (Decision 4). Reject bad combos with 400
+    // before launching the orchestrator.
+    if (options.startFromPhase !== undefined) {
+      const validPhase = Object.values(GenerationPhase).includes(options.startFromPhase as GenerationPhase);
+      if (!validPhase) {
+        throw new BadRequest(`invalid start_from_phase: ${String(options.startFromPhase)}`);
+      }
+      if (options.startFromPhase !== GenerationPhase.GENESIS && !options.previousRunId) {
+        throw new BadRequest("previous_run_id required when start_from_phase is not genesis");
+      }
+    }
+    if (options.scenesToRegenerate !== undefined) {
+      if (!options.previousRunId) {
+        throw new BadRequest("previous_run_id required when scenes_to_regenerate is set");
+      }
+      const valid =
+        Array.isArray(options.scenesToRegenerate) &&
+        options.scenesToRegenerate.length > 0 &&
+        options.scenesToRegenerate.every((n) => Number.isInteger(n) && n > 0);
+      if (!valid) {
+        throw new BadRequest("scenes_to_regenerate must be a non-empty array of positive integers");
+      }
+    }
 
     try {
       $log.info(`[OrchestrationController] calling orchestrator.startGeneration, projectId: ${options.projectId}`);
@@ -395,8 +442,8 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
     @Req() req: Request,
     @Res() res: Response
   ): Promise<void> {
-    // Check if run exists
-    const status = this.orchestrator.getRunStatus(runId);
+    // Check if run exists (falls back to Redis mirror for cross-replica runs — #157 Slice A)
+    const status = await this.orchestrator.getRunStatus(runId);
     if (!status) {
       res.status(404).json({ error: "Run not found" });
       return;
@@ -549,11 +596,11 @@ data: {"error": "...", "phase": "drafting", "recoverable": false}
   @Description("Returns the current status of a generation run including phase, progress, and any errors.")
   @Returns(200, RunStatusDTO)
   @Returns(404)
-  getStatus(
+  async getStatus(
     @PathParams("runId") runId: string
-  ): RunStatusDTO | { error: string } {
-    const status = this.orchestrator.getRunStatus(runId);
-    
+  ): Promise<RunStatusDTO | { error: string }> {
+    const status = await this.orchestrator.getRunStatus(runId);
+
     if (!status) {
       return { error: "Run not found" };
     }

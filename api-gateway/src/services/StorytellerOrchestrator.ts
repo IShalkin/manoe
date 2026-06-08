@@ -41,50 +41,18 @@ import { MetricsService } from "./MetricsService";
 import { AgentFactory } from "../agents/AgentFactory";
 import { AgentContext, SpiceConfig } from "../agents/types";
 import { safeParseWordCount } from "../utils/schemaNormalizers";
+import { createRunConfig, recordPhase, RunConfigArtifact } from "../utils/runConfig";
 import { ArchivistAgent } from "../agents/ArchivistAgent";
 import { EvaluationService } from "./EvaluationService";
 import { WorldBibleEmbeddingService } from "./WorldBibleEmbeddingService";
 import { assembleSceneContract } from "./StoryStateAssembler";
 import { applySpiceExtraction } from "./spiceParser";
 import { buildAmplifyMessages, spliceAmplified, contextAround } from "./SpiceRewriter";
-
-/**
- * Simple rate limiter for concurrent async operations
- * Limits the number of concurrent promises to avoid hitting API rate limits
- */
-function createRateLimiter(concurrency: number) {
-  let activeCount = 0;
-  const queue: Array<() => void> = [];
-
-  const next = () => {
-    if (queue.length > 0 && activeCount < concurrency) {
-      activeCount++;
-      const resolve = queue.shift()!;
-      resolve();
-    }
-  };
-
-  return <T>(fn: () => Promise<T>): Promise<T> => {
-    return new Promise<T>((resolve, reject) => {
-      const run = () => {
-        fn()
-          .then(resolve)
-          .catch(reject)
-          .finally(() => {
-            activeCount--;
-            next();
-          });
-      };
-
-      if (activeCount < concurrency) {
-        activeCount++;
-        run();
-      } else {
-        queue.push(run);
-      }
-    });
-  };
-}
+import { createRateLimiter } from "../utils/rateLimiter";
+import { extractStringValue as extractStringValueHelper } from "../utils/extractStringValue";
+import { addSeedConstraints as addSeedConstraintsHelper } from "../utils/seedConstraints";
+import { wordCount } from "../utils/wordCount";
+import { shouldUseBeatsMethod, calculateBeatsParts, BEATS_THRESHOLD } from "../utils/beatsPlanning";
 
 /**
  * LLM Configuration for generation
@@ -109,6 +77,12 @@ export interface GenerationOptions {
   embeddingApiKey?: string;
   /** Opt-in spice rewrite config (Slice 2). Absent = feature off. */
   spiceConfig?: SpiceConfig;
+  /** Phase-based regeneration: start the chain at this phase, seeding earlier phases from previousRunId. Absent = start at genesis (full run). */
+  startFromPhase?: GenerationPhase;
+  /** Source run whose artifacts seed skipped phases / reused scenes. Required when startFromPhase != genesis or scenesToRegenerate is set. */
+  previousRunId?: string;
+  /** Scene-level regeneration: 1-indexed scene numbers to regenerate; all other scenes reuse previousRunId artifacts. Absent = draft all scenes. */
+  scenesToRegenerate?: number[];
 }
 
 /**
@@ -237,8 +211,32 @@ export class StorytellerOrchestrator {
       updatedAt: new Date().toISOString(),
     };
 
+    // Generate a per-run seed for reproducibility capture (issue #162).
+    const seed = Math.floor(Math.random() * 2_147_483_647);
+    state.seed = seed;
+    state.runConfig = createRunConfig(
+      runId,
+      seed,
+      {
+        provider: String(options.llmConfig?.provider ?? "openai"),
+        model: String(options.llmConfig?.model ?? ""),
+        temperature: options.llmConfig?.temperature ?? 0.7,
+      }
+    );
+    // Thread the seed into every agent LLM call via the llmConfig object (#162).
+    if (options.llmConfig && state.seed != null) {
+      (options.llmConfig as { seed?: number }).seed = state.seed;
+    }
+
     this.activeRuns.set(runId, state);
+    void this.mirrorStatus(runId); // #157 Slice A: mirror initial state
     $log.info(`[StorytellerOrchestrator] startGeneration: state initialized and stored, runId: ${runId}`);
+
+    // Wire the per-call metadata sink onto all agent singletons (#162).
+    // Agents are cached singletons; the sink uses runId to look up the correct state.
+    for (const agentType of Object.values(AgentType)) {
+      this.agentFactory.getAgent(agentType).onLLMCall = this.recordLLMMeta.bind(this);
+    }
 
     // Embedding API Key Resolution (in priority order):
     // 1. Dedicated embedding API key from frontend settings (always treated as Gemini key)
@@ -322,10 +320,19 @@ export class StorytellerOrchestrator {
       // checkpoint rather than mid agent/LLM call.
       state.inFlight = true;
 
+      // Phase-based regeneration (Decision 1/2): when start_from_phase is set,
+      // seed earlier phases from the previous run, then begin the chain there.
+      const startIdx = this.resolveStartPhaseIndex(options.startFromPhase);
+      if (startIdx > 0 && options.previousRunId) {
+        await this.seedStateFromPreviousRun(state, options.previousRunId, startIdx);
+      }
+
       // Phase 1: Genesis
-      $log.info(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
-      await this.runGenesisPhase(runId, options);
-      $log.info(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
+      if (startIdx <= 0) {
+        $log.info(`[StorytellerOrchestrator] runGeneration: about to call runGenesisPhase, runId: ${runId}`);
+        await this.runGenesisPhase(runId, options);
+        $log.info(`[StorytellerOrchestrator] runGeneration: runGenesisPhase completed, runId: ${runId}`);
+      }
       state.inFlight = false; // safe checkpoint
       const shouldStopAfterGenesis = this.shouldStop(runId);
       $log.info(`[StorytellerOrchestrator] runGeneration: shouldStop after Genesis = ${shouldStopAfterGenesis}, runId: ${runId}`);
@@ -335,45 +342,62 @@ export class StorytellerOrchestrator {
       }
 
       // Phase 2: Characters
-      $log.info(`[StorytellerOrchestrator] runGeneration: about to call runCharactersPhase, runId: ${runId}`);
-      state.inFlight = true;
-      await this.runCharactersPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
-      $log.info(`[StorytellerOrchestrator] runGeneration: runCharactersPhase completed, runId: ${runId}`);
+      if (startIdx <= 1) {
+        $log.info(`[StorytellerOrchestrator] runGeneration: about to call runCharactersPhase, runId: ${runId}`);
+        state.inFlight = true;
+        await this.runCharactersPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+        $log.info(`[StorytellerOrchestrator] runGeneration: runCharactersPhase completed, runId: ${runId}`);
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 2.5: Narrator design (voice/POV) — depends on characters + narrative.
-      state.inFlight = true;
-      await this.runNarratorDesignPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
+      if (startIdx <= 2) {
+        state.inFlight = true;
+        await this.runNarratorDesignPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 3: Worldbuilding
-      state.inFlight = true;
-      await this.runWorldbuildingPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
+      if (startIdx <= 3) {
+        state.inFlight = true;
+        await this.runWorldbuildingPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 4: Outlining
-      state.inFlight = true;
-      await this.runOutliningPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
+      if (startIdx <= 4) {
+        state.inFlight = true;
+        await this.runOutliningPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 5: Advanced Planning (optional)
-      state.inFlight = true;
-      await this.runAdvancedPlanningPhase(runId, options);
-      state.inFlight = false; // safe checkpoint
+      if (startIdx <= 5) {
+        state.inFlight = true;
+        await this.runAdvancedPlanningPhase(runId, options);
+        state.inFlight = false; // safe checkpoint
+      }
       if (this.shouldStop(runId)) return;
 
       // Phase 6-9: Drafting → Critique → Revision → Polish (per scene).
       // runDraftingLoop manages its own per-scene inFlight checkpoints.
-      await this.runDraftingLoop(runId, options);
+      // Index 6 is the max — always runs unless start is somehow past it (impossible).
+      if (startIdx <= 6) {
+        await this.runDraftingLoop(runId, options);
+      }
       if (this.shouldStop(runId)) return;
+
+      // Persist the run_config reproducibility artifact (#162).
+      await this.persistRunConfig(runId);
 
       // Mark as completed
       state.isCompleted = true;
       state.updatedAt = new Date().toISOString();
+      await this.mirrorStatus(runId); // #157 Slice A: terminal mirror (await for durability)
 
       await this.publishEvent(runId, "generation_complete", {
         projectId: options.projectId,
@@ -480,60 +504,10 @@ export class StorytellerOrchestrator {
    * Prevents context drift where LLM "forgets" the original story concept
    */
   private addSeedConstraints(state: GenerationState, seedIdea: string): void {
-    const narrative = state.narrative as Record<string, unknown>;
-    const timestamp = new Date().toISOString();
-
-    // Add seed idea as immutable constraint
-    state.keyConstraints.push({
-      key: "seed_idea",
-      value: seedIdea,
-      sceneNumber: 0,
-      timestamp,
-      immutable: true,
-    });
-
-    // Extract key story elements from narrative
-    // Use extractStringValue to handle both string and object formats
-    if (narrative.genre) {
-      state.keyConstraints.push({
-        key: "genre",
-        value: this.extractStringValue(narrative.genre),
-        sceneNumber: 0,
-        timestamp,
-        immutable: true,
-      });
-    }
-
-    if (narrative.premise) {
-      state.keyConstraints.push({
-        key: "premise",
-        value: this.extractStringValue(narrative.premise),
-        sceneNumber: 0,
-        timestamp,
-        immutable: true,
-      });
-    }
-
-    if (narrative.tone) {
-      state.keyConstraints.push({
-        key: "tone",
-        value: this.extractStringValue(narrative.tone),
-        sceneNumber: 0,
-        timestamp,
-        immutable: true,
-      });
-    }
-
-    if (narrative.arc) {
-      state.keyConstraints.push({
-        key: "narrative_arc",
-        value: this.extractStringValue(narrative.arc),
-        sceneNumber: 0,
-        timestamp,
-        immutable: true,
-      });
-    }
-
+    addSeedConstraintsHelper(
+      { keyConstraints: state.keyConstraints as unknown as import("../utils/seedConstraints").SeedConstraint[], narrative: state.narrative as Record<string, unknown> },
+      seedIdea
+    );
     $log.info(`[StorytellerOrchestrator] Added ${state.keyConstraints.length} seed constraints`);
   }
 
@@ -543,21 +517,7 @@ export class StorytellerOrchestrator {
    * Prevents [object Object] serialization issues in constraints
    */
   private extractStringValue(value: unknown): string {
-    if (typeof value === "string") {
-      return value;
-    }
-    if (value && typeof value === "object") {
-      const obj = value as Record<string, unknown>;
-      // Try common field names that LLMs use
-      if (typeof obj.name === "string") return obj.name;
-      if (typeof obj.theme === "string") return obj.theme;
-      if (typeof obj.description === "string") return obj.description;
-      if (typeof obj.type === "string") return obj.type;
-      if (typeof obj.structure === "string") return obj.structure;
-      // Fallback to JSON stringification for complex objects
-      return JSON.stringify(value);
-    }
-    return "";
+    return extractStringValueHelper(value);
   }
 
   /**
@@ -673,7 +633,7 @@ export class StorytellerOrchestrator {
     // LLM-as-a-Judge: Evaluate relevance of character profiles to seed idea
     // Runs asynchronously to not block generation
     // Uses rate limiting (max 3 concurrent) to avoid hitting LLM provider rate limits
-    if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+    if (this.isEvaluationEnabled()) {
       try {
         if (Array.isArray(state.characters)) {
           for (const character of state.characters) {
@@ -938,6 +898,9 @@ export class StorytellerOrchestrator {
     const scenes = (state.outline as Record<string, unknown>)?.scenes as unknown[];
     if (!Array.isArray(scenes)) return;
 
+    // Scene-level regeneration (Decision 3): compute per-scene plan once before the loop.
+    const scenePlan = this.scenesToRun(scenes.length, options.scenesToRegenerate);
+
     for (let sceneNum = 0; sceneNum < scenes.length; sceneNum++) {
       if (this.shouldStop(runId)) return;
 
@@ -945,6 +908,23 @@ export class StorytellerOrchestrator {
       // at the end of the scene (a safe boundary) so gracefulShutdown can wait.
       state.inFlight = true;
       state.currentScene = sceneNum + 1;
+
+      // Scene-level regeneration: reuse prior prose for scenes not in scenesToRegenerate,
+      // instead of re-running the full draft→polish work.
+      if (!scenePlan[sceneNum].regenerate && options.previousRunId) {
+        const reused = await this.reuseSceneFromPreviousRun(runId, options, sceneNum + 1);
+        if (reused) {
+          // Mirror the normal scene-boundary bookkeeping so a reused scene is as
+          // crash-recoverable and status-durable as a freshly drafted one.
+          state.currentSceneOutline = undefined;
+          state.inFlight = false;
+          await this.checkpointScene(runId, sceneNum + 1);
+          void this.mirrorStatus(runId);
+          continue;
+        }
+        // If no prior artifact existed, fall through and draft this scene normally.
+      }
+
       // Slice 2: assemble the per-scene contract from blackboard regions and
       // stash it on state so Writer/Critic can read it without re-assembling.
       state.currentSceneContract = assembleSceneContract(state, sceneNum + 1);
@@ -956,8 +936,7 @@ export class StorytellerOrchestrator {
 
       // PROACTIVE BEATS METHOD: For scenes with target > 1000 words, split into parts upfront
       // This prevents the Writer↔Critic deadlock where LLMs can't produce 1500+ words in one shot
-      const BEATS_THRESHOLD = 1000;
-      if (targetWordCount > BEATS_THRESHOLD) {
+      if (shouldUseBeatsMethod(targetWordCount)) {
         console.log(`[Orchestrator] Scene ${sceneNum + 1} target ${targetWordCount} words > ${BEATS_THRESHOLD}, using Proactive Beats Method`);
         await this.draftSceneWithBeats(runId, options, sceneNum + 1, scene, targetWordCount);
       } else {
@@ -1091,6 +1070,9 @@ export class StorytellerOrchestrator {
 
       // Safe checkpoint between scenes: gracefulShutdown may snapshot here.
       state.inFlight = false;
+      // #157 Slice A: persist crash-recovery checkpoint and mirror status at scene boundary.
+      await this.checkpointScene(runId, sceneNum + 1);
+      void this.mirrorStatus(runId);
     }
 
     // Final Archivist flush: the per-scene trigger only fires on multiples of 3,
@@ -1159,7 +1141,7 @@ export class StorytellerOrchestrator {
       sceneNum,
       title: sceneTitle,
       content: response,
-      wordCount: response.split(/\s+/).length,
+      wordCount: wordCount(response),
       createdAt: new Date().toISOString(),
     };
 
@@ -1240,7 +1222,7 @@ export class StorytellerOrchestrator {
     // LLM-as-a-Judge: Evaluate faithfulness of Writer output to Architect plan
     // Runs asynchronously to not block generation
     // Uses shared rate limiter (max 3 concurrent) to avoid hitting LLM provider rate limits
-    if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+    if (this.isEvaluationEnabled()) {
       try {
         const architectPlan = JSON.stringify(sceneOutline, null, 2);
         
@@ -1290,8 +1272,7 @@ export class StorytellerOrchestrator {
 
     // Calculate number of parts (3-4 based on target word count)
     // ~500 words per part is optimal for LLM generation
-    const WORDS_PER_PART = 500;
-    const partsTotal = Math.min(4, Math.max(3, Math.ceil(targetWordCount / WORDS_PER_PART)));
+    const partsTotal = calculateBeatsParts(targetWordCount);
     const partTargetWords = Math.ceil(targetWordCount / partsTotal);
 
     console.log(`[Orchestrator] Scene ${sceneNum} Beats Method: ${partsTotal} parts, ~${partTargetWords} words each`);
@@ -1355,7 +1336,7 @@ export class StorytellerOrchestrator {
           }
         }
 
-        const partWordCount = partContent.split(/\s+/).length;
+        const partWordCount = wordCount(partContent);
         
         if (partWordCount >= minPartWords) {
           console.log(`[Orchestrator] Scene ${sceneNum} Part ${partIndex}/${partsTotal}: ${partWordCount} words (target: ${partTargetWords})`);
@@ -1367,7 +1348,7 @@ export class StorytellerOrchestrator {
       }
 
       // FAIL-FAST: Check if we exhausted retries without meeting minimum word count
-      const finalPartWordCount = partContent.split(/\s+/).length;
+      const finalPartWordCount = wordCount(partContent);
       if (retryCount >= maxRetriesPerPart && finalPartWordCount < minPartWords) {
         await this.publishEvent(runId, "scene_beat_error", {
           sceneNum,
@@ -1394,8 +1375,8 @@ export class StorytellerOrchestrator {
         sceneNum, 
         partIndex, 
         partsTotal,
-        partWordCount: partContent.split(/\s+/).length,
-        totalWordCount: combinedContent.split(/\s+/).length
+        partWordCount: wordCount(partContent),
+        totalWordCount: wordCount(combinedContent)
       });
     }
 
@@ -1409,7 +1390,7 @@ export class StorytellerOrchestrator {
       sceneNum,
       title: sceneTitle,
       content: combinedContent,
-      wordCount: combinedContent.split(/\s+/).length,
+      wordCount: wordCount(combinedContent),
       createdAt: new Date().toISOString(),
       beatsMethod: true,
       partsGenerated: partsTotal,
@@ -1497,7 +1478,7 @@ export class StorytellerOrchestrator {
     });
 
     // LLM-as-a-Judge evaluation (same as draftScene)
-    if (process.env.EVALUATION_ENABLED === "true" && this.evaluationService.isEnabled) {
+    if (this.isEvaluationEnabled()) {
       try {
         const architectPlan = JSON.stringify(sceneOutline, null, 2);
         
@@ -1611,7 +1592,7 @@ export class StorytellerOrchestrator {
       sceneNum,
       title: (draft as Record<string, unknown>).title,
       content: response,
-      wordCount: response.split(/\s+/).length,
+      wordCount: wordCount(response),
       revisionNumber: (state.revisionCount.get(sceneNum) ?? 0) + 1,
       createdAt: new Date().toISOString(),
     };
@@ -1693,7 +1674,7 @@ export class StorytellerOrchestrator {
       sceneNum,
       title: draft.title,
       content: combinedContent,
-      wordCount: combinedContent.split(/\s+/).length,
+      wordCount: wordCount(combinedContent),
       expansionCount: (Number(draft.expansionCount) || 0) + 1,
       createdAt: new Date().toISOString(),
     };
@@ -1837,7 +1818,7 @@ export class StorytellerOrchestrator {
 
     // Store pre-polish content for validation/fallback
     const prePolishContent = String((draft as Record<string, unknown>).content ?? "");
-    const prePolishWordCount = prePolishContent.split(/\s+/).length;
+    const prePolishWordCount = wordCount(prePolishContent);
 
     // Use WriterAgent through AgentFactory
     const agent = this.agentFactory.getAgent(AgentType.WRITER);
@@ -1850,7 +1831,7 @@ export class StorytellerOrchestrator {
     const output = await agent.execute(context, options);
     // Strip fake word count claims from Writer output (LLMs hallucinate word counts)
     const response = this.stripFakeWordCount(output.content as string);
-    const polishedWordCount = response.split(/\s+/).length;
+    const polishedWordCount = wordCount(response);
 
     // POST-POLISH VALIDATION: Check if polish is acceptable
     // Reject polish if it's significantly shorter (lost chunks) or missing ending
@@ -2018,13 +1999,13 @@ export class StorytellerOrchestrator {
       await this.saveArtifact(runId, options.projectId, `spiced_scene_${sceneNum}`, {
         sceneNum,
         content: spiced,
-        wordCount: spiced.split(/\s+/).length,
+        wordCount: wordCount(spiced),
       });
       await this.publishEvent(runId, "scene_spiced", {
         sceneNum,
         amplified: amplifiedCount,
         finalContent: spiced,
-        wordCount: spiced.split(/\s+/).length,
+        wordCount: wordCount(spiced),
       });
     } catch (spicePassError) {
       // Optional enhancement: a failure here (e.g. Redis publish) must NEVER fail
@@ -2538,6 +2519,11 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     return false;
   }
 
+  /** Judge is observability-only and default-ON; set EVALUATION_ENABLED=false to disable. */
+  private isEvaluationEnabled(): boolean {
+    return process.env.EVALUATION_ENABLED !== "false" && this.evaluationService.isEnabled;
+  }
+
   /**
    * Publish event to Redis Streams
    */
@@ -2560,11 +2546,42 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
   }
 
   /**
+   * Record per-phase resolved model + sampling params into the run's runConfig (#162).
+   * Bound to all agent sinks; uses runId to look up the correct activeRun state.
+   */
+  private recordLLMMeta(runId: string, meta: {
+    provider: string; requestedModel: string; resolvedModel: string;
+    temperature: number; seed?: number; maxTokens: number; phase: string;
+  }): void {
+    const st = this.activeRuns.get(runId);
+    if (!st?.runConfig) return;
+    recordPhase(st.runConfig, meta.phase, {
+      provider: meta.provider,
+      requestedModel: meta.requestedModel,
+      resolvedModel: meta.resolvedModel,
+      temperature: meta.temperature,
+      seed: meta.seed,
+      maxTokens: meta.maxTokens,
+    }, new Date().toISOString());
+  }
+
+  /**
+   * Persist the accumulated run_config artifact to Supabase (#162).
+   * Called at run completion and on error so a partial run is still diagnosable.
+   */
+  private async persistRunConfig(runId: string): Promise<void> {
+    const st = this.activeRuns.get(runId);
+    if (!st?.runConfig) return;
+    await this.saveArtifact(runId, st.projectId, "run_config", st.runConfig as unknown);
+  }
+
+  /**
    * Publish phase start event
    */
   private async publishPhaseStart(runId: string, phase: GenerationPhase): Promise<void> {
     await this.publishEvent(runId, "phase_start", { phase });
     this.langfuse.addEvent(runId, "phase_start", { phase });
+    void this.mirrorStatus(runId); // #157 Slice A
   }
 
   /**
@@ -2577,6 +2594,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
   ): Promise<void> {
     await this.publishEvent(runId, "phase_complete", { phase, artifact });
     this.langfuse.addEvent(runId, "phase_complete", { phase });
+    void this.mirrorStatus(runId); // #157 Slice A
   }
 
   /**
@@ -2600,9 +2618,153 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     }
   }
 
+  // ==================== REGENERATION HELPERS ====================
+
+  /**
+   * Linear phase chain as executed by runGeneration. Index positions:
+   * 0 genesis, 1 characters, 2 narrator_design, 3 worldbuilding,
+   * 4 outlining, 5 advanced_planning, 6 drafting-loop (folds critique/revision/
+   * originality/impact/polish). Used by resolveStartPhaseIndex.
+   */
+  private static readonly PHASE_CHAIN: GenerationPhase[] = [
+    GenerationPhase.GENESIS,
+    GenerationPhase.CHARACTERS,
+    GenerationPhase.NARRATOR_DESIGN,
+    GenerationPhase.WORLDBUILDING,
+    GenerationPhase.OUTLINING,
+    GenerationPhase.ADVANCED_PLANNING,
+    GenerationPhase.DRAFTING,
+  ];
+
+  /**
+   * Per-phase artifact-type + state-field seeding map, in chain order. The artifact
+   * type strings are the REAL save-site keys (StorytellerOrchestrator saveArtifact
+   * calls), not PHASE_CONFIGS.outputArtifact labels.
+   */
+  private static readonly SEED_MAP: { artifactType: string; field: keyof GenerationState }[] = [
+    { artifactType: "narrative", field: "narrative" },
+    { artifactType: "characters", field: "characters" },
+    { artifactType: "narrator_voice", field: "narratorVoice" },
+    { artifactType: "worldbuilding", field: "worldbuilding" },
+    { artifactType: "outline", field: "outline" },
+    { artifactType: "advanced_plan", field: "advancedPlan" },
+  ];
+
+  /**
+   * Resolve start_from_phase to an index in PHASE_CHAIN. Undefined / genesis -> 0
+   * (full run). In-loop phases (critique/revision/originality/impact/polish) resolve
+   * to the drafting-loop index (6) since the loop owns those phases. Pure.
+   */
+  private resolveStartPhaseIndex(startFromPhase?: GenerationPhase): number {
+    if (!startFromPhase) return 0;
+    const idx = StorytellerOrchestrator.PHASE_CHAIN.indexOf(startFromPhase);
+    if (idx >= 0) return idx;
+    // In-loop phases not listed in PHASE_CHAIN -> drafting loop owns them.
+    return StorytellerOrchestrator.PHASE_CHAIN.indexOf(GenerationPhase.DRAFTING);
+  }
+
+  /**
+   * Decide, per scene, whether to regenerate or reuse. Pure. scenesToRegenerate
+   * absent -> regenerate all. 1-indexed scene numbers.
+   */
+  private scenesToRun(
+    sceneCount: number,
+    scenesToRegenerate?: number[]
+  ): { sceneNum: number; regenerate: boolean }[] {
+    const out: { sceneNum: number; regenerate: boolean }[] = [];
+    for (let i = 1; i <= sceneCount; i++) {
+      const regenerate = !scenesToRegenerate || scenesToRegenerate.includes(i);
+      out.push({ sceneNum: i, regenerate });
+    }
+    return out;
+  }
+
+  /**
+   * Phase-based regeneration: load prior-run artifacts for every phase BEFORE
+   * uptoPhaseIndex and seed them into state. Explicit per-artifactType reads
+   * (Decision 2a). getRunArtifact returns the full row { content } or null;
+   * a missing artifact is warned and skipped (field left at its default).
+   */
+  private async seedStateFromPreviousRun(
+    state: GenerationState,
+    previousRunId: string,
+    uptoPhaseIndex: number
+  ): Promise<void> {
+    for (let i = 0; i < uptoPhaseIndex && i < StorytellerOrchestrator.SEED_MAP.length; i++) {
+      const { artifactType, field } = StorytellerOrchestrator.SEED_MAP[i];
+      const row = (await this.supabase.getRunArtifact(previousRunId, artifactType)) as
+        | { content: unknown }
+        | null;
+      if (!row || row.content == null) {
+        console.warn(
+          `[Orchestrator] seedStateFromPreviousRun: no '${artifactType}' artifact on run ${previousRunId}; skipping`
+        );
+        continue;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (state as any)[field] = row.content;
+    }
+  }
+
+  /**
+   * Scene-level regeneration: load a kept scene's prior prose from previousRunId and
+   * place it into state.drafts. Prefers final_scene_N (polished terminal output),
+   * falls back to draft_scene_N. Returns true if a prior artifact was found.
+   */
+  private async reuseSceneFromPreviousRun(
+    runId: string,
+    options: GenerationOptions,
+    sceneNum: number
+  ): Promise<boolean> {
+    const state = this.activeRuns.get(runId);
+    if (!state || !options.previousRunId) return false;
+
+    let row = (await this.supabase.getRunArtifact(
+      options.previousRunId,
+      `final_scene_${sceneNum}`
+    )) as { content: unknown } | null;
+
+    if (!row || row.content == null) {
+      row = (await this.supabase.getRunArtifact(
+        options.previousRunId,
+        `draft_scene_${sceneNum}`
+      )) as { content: unknown } | null;
+    }
+
+    if (!row || row.content == null) {
+      console.warn(
+        `[Orchestrator] reuseSceneFromPreviousRun: no prior artifact for scene ${sceneNum} on run ${options.previousRunId}; will draft instead`
+      );
+      return false;
+    }
+
+    state.drafts.set(sceneNum, row.content as Record<string, unknown>);
+
+    // Thread continuity bookkeeping for the reused scene so a LATER regenerated
+    // scene isn't starved of synopsis / value-shift context. A reused scene has
+    // no fresh critique, so record a neutral (0) value-shift and summarize the
+    // reused prose into the rolling synopsis (best-effort; never fails the run).
+    state.valueShifts.set(sceneNum, 0);
+    try {
+      const reusedText = String((row.content as Record<string, unknown>)?.content ?? "");
+      if (reusedText.trim().length > 0) {
+        const archivist = this.agentFactory.getAgent(AgentType.ARCHIVIST) as ArchivistAgent;
+        const summary = await archivist.summarizeScene(runId, options, sceneNum, reusedText);
+        if (summary) state.rollingSynopsis.push({ sceneNumber: sceneNum, summary });
+      }
+    } catch (synopsisError) {
+      $log.warn(
+        `[StorytellerOrchestrator] reuseSceneFromPreviousRun: synopsis generation failed for scene ${sceneNum}, continuing anyway, runId: ${runId}`,
+        synopsisError
+      );
+    }
+
+    return true;
+  }
+
   /**
    * Handle generation error
-   * 
+   *
    * IMPORTANT: Publishes ERROR event to Redis Stream so clients don't hang forever
    * Client should check for event.type === "ERROR" and stop waiting
    */
@@ -2614,6 +2776,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     if (state) {
       state.error = errorMessage;
       state.updatedAt = new Date().toISOString();
+      await this.mirrorStatus(runId); // #157 Slice A: terminal mirror on error
     }
 
     // Publish detailed ERROR event - clients MUST check for this
@@ -2643,6 +2806,9 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
     // Score the trace as failed for analytics
     this.langfuse.scoreTrace(runId, "success", 0, `Generation failed: ${errorMessage}`);
+
+    // Persist whatever run_config was accumulated so a partial run is still diagnosable (#162).
+    await this.persistRunConfig(runId);
   }
 
   /**
@@ -2708,27 +2874,129 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     return [parsed];
   }
 
+  // ==================== STATE SERIALIZATION / CHECKPOINTING (issue #157, Slice A) ====================
+
+  /** Serialize a run's state for persistence (Maps -> plain objects). */
+  private serializeState(state: GenerationState): Record<string, unknown> {
+    return {
+      ...state,
+      drafts: Object.fromEntries(state.drafts),
+      critiques: Object.fromEntries(state.critiques),
+      revisionCount: Object.fromEntries(state.revisionCount),
+      valueShifts: Object.fromEntries(state.valueShifts),
+      spiceRegions: Object.fromEntries(state.spiceRegions),
+    };
+  }
+
+  /** Deserialize a persisted state back into a live GenerationState (plain objects -> Maps). */
+  private deserializeState(savedState: Record<string, unknown>): GenerationState {
+    const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
+    const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
+    const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
+    const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
+    const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
+
+    return {
+      ...(savedState as unknown as GenerationState),
+      drafts: new Map(Object.entries(draftsObj).map(([k, v]) => [parseInt(k, 10), v])),
+      critiques: new Map(Object.entries(critiquesObj).map(([k, v]) => [parseInt(k, 10), v])),
+      revisionCount: new Map(Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])),
+      valueShifts: new Map(Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])),
+      spiceRegions: new Map(Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])),
+      // Default to [] for snapshots saved before rollingSynopsis existed,
+      // so the .push() in runDraftingLoop does not throw on restore.
+      rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
+      isPaused: true, // Keep paused until explicitly resumed
+    };
+  }
+
+  /**
+   * Persist a full state checkpoint at a scene boundary so a hard crash loses at
+   * most the in-progress scene (issue #157, Slice A). Distinct artifact type from
+   * the graceful-shutdown snapshot; phase varies per scene to retain history.
+   */
+  private async checkpointScene(runId: string, sceneNumber: number): Promise<void> {
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+    try {
+      await this.supabase.saveRunArtifact({
+        runId: state.runId,
+        projectId: state.projectId,
+        artifactType: "run_state_checkpoint",
+        phase: `checkpoint_scene_${sceneNumber}`,
+        content: this.serializeState(state),
+      });
+    } catch (err) {
+      console.warn(`[Orchestrator] checkpointScene failed for ${runId} scene ${sceneNumber}: ${String(err)}`);
+    }
+  }
+
+  // ==================== REDIS STATUS MIRROR (issue #157, Slice A) ====================
+
+  /** Mirror the small run-status record to Redis (issue #157, Slice A). Best-effort. */
+  private async mirrorStatus(runId: string): Promise<void> {
+    const state = this.activeRuns.get(runId);
+    if (!state) return;
+    try {
+      await this.redisStreams.setRunStatus({
+        runId: state.runId,
+        projectId: state.projectId,
+        phase: String(state.phase),
+        currentScene: state.currentScene,
+        totalScenes: state.totalScenes,
+        isPaused: state.isPaused,
+        isCompleted: state.isCompleted,
+        error: state.error,
+        startedAt: state.startedAt,
+        updatedAt: state.updatedAt,
+      });
+    } catch (err) {
+      console.warn(`[Orchestrator] mirrorStatus failed for ${runId}: ${String(err)}`);
+    }
+  }
+
   // ==================== PUBLIC API ====================
 
   /**
-   * Get run status
+   * Get run status. Falls back to the Redis mirror so cross-replica status/stream
+   * requests succeed for a live run (issue #157, Slice A).
    */
-  getRunStatus(runId: string): RunStatus | null {
+  async getRunStatus(runId: string): Promise<RunStatus | null> {
     const state = this.activeRuns.get(runId);
-    if (!state) return null;
-
-    return {
-      runId: state.runId,
-      projectId: state.projectId,
-      phase: state.phase,
-      currentScene: state.currentScene,
-      totalScenes: state.totalScenes,
-      isPaused: state.isPaused,
-      isCompleted: state.isCompleted,
-      error: state.error,
-      startedAt: state.startedAt,
-      updatedAt: state.updatedAt,
-    };
+    if (state) {
+      return {
+        runId: state.runId,
+        projectId: state.projectId,
+        phase: state.phase,
+        currentScene: state.currentScene,
+        totalScenes: state.totalScenes,
+        isPaused: state.isPaused,
+        isCompleted: state.isCompleted,
+        error: state.error,
+        startedAt: state.startedAt,
+        updatedAt: state.updatedAt,
+      };
+    }
+    // Cross-instance fallback: this run may be live on another replica.
+    try {
+      const mirror = await this.redisStreams.getRunStatusMirror(runId);
+      if (!mirror) return null;
+      return {
+        runId: mirror.runId,
+        projectId: mirror.projectId,
+        phase: mirror.phase as RunStatus["phase"],
+        currentScene: mirror.currentScene,
+        totalScenes: mirror.totalScenes,
+        isPaused: mirror.isPaused,
+        isCompleted: mirror.isCompleted,
+        error: mirror.error,
+        startedAt: mirror.startedAt ?? new Date().toISOString(),
+        updatedAt: mirror.updatedAt ?? new Date().toISOString(),
+      };
+    } catch (err) {
+      console.warn(`[Orchestrator] getRunStatus Redis fallback failed for ${runId}: ${String(err)}`);
+      return null;
+    }
   }
 
   /**
@@ -2747,6 +3015,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
     state.isPaused = true;
     state.updatedAt = new Date().toISOString();
+    void this.mirrorStatus(runId); // #157 Slice A
     return true;
   }
 
@@ -2759,6 +3028,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
     state.isPaused = false;
     state.updatedAt = new Date().toISOString();
+    void this.mirrorStatus(runId); // #157 Slice A
     return true;
   }
 
@@ -2790,6 +3060,7 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     state.isCancelled = true;
     state.error = "Cancelled by user";
     state.updatedAt = new Date().toISOString();
+    void this.mirrorStatus(runId); // #157 Slice A
     return true;
   }
 
@@ -2879,15 +3150,8 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     let savedCount = 0;
     for (const state of activeRuns) {
       try {
-        // Serialize the state (Maps need special handling)
-        const serializedState = {
-          ...state,
-          drafts: Object.fromEntries(state.drafts),
-          critiques: Object.fromEntries(state.critiques),
-          revisionCount: Object.fromEntries(state.revisionCount),
-          valueShifts: Object.fromEntries(state.valueShifts),
-          spiceRegions: Object.fromEntries(state.spiceRegions),
-        };
+        // Serialize the state (Maps need special handling) — uses shared serializeState()
+        const serializedState = this.serializeState(state);
 
         await this.supabase.saveRunArtifact({
           runId: state.runId,
@@ -2929,8 +3193,26 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
         return 0;
       }
 
-      // Get saved run state from Supabase
-      const artifact = await this.supabase.getRunArtifact(runId, "run_state_snapshot");
+      // Get saved run state from Supabase — prefer graceful-shutdown snapshot,
+      // fall back to the highest-numbered scene checkpoint (issue #157, Slice A).
+      let artifact = await this.supabase.getRunArtifact(runId, "run_state_snapshot");
+
+      if (!artifact) {
+        // No graceful-shutdown snapshot — look for the latest scene checkpoint.
+        const allArtifacts = await this.supabase.getRunArtifacts(runId);
+        const checkpoints = (allArtifacts as Array<{ artifact_type: string; content: unknown; phase?: string }>)
+          .filter((a) => a.artifact_type === "run_state_checkpoint" && typeof a.phase === "string");
+        if (checkpoints.length > 0) {
+          // Sort by scene number extracted from phase "checkpoint_scene_N"
+          checkpoints.sort((a, b) => {
+            const numA = parseInt(a.phase!.replace("checkpoint_scene_", ""), 10) || 0;
+            const numB = parseInt(b.phase!.replace("checkpoint_scene_", ""), 10) || 0;
+            return numA - numB;
+          });
+          artifact = checkpoints[checkpoints.length - 1] as unknown;
+          console.log(`Orchestrator: No snapshot for run ${runId}; restoring from latest scene checkpoint (${checkpoints[checkpoints.length - 1].phase})`);
+        }
+      }
 
       if (!artifact) {
         console.log("Orchestrator: No saved run state found");
@@ -2939,37 +3221,8 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
 
       try {
         const artifactData = artifact as { content: Record<string, unknown> };
-        const savedState = artifactData.content;
-        
-        // Deserialize the state (restore Maps from serialized objects)
-        const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
-        const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
-        const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
-        const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
-        const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
-
-        const state: GenerationState = {
-          ...(savedState as unknown as GenerationState),
-          drafts: new Map(
-            Object.entries(draftsObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          critiques: new Map(
-            Object.entries(critiquesObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          revisionCount: new Map(
-            Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          valueShifts: new Map(
-            Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          spiceRegions: new Map(
-            Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
-          ),
-          // Default to [] for snapshots saved before rollingSynopsis existed,
-          // so the .push() in runDraftingLoop does not throw on restore.
-          rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
-          isPaused: true, // Keep paused until explicitly resumed
-        };
+        // Deserialize via shared method — uses deserializeState()
+        const state = this.deserializeState(artifactData.content);
 
         this.activeRuns.set(state.runId, state);
 
@@ -3017,45 +3270,19 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
       let restoredCount = 0;
       for (const snapshot of snapshots) {
         try {
-          const savedState = snapshot.content as Record<string, unknown>;
-          
           // Check if this run is already active (shouldn't happen, but safety check)
           if (this.activeRuns.has(snapshot.run_id)) {
             console.log(`Orchestrator: Run ${snapshot.run_id} already active, skipping`);
             continue;
           }
 
-          // Deserialize the state (restore Maps from serialized objects)
-          const draftsObj = (savedState.drafts as Record<string, Record<string, unknown>>) || {};
-          const critiquesObj = (savedState.critiques as Record<string, Record<string, unknown>[]>) || {};
-          const revisionObj = (savedState.revisionCount as Record<string, number>) || {};
-          const valueShiftsObj = (savedState.valueShifts as Record<string, number>) || {};
-          const spiceRegionsObj = (savedState.spiceRegions as Record<string, SpiceRegion[]>) || {};
-
-          const state: GenerationState = {
-            ...(savedState as unknown as GenerationState),
+          // Deserialize via shared method — uses deserializeState()
+          const savedState = snapshot.content as Record<string, unknown>;
+          const state = this.deserializeState({
+            ...savedState,
             runId: snapshot.run_id,
             projectId: snapshot.project_id,
-            drafts: new Map(
-              Object.entries(draftsObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            critiques: new Map(
-              Object.entries(critiquesObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            revisionCount: new Map(
-              Object.entries(revisionObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            valueShifts: new Map(
-              Object.entries(valueShiftsObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            spiceRegions: new Map(
-              Object.entries(spiceRegionsObj).map(([k, v]) => [parseInt(k, 10), v])
-            ),
-            // Default to [] for snapshots saved before rollingSynopsis existed,
-            // so the .push() in runDraftingLoop does not throw on restore.
-            rollingSynopsis: (savedState.rollingSynopsis as SynopsisEntry[]) ?? [],
-            isPaused: true, // Keep paused until explicitly resumed
-          };
+          });
 
           this.activeRuns.set(state.runId, state);
 

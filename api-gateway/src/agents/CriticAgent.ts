@@ -14,6 +14,7 @@ import { AgentContext, AgentOutput, GenerationOptions } from "./types";
 import { CritiqueSchema } from "../schemas/AgentSchemas";
 import { ContentGuardrail, ConsistencyGuardrail } from "../guardrails";
 import { RedisStreamsService } from "../services/RedisStreamsService";
+import { isRevisionNeeded as gateIsRevisionNeeded, calculateWordCountCompliance } from "../utils/revisionGate";
 
 export class CriticAgent extends BaseAgent {
   constructor(
@@ -78,51 +79,10 @@ export class CriticAgent extends BaseAgent {
    * Determine if revision is needed based on critique
    * Uses Guard Clause Pattern: check failure conditions first, then success conditions
    * This prevents bugs where high scores could bypass issue checks
+   * // Logic extracted to utils/revisionGate.ts (issue #165) so tests exercise this exact code.
    */
   private isRevisionNeeded(critique: Record<string, unknown>): boolean {
-    const hasIssues = Array.isArray(critique.issues) && critique.issues.length > 0;
-    const hasRevisionRequests = Array.isArray(critique.revisionRequests) && critique.revisionRequests.length > 0;
-    const score = typeof critique.score === "number" ? critique.score : null;
-
-    // 1. Check hard failures first (guard clauses)
-    // Word count compliance is a hard requirement - LLMs often lie about word counts
-    if (critique.wordCountCompliance === false) {
-      return true;
-    }
-
-    // Scope adherence is a hard requirement - scene must stay within outline bounds
-    if (critique.scopeAdherence === false) {
-      return true;
-    }
-
-    // Score below 7 always needs revision
-    if (score !== null && score < 7) {
-      return true;
-    }
-
-    // Score 7-8 needs revision if there are any issues
-    if (score !== null && score < 8 && hasIssues) {
-      return true;
-    }
-
-    // Any issues or revision requests require revision (even with high score)
-    if (hasIssues || hasRevisionRequests) {
-      return true;
-    }
-
-    // 2. Check success conditions
-    // Only approve if explicitly approved AND score is high
-    if (critique.approved === true && score !== null && score >= 8) {
-      return false;
-    }
-
-    // High score without issues is approved
-    if (score !== null && score >= 8) {
-      return false;
-    }
-
-    // 3. Default to safe behavior - require revision if uncertain
-    return true;
+    return gateIsRevisionNeeded(critique);
   }
 
   /**
@@ -203,7 +163,7 @@ Key Constraints: ${variables.keyConstraints || "No constraints established yet."
       
       // Calculate actual word count (don't trust LLM's self-reported count)
       const actualWordCount = String((draft as Record<string, unknown>).content || "").split(/\s+/).filter(w => w.length > 0).length;
-      const wordCountRatio = actualWordCount / Number(targetWordCount);
+      const { ratio: wordCountRatio } = calculateWordCountCompliance(actualWordCount, Number(targetWordCount));
 
       // Get scene outline for scope checking
       const sceneHook = sceneOutline.hook ?? sceneOutline.endHook ?? "";

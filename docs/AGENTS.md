@@ -284,6 +284,21 @@ The Writer and Critic agents operate in a feedback loop:
 - Maximum revisions reached (default: 3)
 - User manual approval
 
+### LLM-as-a-Judge (observability, not a gate)
+
+The judge scores faithfulness (Writer vs Architect plan) and relevance (Profiler vs
+seed idea) on a 0–1 scale. It runs N=3 samples at temperature 0 and reports the
+median to reduce single-sample noise. It is **default-on** (cheap, async) and
+**gates nothing** — scores are recorded to Prometheus (`manoe_evaluation_score`,
+`scale="0-1"`) and Langfuse for observability only. This is distinct from the
+Critic's 1–10 craft score, which DOES gate the revision loop.
+
+**Known gap (not closed here):** the 0–1 rubric bands are unvalidated against human
+labels; no inter-rater agreement (κ) has been measured. Calibrating against a
+human-labeled holdout is a prerequisite before any judge score is used to gate
+generation. Until then, treat absolute judge numbers as relative signals, not
+thresholds.
+
 ## Audit Logging
 
 All agent actions are logged to the `audit_logs` table:
@@ -301,6 +316,39 @@ This enables:
 - Performance monitoring
 - Debugging failed generations
 - Quality analysis over time
+
+- **Run reproducibility (`run_config` artifact):** each run persists a `run_config` artifact capturing the per-run `seed`, the requested provider/model/temperature, and a per-phase record of the *resolved* model id and sampling params (temperature, seed, maxTokens). Use it to bisect a quality regression to model vs. prompt vs. sampling. Floating model aliases are unchanged; the resolved id is what the provider actually served.
+
+## Run State & Scaling (issue #157)
+
+### Slice A (shipped)
+
+Run *status* is mirrored to Redis (`manoe:run_status:{runId}`) at every lifecycle
+transition (start, phase change, pause/resume/cancel, completion, error, scene
+boundary). Any replica can answer `GET /orchestrate/status/:runId` and
+`GET /orchestrate/stream/:runId` for a live run, even one it does not own in heap.
+
+Full state is checkpointed to Supabase (`artifact_type: run_state_checkpoint`,
+`phase: checkpoint_scene_N`) at each scene boundary. A hard crash loses at most
+the in-progress scene; `restoreFromShutdown` falls back to the latest checkpoint
+when no graceful-shutdown snapshot exists.
+
+### NOT yet shipped
+
+Cross-instance pause/resume/cancel and mid-LLM-call abort. The running loop and
+its control flags (`isPaused`, `isCancelled`) remain in the owning instance's
+process heap.
+
+**Run the api-gateway as a single replica** (`deploy.replicas: 1` is pinned in
+`docker-compose.vps.yml`) until Slice B (Redis pub/sub control channel) lands.
+
+### Regeneration paths (implemented)
+
+Two regeneration modes are wired end-to-end (the frontend has always sent these fields; the backend previously dropped them — fixed in the regeneration plan):
+
+- **Phase-based:** `start_from_phase` + `previous_run_id` → `StorytellerOrchestrator.seedStateFromPreviousRun()` loads prior `narrative`/`characters`/`narrator_voice`/`worldbuilding`/`outline`/`advanced_plan` artifacts for phases before the start phase, then `runGeneration` skips those phases via `resolveStartPhaseIndex()`.
+- **Scene-level:** `scenes_to_regenerate` + `previous_run_id` → `runDraftingLoop` re-drafts only listed scenes; others are reused via `reuseSceneFromPreviousRun()` (final-then-draft fallback).
+- Controller rejects invalid combos (bad phase, missing `previous_run_id`, malformed scene list) with 400.
 
 ## Extending Agents
 

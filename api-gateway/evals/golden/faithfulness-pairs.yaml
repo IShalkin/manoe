@@ -1,0 +1,101 @@
+# =============================================================================
+# MANOE judge DISCRIMINATION golden pairs (the REAL faithful-vs-unfaithful gate)
+# =============================================================================
+# This is where the LLM judge's discrimination is honestly tested — against a
+# REAL model (promptfoo's grader), NOT a stub. (A stubbed-LLM jest test cannot
+# verify discrimination; that lives in EvaluationPromptAssembly.test.ts as
+# prompt-ASSEMBLY only — see ../../src/__tests__/EvaluationPromptAssembly.test.ts.)
+#
+# Each PAIR shares an architect plan. One member is a writer passage that
+# FAITHFULLY follows the plan; the other DELIBERATELY violates it.
+#
+# IMPORTANT — single-passage grading. These cases are consumed by
+# `promptfooconfig.discrimination.yaml`, which uses the `echo` provider with the
+# prompt `{{passage}}`. So the model OUTPUT *is* the passage in `vars.passage`
+# (no separate Writer generation happens), and the llm-rubric grades that single
+# output against `vars.plan`. This avoids the dual-passage ambiguity of grading a
+# fresh Writer generation while ALSO embedding a different passage in the rubric.
+# =============================================================================
+
+# ---- PAIR A: plan demands a tragic ending; writer obeys / violates ----------
+- _id: faithful-tragic-ending
+  vars:
+    plan: >
+      The scene must end TRAGICALLY — Elena reads the letter, learns her brother
+      died at sea, and is left alone in grief. No rescue, no hopeful reversal.
+    passage: >
+      Elena's hands shook as she unfolded the page. The ink had run, but the
+      words held: the Maris went down off the Skaw, all hands lost. She read his
+      name three times before it stopped being a name and became a fact. The fire
+      had burned to embers. She did not stir to feed it.
+  assert:
+    - type: llm-rubric
+      value: >
+        The OUTPUT is a writer passage. The architect plan was: {{plan}}
+
+        PASS if and only if the OUTPUT FAITHFULLY follows that plan (tragic,
+        brother dead, Elena alone, no hopeful reversal). This passage is faithful,
+        so the correct verdict is PASS.
+
+- _id: unfaithful-tragic-ending
+  vars:
+    plan: >
+      The scene must end TRAGICALLY — Elena reads the letter, learns her brother
+      died at sea, and is left alone in grief. No rescue, no hopeful reversal.
+    passage: >
+      Elena unfolded the page with trembling hands — then laughed aloud. The
+      letter was from her brother himself: the Maris had limped into port after
+      all, and he would be home by Sunday. She threw open the window and called
+      the good news down to the children in the lane.
+  assert:
+    - type: llm-rubric
+      value: >
+        The OUTPUT is a writer passage. The architect plan was: {{plan}}
+
+        PASS if and only if the OUTPUT FAITHFULLY follows that plan (tragic,
+        brother dead, Elena alone, no hopeful reversal). This passage CONTRADICTS
+        the plan (brother survives, hopeful reversal), so a discriminating judge
+        must return FAIL. (A red/FAIL cell here is the CORRECT outcome — see
+        README. The pair is healthy when the faithful case PASSes and this one
+        FAILs.)
+
+# ---- PAIR B: plan forbids a character; writer obeys / violates --------------
+- _id: faithful-no-villain
+  vars:
+    plan: >
+      Tom searches the empty house ALONE. The antagonist (Crane) must NOT appear
+      in this scene — his presence is felt only through signs (a cold cup of
+      coffee, a door left ajar).
+    passage: >
+      Tom moved room to room. The coffee on the table was still warm; the back
+      door stood open to the rain. Whoever had been here had left in a hurry. He
+      never saw a soul — only the spaces a person leaves behind.
+  assert:
+    - type: llm-rubric
+      value: >
+        The OUTPUT is a writer passage. The architect plan was: {{plan}}
+
+        PASS if and only if the OUTPUT FAITHFULLY follows that plan (Crane absent,
+        presence implied only). This passage is faithful, so the correct verdict
+        is PASS.
+
+- _id: unfaithful-no-villain
+  vars:
+    plan: >
+      Tom searches the empty house ALONE. The antagonist (Crane) must NOT appear
+      in this scene — his presence is felt only through signs (a cold cup of
+      coffee, a door left ajar).
+    passage: >
+      Tom moved room to room. In the study, Crane was waiting in the leather
+      chair, a pistol resting on his knee. "I wondered when you'd get here," Crane
+      said, and gestured for Tom to sit.
+  assert:
+    - type: llm-rubric
+      value: >
+        The OUTPUT is a writer passage. The architect plan was: {{plan}}
+
+        PASS if and only if the OUTPUT FAITHFULLY follows that plan (Crane absent,
+        presence implied only). Here Crane APPEARS and SPEAKS, contradicting the
+        plan, so a discriminating judge must return FAIL. (A red/FAIL cell here is
+        the CORRECT outcome — see README. The pair is healthy when the faithful
+        case PASSes and this one FAILs.)

@@ -1,0 +1,41 @@
+# =============================================================================
+# MANOE judge DISCRIMINATION eval — single-passage grading (OpenAI, CI)
+# =============================================================================
+# Purpose: honestly measure whether the LLM judge can tell a FAITHFUL writer
+# passage from an UNFAITHFUL one. Unlike promptfooconfig.ci.yaml (which generates
+# a scene with the Writer prompt and grades quality), this config does NOT run a
+# generation. It uses the `echo` provider so the model OUTPUT *is* the fixed
+# passage in each test case's `vars.passage`; the llm-rubric then grades that one
+# passage against `vars.plan`. One passage in, one verdict out — no dual-passage
+# ambiguity.
+#
+# Run locally:  cd api-gateway/evals && OPENAI_API_KEY=sk-... \
+#               npx promptfoo@latest eval -c promptfooconfig.discrimination.yaml
+# Run in CI:    see .github/workflows/ci.yml step `eval-discrimination` (non-blocking).
+#
+# Reading results: each unfaithful-* case is EXPECTED to FAIL the rubric — a
+# red/FAIL cell there is the CORRECT outcome (the judge caught the violation).
+# The gate is healthy when each faithful-* PASSes and its unfaithful-* partner
+# FAILs. See golden/faithfulness-pairs.yaml and README.
+# Schema ref: https://promptfoo.dev/docs/configuration/reference/
+# =============================================================================
+
+description: "MANOE judge discrimination — faithful vs unfaithful (echo, OpenAI judge)"
+
+# The `echo` provider returns the rendered prompt verbatim as the output, so the
+# graded OUTPUT is exactly the passage. No generation, no API cost for this step.
+providers:
+  - id: echo
+    label: passage-under-judgement
+
+# The prompt IS the passage (echoed straight through to the output).
+prompts:
+  - "{{passage}}"
+
+defaultTest:
+  options:
+    # Real model as the JUDGE — this is the component actually under evaluation.
+    provider: openai:gpt-4.1-mini
+
+tests:
+  - file://golden/faithfulness-pairs.yaml

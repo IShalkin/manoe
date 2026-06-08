@@ -81,6 +81,12 @@ services:
       - VIRTUAL_PORT=3000
       - LETSENCRYPT_HOST=manoe-gateway.iliashalkin.com
       - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-admin@iliashalkin.com}
+    # Issue #157 Slice A: control ops (pause/resume/cancel) are instance-local — the
+    # running loop and its flags live in this process's heap. Status reads ARE
+    # cross-instance (Redis mirror), but DO NOT scale beyond 1 replica until
+    # Slice B (Redis pub/sub control channel) ships.
+    deploy:
+      replicas: 1
     depends_on:
       manoe-redis:
         condition: service_healthy
