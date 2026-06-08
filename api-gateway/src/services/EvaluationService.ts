@@ -90,8 +90,15 @@ export class EvaluationService {
 
   private evaluationConfig: EvaluationConfig | null = null;
 
-  /** Self-consistency samples per evaluation. Median is reported. Override via EVALUATION_SAMPLES. */
-  private readonly sampleCount: number = Math.max(1, Number(process.env.EVALUATION_SAMPLES) || 3);
+  /**
+   * Self-consistency samples per evaluation. Median is reported. Override via
+   * EVALUATION_SAMPLES. Parsed as a finite integer and clamped to [1, 10] so a
+   * non-integer/Infinity value can never create an unbounded judge loop.
+   */
+  private readonly sampleCount: number = (() => {
+    const configured = Number.parseInt(process.env.EVALUATION_SAMPLES || "", 10);
+    return Number.isFinite(configured) ? Math.min(10, Math.max(1, configured)) : 3;
+  })();
 
   constructor() {
     this.initializeConfig();

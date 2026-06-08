@@ -12,9 +12,13 @@ export function buildCanonicalNamesBlock(characters: unknown): string {
   for (const char of characters) {
     if (typeof char === "object" && char !== null) {
       const charObj = char as Record<string, unknown>;
-      const name = charObj.name || charObj.fullName || charObj.characterName;
-      if (typeof name === "string" && name.trim()) {
-        names.push(name.trim());
+      // Pick the first field that is a NON-BLANK string, so a whitespace-only
+      // `name` falls through to fullName/characterName instead of blocking them.
+      const candidate = [charObj.name, charObj.fullName, charObj.characterName].find(
+        (v): v is string => typeof v === "string" && v.trim().length > 0
+      );
+      if (candidate) {
+        names.push(candidate.trim());
       }
     }
   }

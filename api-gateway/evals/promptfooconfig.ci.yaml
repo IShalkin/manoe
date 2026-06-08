@@ -80,9 +80,14 @@ prompts:
 # -----------------------------------------------------------------------------
 # Test cases — externalized to the curated golden set. promptfoo loads each
 # referenced YAML file as a list of test cases (vars + assert per case).
-#   - golden/scenes.yaml           : writer-quality cases (Task 2)
-#   - golden/faithfulness-pairs.yaml: faithful-vs-unfaithful discrimination (Task 3)
+#   - golden/scenes.yaml : writer-quality cases (Task 2)
+#
+# NOTE: the faithful-vs-unfaithful DISCRIMINATION pairs are NOT run here. Grading
+# a fresh Writer generation while also embedding a fixed passage in the rubric
+# would show the judge two different passages. Those pairs run in their own
+# config (promptfooconfig.discrimination.yaml) via the `echo` provider so the
+# graded OUTPUT *is* the fixed passage. See that file + the `eval-discrimination`
+# CI step.
 # -----------------------------------------------------------------------------
 tests:
   - file://golden/scenes.yaml
-  - file://golden/faithfulness-pairs.yaml

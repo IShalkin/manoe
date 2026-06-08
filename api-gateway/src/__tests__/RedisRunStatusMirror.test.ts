@@ -17,12 +17,37 @@ const mockHset = jest.fn();
 const mockExpire = jest.fn();
 const mockHgetall = jest.fn();
 
+// setRunStatus now writes atomically via multi().hset().expire().exec(). The
+// fake `multi()` returns a chainable builder that forwards to the SAME
+// mockHset/mockExpire fns (so their call assertions still hold), and exec()
+// resolves once both have run.
+function makeMulti() {
+  const ops: Array<() => Promise<unknown>> = [];
+  const builder: Record<string, unknown> = {
+    hset: (...args: unknown[]) => {
+      ops.push(() => mockHset(...args));
+      return builder;
+    },
+    expire: (...args: unknown[]) => {
+      ops.push(() => mockExpire(...args));
+      return builder;
+    },
+    exec: async () => {
+      const results = [];
+      for (const op of ops) results.push(await op());
+      return results;
+    },
+  };
+  return builder;
+}
+
 jest.mock("ioredis", () => {
   return jest.fn().mockImplementation(() => ({
     on: jest.fn(),
     hset: mockHset,
     expire: mockExpire,
     hgetall: mockHgetall,
+    multi: () => makeMulti(),
     quit: jest.fn().mockResolvedValue("OK"),
   }));
 });

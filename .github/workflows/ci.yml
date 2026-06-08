@@ -147,10 +147,23 @@ jobs:
             --no-table \
             --output results.json
 
+      - name: Run promptfoo judge-discrimination eval (echo + OpenAI judge)
+        if: steps.guard.outputs.run_eval == 'true'
+        # Separate config: grades a fixed passage via the `echo` provider so the
+        # judge sees ONE passage (no Writer generation). Non-blocking like above.
+        continue-on-error: true
+        run: |
+          npx promptfoo@latest eval \
+            -c promptfooconfig.discrimination.yaml \
+            --no-table \
+            --output results-discrimination.json
+
       - name: Upload eval results
         if: steps.guard.outputs.run_eval == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: promptfoo-eval-results
-          path: api-gateway/evals/results.json
+          path: |
+            api-gateway/evals/results.json
+            api-gateway/evals/results-discrimination.json
           retention-days: 7

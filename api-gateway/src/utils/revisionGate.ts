@@ -18,9 +18,10 @@ export function isRevisionNeeded(critique: Record<string, unknown>): boolean {
   if (score !== null && score < 8 && hasIssues) return true;
   if (hasIssues || hasRevisionRequests) return true;
 
-  // 2. Success conditions
-  if (critique.approved === true && score !== null && score >= 8) return false;
-  if (score !== null && score >= 8) return false;
+  // 2. Success conditions. A high score passes UNLESS the critique explicitly
+  // disapproved (approved === false) — an explicit veto must force revision even
+  // when the score is high.
+  if (score !== null && score >= 8 && critique.approved !== false) return false;
 
   // 3. Default to safe behavior
   return true;
@@ -34,6 +35,12 @@ export function calculateWordCountCompliance(
   actualWordCount: number,
   targetWordCount: number
 ): { compliant: boolean; ratio: number } {
+  // Guard against a missing/zero/invalid target (would yield Infinity/NaN and a
+  // bogus gate decision). With no usable target we cannot judge compliance, so
+  // treat it as compliant (the gate has other signals) and report ratio 0.
+  if (!Number.isFinite(targetWordCount) || targetWordCount <= 0) {
+    return { compliant: true, ratio: 0 };
+  }
   const ratio = actualWordCount / targetWordCount;
   return { compliant: ratio >= 0.7, ratio };
 }

@@ -20,7 +20,10 @@ export function createRateLimiter(concurrency: number) {
   return <T>(fn: () => Promise<T>): Promise<T> => {
     return new Promise<T>((resolve, reject) => {
       const run = () => {
-        fn()
+        // Wrap in Promise.resolve().then so a SYNCHRONOUS throw from fn() becomes
+        // a rejection that still hits .finally — otherwise the slot leaks.
+        Promise.resolve()
+          .then(fn)
           .then(resolve)
           .catch(reject)
           .finally(() => {

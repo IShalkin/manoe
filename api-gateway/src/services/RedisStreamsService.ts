@@ -814,8 +814,9 @@ export class RedisStreamsService {
       startedAt: record.startedAt ?? "",
       updatedAt: record.updatedAt ?? "",
     };
-    await client.hset(key, flat);
-    await client.expire(key, ttlSeconds);
+    // Atomic HSET+EXPIRE so a failure between them can't leave a stale key with
+    // no TTL (which would never get reclaimed).
+    await client.multi().hset(key, flat).expire(key, ttlSeconds).exec();
   }
 
   async getRunStatusMirror(runId: string): Promise<RunStatusMirror | null> {

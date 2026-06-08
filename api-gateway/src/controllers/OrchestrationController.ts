@@ -353,7 +353,12 @@ Initiates a new narrative generation run. Returns immediately with a run ID.
       embeddingApiKey,
       spiceConfig: request.spiceConfig,
       startFromPhase: request.start_from_phase,
-      previousRunId: request.previous_run_id,
+      // Normalize to a trimmed non-empty id or undefined, so a blank/whitespace
+      // value cannot pass the "required" guards below or reach the orchestrator.
+      previousRunId:
+        typeof request.previous_run_id === "string" && request.previous_run_id.trim()
+          ? request.previous_run_id.trim()
+          : undefined,
       scenesToRegenerate: request.scenes_to_regenerate,
     };
 

@@ -914,7 +914,12 @@ export class StorytellerOrchestrator {
       if (!scenePlan[sceneNum].regenerate && options.previousRunId) {
         const reused = await this.reuseSceneFromPreviousRun(runId, options, sceneNum + 1);
         if (reused) {
+          // Mirror the normal scene-boundary bookkeeping so a reused scene is as
+          // crash-recoverable and status-durable as a freshly drafted one.
+          state.currentSceneOutline = undefined;
           state.inFlight = false;
+          await this.checkpointScene(runId, sceneNum + 1);
+          void this.mirrorStatus(runId);
           continue;
         }
         // If no prior artifact existed, fall through and draft this scene normally.
@@ -2734,6 +2739,26 @@ Use Chain of Thought reasoning: IDENTIFY conflicts → RESOLVE by timestamp → 
     }
 
     state.drafts.set(sceneNum, row.content as Record<string, unknown>);
+
+    // Thread continuity bookkeeping for the reused scene so a LATER regenerated
+    // scene isn't starved of synopsis / value-shift context. A reused scene has
+    // no fresh critique, so record a neutral (0) value-shift and summarize the
+    // reused prose into the rolling synopsis (best-effort; never fails the run).
+    state.valueShifts.set(sceneNum, 0);
+    try {
+      const reusedText = String((row.content as Record<string, unknown>)?.content ?? "");
+      if (reusedText.trim().length > 0) {
+        const archivist = this.agentFactory.getAgent(AgentType.ARCHIVIST) as ArchivistAgent;
+        const summary = await archivist.summarizeScene(runId, options, sceneNum, reusedText);
+        if (summary) state.rollingSynopsis.push({ sceneNumber: sceneNum, summary });
+      }
+    } catch (synopsisError) {
+      $log.warn(
+        `[StorytellerOrchestrator] reuseSceneFromPreviousRun: synopsis generation failed for scene ${sceneNum}, continuing anyway, runId: ${runId}`,
+        synopsisError
+      );
+    }
+
     return true;
   }
 

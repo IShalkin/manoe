@@ -656,7 +656,7 @@ export class LLMProviderService {
       requestParams.response_format = { type: "json_object" };
     }
 
-    if (typeof options.seed === "number") {
+    if (Number.isInteger(options.seed)) {
       requestParams.seed = options.seed;
     }
 
@@ -824,7 +824,10 @@ export class LLMProviderService {
     return {
       content: parsed.content,
       model: options.model,
-      resolvedModel: options.model,
+      // Prefer the provider-resolved version (e.g. a dated/preview alias) for
+      // reproducibility; fall back to the requested model when absent.
+      resolvedModel:
+        (result.response as { modelVersion?: string }).modelVersion ?? options.model,
       provider: LLMProvider.GEMINI,
       usage: parsed.usage,
       finishReason: parsed.finishReason,
