@@ -70,7 +70,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "gemini-3-flash": { input: 0.000075, output: 0.0003 },
   // DeepSeek models
   "deepseek-v3": { input: 0.00014, output: 0.00028 },
-  "deepseek-v3.2": { input: 0.00014, output: 0.00028 },
+  "deepseek-v3.2": { input: 0.000229, output: 0.000343 },
   "deepseek-r1": { input: 0.00055, output: 0.00219 },
   // Moonshot/Kimi models (OpenRouter)
   "kimi-k2": { input: 0.0006, output: 0.0024 },
