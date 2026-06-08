@@ -187,16 +187,16 @@ export function getMaxTokensForPhase(phase?: GenerationPhase): number {
 }
 
 /**
- * Default models for each provider (December 2025)
- * Based on README.md Model Tiers
+ * Default models for each provider (June 2026)
+ * Flagship tier per provider; overridable per-request via llmConfig.model.
  */
 export const DEFAULT_MODELS: Record<LLMProvider, string> = {
-  [LLMProvider.OPENAI]: "gpt-5.2",
-  [LLMProvider.ANTHROPIC]: "claude-opus-4.5",
-  [LLMProvider.GEMINI]: "gemini-3-pro",
-  [LLMProvider.OPENROUTER]: "google/gemini-3-pro",
-  [LLMProvider.DEEPSEEK]: "deepseek-v3",
-  [LLMProvider.VENICE]: "dolphin-mistral-24b",
+  [LLMProvider.OPENAI]: "gpt-5.5",
+  [LLMProvider.ANTHROPIC]: "claude-opus-4-8",
+  [LLMProvider.GEMINI]: "gemini-3.1-pro-preview",
+  [LLMProvider.OPENROUTER]: "google/gemini-3.1-pro-preview",
+  [LLMProvider.DEEPSEEK]: "deepseek-v3.2",
+  [LLMProvider.VENICE]: "venice-uncensored",
 };
 
 /**

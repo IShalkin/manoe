@@ -47,8 +47,8 @@ class LLMConfigDTO {
   provider: LLMProvider;
 
   @Required()
-  @Description("Model name (e.g., gpt-4-turbo, claude-3-opus)")
-  @Example("gpt-4-turbo")
+  @Description("Model name (e.g., gpt-5.5, claude-opus-4-8)")
+  @Example("gpt-5.5")
   model: string;
 
   @Required()

@@ -3,12 +3,12 @@
  * Unified model client adapter supporting multiple LLM providers (BYOK)
  * 
  * Supports:
- * - OpenAI (GPT-5.2, GPT-5, O3, etc.)
- * - Anthropic Claude (Opus 4.5, Sonnet 4, etc.)
- * - Google Gemini (Gemini 3 Pro, Flash, etc.)
+ * - OpenAI (GPT-5.5, GPT-5.4, mini/nano, etc.)
+ * - Anthropic Claude (Opus 4.8, Sonnet 4.7, Haiku 4.5, etc.)
+ * - Google Gemini (Gemini 3.1 Pro, 3.5 Flash, etc.)
  * - OpenRouter (access to all models)
- * - DeepSeek (V3, R1)
- * - Venice AI (Dolphin Mistral, Llama 4 Maverick)
+ * - DeepSeek (V3.2, R1)
+ * - Venice AI (uncensored models)
  */
 
 import { Service, Inject } from "@tsed/di";
@@ -52,11 +52,26 @@ const MODEL_CONTEXT_LENGTHS: Record<string, number> = {
   "gpt-4-0125-preview": 128000,
   "gpt-4o": 128000,
   "gpt-4o-mini": 128000,
+  // GPT-5 variants (current generation)
+  "gpt-5.5": 1000000,
+  "gpt-5.4": 400000,
+  "gpt-5.4-mini": 400000,
   // GPT-3.5 variants
   "gpt-3.5-turbo": 16385,
   "gpt-3.5-turbo-16k": 16385,
   "gpt-3.5-turbo-1106": 16385,
   "gpt-3.5-turbo-0125": 16385,
+  // Anthropic (current generation)
+  "claude-opus-4-8": 1000000,
+  "claude-sonnet-4-7": 1000000,
+  "claude-sonnet-4-6": 1000000,
+  "claude-haiku-4-5": 200000,
+  // Gemini (current generation)
+  "gemini-3.1-pro-preview": 1000000,
+  "gemini-3.5-flash": 1000000,
+  "gemini-3.1-flash-lite": 1000000,
+  // DeepSeek (current generation)
+  "deepseek-v3.2": 128000,
   // Default for unknown models (assume large context)
   "default": 128000,
 };
@@ -180,6 +195,11 @@ const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
   "claude-3-opus": 4096,
   "claude-opus-4": 16384,
   "claude-sonnet-4": 16384,
+  // Claude current generation (aligned with ModelsController catalog maxOutput)
+  "claude-opus-4-8": 128000,
+  "claude-sonnet-4-7": 64000,
+  "claude-sonnet-4-6": 64000,
+  "claude-haiku-4-5": 64000,
   // GPT-4 variants (OpenAI)
   "gpt-4": 8192,
   "gpt-4-0314": 8192,
@@ -190,12 +210,18 @@ const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
   "gpt-4-0125": 4096,
   "gpt-4o": 16384,
   "gpt-4o-mini": 16384,
+  "gpt-5.5": 128000,
+  "gpt-5.4-mini": 128000,
+  "gpt-5.4": 128000,
   "gpt-5": 32768,
   "o1": 32768,
   "o3": 32768,
   // GPT-3.5 variants
   "gpt-3.5-turbo": 4096,
   // Gemini models
+  "gemini-3.1-pro-preview": 8192,
+  "gemini-3.5-flash": 8192,
+  "gemini-3.1-flash-lite": 8192,
   "gemini-3-pro": 8192,
   "gemini-3-flash": 8192,
   "gemini-2": 8192,
@@ -203,6 +229,7 @@ const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
   "gemini-1.5-flash": 8192,
   // DeepSeek models
   "deepseek-v3": 8192,
+  "deepseek-v3.2": 8192,
   "deepseek-r1": 8192,
   // Default (conservative)
   "default": 4096,

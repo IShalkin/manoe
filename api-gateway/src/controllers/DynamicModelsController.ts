@@ -155,7 +155,7 @@ export class DynamicModelsController {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-3-5-sonnet-20241022",
+        model: "claude-haiku-4-5",
         max_tokens: 1,
         messages: [{ role: "user", content: "hi" }],
       }),
@@ -166,13 +166,11 @@ export class DynamicModelsController {
       throw new Error("Invalid Anthropic API key");
     }
 
-    // Return known Claude models
+    // Return known Claude models (current generation)
     return [
-      { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet (Latest)", context_length: 200000 },
-      { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", context_length: 200000 },
-      { id: "claude-3-opus-20240229", name: "Claude 3 Opus", context_length: 200000 },
-      { id: "claude-3-sonnet-20240229", name: "Claude 3 Sonnet", context_length: 200000 },
-      { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku", context_length: 200000 },
+      { id: "claude-opus-4-8", name: "Claude Opus 4.8", context_length: 1000000 },
+      { id: "claude-sonnet-4-7", name: "Claude Sonnet 4.7", context_length: 1000000 },
+      { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", context_length: 200000 },
     ];
   }
 
@@ -252,14 +250,11 @@ export class DynamicModelsController {
 
   private getOpenAIContextLength(modelId: string): number {
     const contextLengths: Record<string, number> = {
-      "gpt-4o": 128000,
-      "gpt-4o-mini": 128000,
-      "gpt-4-turbo": 128000,
-      "gpt-4": 8192,
-      "gpt-3.5-turbo": 16385,
-      "o1-preview": 128000,
-      "o1-mini": 128000,
-      "o3-mini": 200000,
+      "gpt-5.5": 1000000,
+      "gpt-5.4": 400000,
+      "gpt-5.4-mini": 400000,
+      "gpt-5.4-nano": 400000,
+      "gpt-5": 400000,
     };
 
     // Check for exact match first

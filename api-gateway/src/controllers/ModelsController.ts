@@ -1,136 +1,89 @@
 import { Controller, Get, QueryParams } from "@tsed/common";
 import { Description, Summary, Tags } from "@tsed/schema";
 
-// Model definitions matching the Python orchestrator
+// Current-generation model catalog (June 2026).
+// Flagship defaults live in LLMModels.ts DEFAULT_MODELS; this catalog is the
+// frontend-facing menu of selectable models per provider.
 const OPENAI_MODELS = {
-  "gpt-4o": {
-    name: "GPT-4o",
-    description: "Most capable GPT-4 model, multimodal",
-    contextWindow: 128000,
-    maxOutput: 16384,
+  "gpt-5.5": {
+    name: "GPT-5.5",
+    description: "Flagship OpenAI model for coding and professional work",
+    contextWindow: 1000000,
+    maxOutput: 128000,
     recommendedFor: ["architect", "profiler", "strategist", "critic"],
   },
-  "gpt-4o-mini": {
-    name: "GPT-4o Mini",
-    description: "Smaller, faster, cheaper GPT-4o variant",
-    contextWindow: 128000,
-    maxOutput: 16384,
+  "gpt-5.4": {
+    name: "GPT-5.4",
+    description: "Previous flagship; strong reasoning and general purpose",
+    contextWindow: 400000,
+    maxOutput: 128000,
+    recommendedFor: ["architect", "strategist", "critic"],
+  },
+  "gpt-5.4-mini": {
+    name: "GPT-5.4 Mini",
+    description: "Strong, fast, cost-effective mini model",
+    contextWindow: 400000,
+    maxOutput: 128000,
     recommendedFor: ["writer"],
   },
-  "gpt-4-turbo": {
-    name: "GPT-4 Turbo",
-    description: "GPT-4 Turbo with vision capabilities",
-    contextWindow: 128000,
-    maxOutput: 4096,
-    recommendedFor: ["architect", "critic"],
-  },
-  "gpt-3.5-turbo": {
-    name: "GPT-3.5 Turbo",
-    description: "Fast and cost-effective",
-    contextWindow: 16385,
-    maxOutput: 4096,
+  "gpt-5.4-nano": {
+    name: "GPT-5.4 Nano",
+    description: "Smallest, lowest-latency and cheapest GPT-5.4 variant",
+    contextWindow: 400000,
+    maxOutput: 128000,
     recommendedFor: ["writer"],
-  },
-  "o1-preview": {
-    name: "O1 Preview",
-    description: "Advanced reasoning model",
-    contextWindow: 128000,
-    maxOutput: 32768,
-    recommendedFor: ["architect", "strategist"],
-  },
-  "o1-mini": {
-    name: "O1 Mini",
-    description: "Smaller reasoning model",
-    contextWindow: 128000,
-    maxOutput: 65536,
-    recommendedFor: ["strategist"],
   },
 };
 
 const OPENROUTER_MODELS = {
-  "openai/gpt-4o": {
-    name: "GPT-4o (via OpenRouter)",
-    description: "OpenAI GPT-4o through OpenRouter",
-    contextWindow: 128000,
-    maxOutput: 16384,
+  "openai/gpt-5.5": {
+    name: "GPT-5.5 (via OpenRouter)",
+    description: "OpenAI GPT-5.5 through OpenRouter",
+    contextWindow: 1000000,
+    maxOutput: 128000,
     recommendedFor: ["architect", "profiler", "strategist", "critic"],
   },
-  "anthropic/claude-3.5-sonnet": {
-    name: "Claude 3.5 Sonnet (via OpenRouter)",
-    description: "Anthropic Claude 3.5 Sonnet through OpenRouter",
-    contextWindow: 200000,
-    maxOutput: 8192,
+  "anthropic/claude-opus-4.8": {
+    name: "Claude Opus 4.8 (via OpenRouter)",
+    description: "Anthropic Claude Opus 4.8 through OpenRouter",
+    contextWindow: 1000000,
+    maxOutput: 128000,
     recommendedFor: ["architect", "profiler", "critic", "writer"],
   },
-  "anthropic/claude-3-opus": {
-    name: "Claude 3 Opus (via OpenRouter)",
-    description: "Anthropic Claude 3 Opus through OpenRouter",
-    contextWindow: 200000,
-    maxOutput: 4096,
-    recommendedFor: ["architect", "critic"],
-  },
-  "google/gemini-pro-1.5": {
-    name: "Gemini Pro 1.5 (via OpenRouter)",
-    description: "Google Gemini Pro 1.5 through OpenRouter",
+  "google/gemini-3.1-pro-preview": {
+    name: "Gemini 3.1 Pro (via OpenRouter)",
+    description: "Google Gemini 3.1 Pro through OpenRouter",
     contextWindow: 1000000,
     maxOutput: 8192,
-    recommendedFor: ["strategist", "writer"],
+    recommendedFor: ["architect", "strategist", "writer"],
   },
-  "meta-llama/llama-3.1-405b-instruct": {
-    name: "Llama 3.1 405B (via OpenRouter)",
-    description: "Meta Llama 3.1 405B Instruct",
-    contextWindow: 131072,
-    maxOutput: 4096,
-    recommendedFor: ["writer"],
-  },
-  "meta-llama/llama-3.1-70b-instruct": {
-    name: "Llama 3.1 70B (via OpenRouter)",
-    description: "Meta Llama 3.1 70B Instruct",
-    contextWindow: 131072,
-    maxOutput: 4096,
-    recommendedFor: ["writer"],
-  },
-  "mistralai/mistral-large": {
-    name: "Mistral Large (via OpenRouter)",
-    description: "Mistral AI Large model",
+  "deepseek/deepseek-v3.2": {
+    name: "DeepSeek V3.2 (via OpenRouter)",
+    description: "DeepSeek V3.2 through OpenRouter",
     contextWindow: 128000,
-    maxOutput: 4096,
-    recommendedFor: ["writer", "profiler"],
-  },
-  "qwen/qwen-2.5-72b-instruct": {
-    name: "Qwen 2.5 72B (via OpenRouter)",
-    description: "Alibaba Qwen 2.5 72B Instruct",
-    contextWindow: 131072,
     maxOutput: 8192,
     recommendedFor: ["writer", "profiler"],
   },
 };
 
 const GEMINI_MODELS = {
-  "gemini-2.0-flash-exp": {
-    name: "Gemini 2.0 Flash (Experimental)",
-    description: "Latest Gemini 2.0 Flash experimental model",
-    contextWindow: 1000000,
-    maxOutput: 8192,
-    recommendedFor: ["architect", "strategist", "writer"],
-  },
-  "gemini-1.5-pro": {
-    name: "Gemini 1.5 Pro",
-    description: "Most capable Gemini model with 1M context",
+  "gemini-3.1-pro-preview": {
+    name: "Gemini 3.1 Pro",
+    description: "Most capable Gemini model for complex reasoning",
     contextWindow: 1000000,
     maxOutput: 8192,
     recommendedFor: ["architect", "profiler", "strategist", "critic"],
   },
-  "gemini-1.5-flash": {
-    name: "Gemini 1.5 Flash",
-    description: "Fast and efficient Gemini model",
+  "gemini-3.5-flash": {
+    name: "Gemini 3.5 Flash",
+    description: "Frontier-class performance for agentic and coding tasks",
     contextWindow: 1000000,
     maxOutput: 8192,
-    recommendedFor: ["writer"],
+    recommendedFor: ["architect", "strategist", "writer"],
   },
-  "gemini-1.5-flash-8b": {
-    name: "Gemini 1.5 Flash 8B",
-    description: "Smallest and fastest Gemini model",
+  "gemini-3.1-flash-lite": {
+    name: "Gemini 3.1 Flash-Lite",
+    description: "Fastest, most budget-friendly Gemini model",
     contextWindow: 1000000,
     maxOutput: 8192,
     recommendedFor: ["writer"],
@@ -138,39 +91,25 @@ const GEMINI_MODELS = {
 };
 
 const CLAUDE_MODELS = {
-  "claude-3-5-sonnet-20241022": {
-    name: "Claude 3.5 Sonnet (Latest)",
-    description: "Most intelligent Claude model, best for complex tasks",
-    contextWindow: 200000,
-    maxOutput: 8192,
+  "claude-opus-4-8": {
+    name: "Claude Opus 4.8",
+    description: "Most capable Claude model for complex reasoning and prose",
+    contextWindow: 1000000,
+    maxOutput: 128000,
     recommendedFor: ["architect", "profiler", "strategist", "critic", "writer"],
   },
-  "claude-3-5-haiku-20241022": {
-    name: "Claude 3.5 Haiku",
-    description: "Fast and cost-effective Claude model",
-    contextWindow: 200000,
-    maxOutput: 8192,
-    recommendedFor: ["writer"],
+  "claude-sonnet-4-7": {
+    name: "Claude Sonnet 4.7",
+    description: "Best combination of speed and intelligence",
+    contextWindow: 1000000,
+    maxOutput: 64000,
+    recommendedFor: ["profiler", "strategist", "writer"],
   },
-  "claude-3-opus-20240229": {
-    name: "Claude 3 Opus",
-    description: "Most powerful Claude 3 model for complex reasoning",
+  "claude-haiku-4-5": {
+    name: "Claude Haiku 4.5",
+    description: "Fastest Claude model with near-frontier intelligence",
     contextWindow: 200000,
-    maxOutput: 4096,
-    recommendedFor: ["architect", "critic"],
-  },
-  "claude-3-sonnet-20240229": {
-    name: "Claude 3 Sonnet",
-    description: "Balanced Claude 3 model",
-    contextWindow: 200000,
-    maxOutput: 4096,
-    recommendedFor: ["profiler", "strategist"],
-  },
-  "claude-3-haiku-20240307": {
-    name: "Claude 3 Haiku",
-    description: "Fastest Claude 3 model",
-    contextWindow: 200000,
-    maxOutput: 4096,
+    maxOutput: 64000,
     recommendedFor: ["writer"],
   },
 };
@@ -212,7 +151,7 @@ export class ModelsController {
         {
           id: "openai",
           name: "OpenAI",
-          description: "OpenAI GPT models including GPT-4o and O1",
+          description: "OpenAI GPT models including GPT-5.5 and GPT-5.4 mini/nano variants",
           baseUrl: "https://api.openai.com/v1",
         },
         {
@@ -314,35 +253,35 @@ export class ModelsController {
           phase: "Genesis",
           description: "Transforms seed ideas into structured narrative possibilities",
           defaultProvider: "openai",
-          defaultModel: "gpt-4o",
+          defaultModel: "gpt-5.5",
         },
         {
           name: "profiler",
           phase: "Characters",
           description: "Creates psychologically deep character profiles",
           defaultProvider: "openai",
-          defaultModel: "gpt-4o",
+          defaultModel: "gpt-5.5",
         },
         {
           name: "strategist",
           phase: "Outlining",
           description: "Creates detailed scene-by-scene plot outlines",
           defaultProvider: "openai",
-          defaultModel: "gpt-4o",
+          defaultModel: "gpt-5.5",
         },
         {
           name: "writer",
           phase: "Drafting",
           description: "Transforms scene outlines into vivid prose",
           defaultProvider: "openai",
-          defaultModel: "gpt-4o-mini",
+          defaultModel: "gpt-5.4-mini",
         },
         {
           name: "critic",
           phase: "Critique",
           description: "Provides artistic critique of scene drafts",
           defaultProvider: "openai",
-          defaultModel: "gpt-4o",
+          defaultModel: "gpt-5.5",
         },
       ],
     };
